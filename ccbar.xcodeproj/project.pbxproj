@@ -17,6 +17,7 @@
 		49C1BE05000000000001AAAA /* libzstd in Frameworks */ = {isa = PBXBuildFile; productRef = 49C1BE04000000000001AAAA /* libzstd */; };
 		49C1BE09000000000001AAAA /* DshZstdFrames.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE06000000000001AAAA /* DshZstdFrames.swift */; };
 		49C1BE0A000000000001AAAA /* DshZstdDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE07000000000001AAAA /* DshZstdDecoder.swift */; };
+		49C1BE31000000000001AAAA /* ZstdStreamReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE30000000000001AAAA /* ZstdStreamReader.swift */; };
 		49C1BE0B000000000001AAAA /* DshZstdFrameScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE08000000000001AAAA /* DshZstdFrameScannerTests.swift */; };
 		49C1BE0F000000000001AAAA /* DshSessionScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE0C000000000001AAAA /* DshSessionScanner.swift */; };
 		49C1BE10000000000001AAAA /* DshSessionScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE0D000000000001AAAA /* DshSessionScannerTests.swift */; };
@@ -235,6 +236,7 @@
 		49C1B32000000000000FAAAA /* PiJSONLScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiJSONLScanner.swift; sourceTree = "<group>"; };
 		49C1BE06000000000001AAAA /* DshZstdFrames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshZstdFrames.swift; sourceTree = "<group>"; };
 		49C1BE07000000000001AAAA /* DshZstdDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshZstdDecoder.swift; sourceTree = "<group>"; };
+		49C1BE30000000000001AAAA /* ZstdStreamReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZstdStreamReader.swift; sourceTree = "<group>"; };
 		49C1BE08000000000001AAAA /* DshZstdFrameScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshZstdFrameScannerTests.swift; sourceTree = "<group>"; };
 		49C1BE0C000000000001AAAA /* DshSessionScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshSessionScanner.swift; sourceTree = "<group>"; };
 		49C1BE0D000000000001AAAA /* DshSessionScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshSessionScannerTests.swift; sourceTree = "<group>"; };
@@ -513,6 +515,7 @@
 				49C1B90000000000000FAAAA /* OpencodeScanner.swift */,
 				49C1BE06000000000001AAAA /* DshZstdFrames.swift */,
 				49C1BE07000000000001AAAA /* DshZstdDecoder.swift */,
+				49C1BE30000000000001AAAA /* ZstdStreamReader.swift */,
 				49C1BE0C000000000001AAAA /* DshSessionScanner.swift */,
 				49C1BE13000000000001AAAA /* DshContributionStore.swift */,
 				49C1BE14000000000001AAAA /* DshContributionRollup.swift */,
@@ -808,6 +811,7 @@
 				49C1B90000000000000FAABB /* OpencodeScanner.swift in Sources */,
 				49C1BE09000000000001AAAA /* DshZstdFrames.swift in Sources */,
 				49C1BE0A000000000001AAAA /* DshZstdDecoder.swift in Sources */,
+				49C1BE31000000000001AAAA /* ZstdStreamReader.swift in Sources */,
 				49C1BE0F000000000001AAAA /* DshSessionScanner.swift in Sources */,
 				49C1BE17000000000001AAAA /* DshContributionStore.swift in Sources */,
 				49C1BE18000000000001AAAA /* DshContributionRollup.swift in Sources */,

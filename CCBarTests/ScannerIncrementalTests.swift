@@ -244,6 +244,145 @@ final class ScannerIncrementalTests: XCTestCase {
         }
     }
 
+    // MARK: - Codex 压缩日志（.jsonl.zst）
+
+    private func codexFixtureData() throws -> Data {
+        let source = try XCTUnwrap(
+            Bundle(for: ScannerIncrementalTests.self).url(forResource: "codex-fast-scan", withExtension: "jsonl")
+        )
+        return try Data(contentsOf: source)
+    }
+
+    private func makeCodexRoots() throws -> (sessions: URL, archived: URL) {
+        let sessions = tempDir.appendingPathComponent("sessions", isDirectory: true)
+        let archived = tempDir.appendingPathComponent("archived", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: archived, withIntermediateDirectories: true)
+        return (sessions, archived)
+    }
+
+    /// 模拟 Codex 的压缩：写出同名 `.jsonl.zst`、保留原 mtime、删掉明文。
+    private func compressInPlace(_ plain: URL, streaming: Bool = false) throws -> URL {
+        let data = try Data(contentsOf: plain)
+        let mtime = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: plain.path)[.modificationDate] as? Date
+        )
+        let compressed = URL(fileURLWithPath: plain.path + ".zst")
+        let frame = streaming ? try DshTestFixtures.streamingFrame(data) : try DshTestFixtures.frame(data)
+        try frame.write(to: compressed)
+        try setMtime(mtime, of: compressed)
+        try FileManager.default.removeItem(at: plain)
+        return compressed
+    }
+
+    func testCodexReadsCompressedRollout() async throws {
+        let (sessions, archived) = try makeCodexRoots()
+        let id = "aaaaaaa1-1111-4111-8111-111111111111"
+        let compressed = sessions.appendingPathComponent("rollout-2026-07-16T00-00-00-\(id).jsonl.zst")
+        try DshTestFixtures.frame(try codexFixtureData()).write(to: compressed)
+
+        let result = await CodexJSONLScanner.scan(previous: [:], roots: [sessions, archived], indexedTitles: [:])
+        XCTAssertEqual(result.entries.count, 3)
+        XCTAssertEqual(result.newState[id]?.offset, UInt64(try codexFixtureData().count), "offset 按解压后的字节计")
+        XCTAssertEqual(result.conversationSeeds.first?.sourcePath, compressed.path)
+
+        let second = await CodexJSONLScanner.scan(previous: result.newState, roots: [sessions, archived], indexedTitles: [:])
+        XCTAssertTrue(second.entries.isEmpty)
+        XCTAssertEqual(second.linesParsed, 0, "未变化的压缩日志不应再次解压解析")
+    }
+
+    /// 已扫完的明文被 Codex 压缩：沿用原 watermark，不重复计入。
+    func testCodexCompressionAfterScanDoesNotRecount() async throws {
+        for streaming in [false, true] {
+            let (sessions, archived) = try makeCodexRoots()
+            let id = streaming ? "aaaaaaa2-2222-4222-8222-222222222222" : "aaaaaaa3-3333-4333-8333-333333333333"
+            let plain = try copyFixture(
+                named: "codex-fast-scan",
+                to: sessions.appendingPathComponent("rollout-2026-07-16T00-00-00-\(id).jsonl")
+            )
+            let first = await CodexJSONLScanner.scan(previous: [:], roots: [sessions, archived], indexedTitles: [:])
+            XCTAssertEqual(first.entries.count, 3)
+
+            _ = try compressInPlace(plain, streaming: streaming)
+            let second = await CodexJSONLScanner.scan(previous: first.newState, roots: [sessions, archived], indexedTitles: [:])
+            XCTAssertTrue(second.entries.isEmpty, "压缩前已入账的用量不能重复计入（帧头无 content size: \(streaming)）")
+            XCTAssertEqual(second.newState[id]?.offset, first.newState[id]?.offset)
+            XCTAssertNotNil(second.newState[id]?.fileSize)
+            try FileManager.default.removeItem(at: sessions)
+            try FileManager.default.removeItem(at: archived)
+        }
+    }
+
+    /// resume 时 Codex 把压缩日志解压回明文再追加：只计入追加的部分。
+    func testCodexMaterializedRolloutOnlyCountsAppendedUsage() async throws {
+        let (sessions, archived) = try makeCodexRoots()
+        let id = "aaaaaaa4-4444-4444-8444-444444444444"
+        let plainURL = sessions.appendingPathComponent("rollout-2026-07-16T00-00-00-\(id).jsonl")
+        let compressed = URL(fileURLWithPath: plainURL.path + ".zst")
+        try DshTestFixtures.frame(try codexFixtureData()).write(to: compressed)
+        try setMtime(Date(timeIntervalSince1970: 1_000), of: compressed)
+        let first = await CodexJSONLScanner.scan(previous: [:], roots: [sessions, archived], indexedTitles: [:])
+        XCTAssertEqual(first.entries.count, 3)
+
+        var materialized = try codexFixtureData()
+        materialized.append(Data("""
+        {"timestamp":"2026-07-16T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":600,"cached_input_tokens":120,"output_tokens":90,"reasoning_output_tokens":12,"total_tokens":690},"last_token_usage":{"input_tokens":200,"cached_input_tokens":40,"output_tokens":35,"reasoning_output_tokens":4,"total_tokens":235}}}}
+
+        """.utf8))
+        try materialized.write(to: plainURL)
+        try FileManager.default.removeItem(at: compressed)
+        try setMtime(Date(timeIntervalSince1970: 2_000), of: plainURL)
+
+        let second = await CodexJSONLScanner.scan(previous: first.newState, roots: [sessions, archived], indexedTitles: [:])
+        XCTAssertEqual(second.entries.count, 1)
+        XCTAssertNil(second.newState[id]?.fileSize, "回到明文后按 offset 与文件大小判断")
+    }
+
+    /// 解压过渡期明文与压缩并存：只读明文一份。
+    func testCodexPlainSiblingHidesCompressedCopy() async throws {
+        let (sessions, archived) = try makeCodexRoots()
+        let id = "aaaaaaa5-5555-4555-8555-555555555555"
+        let plain = try copyFixture(
+            named: "codex-fast-scan",
+            to: sessions.appendingPathComponent("rollout-2026-07-16T00-00-00-\(id).jsonl")
+        )
+        try DshTestFixtures.frame(try codexFixtureData()).write(to: URL(fileURLWithPath: plain.path + ".zst"))
+
+        let files = JSONLDirectoryEnumerator.enumerate(at: sessions, includeZstd: true).files
+        XCTAssertEqual(files.map(\.path), [plain.path])
+        XCTAssertEqual(JSONLDirectoryEnumerator.enumerate(at: sessions).files.count, 1, "默认不收压缩日志")
+
+        let result = await CodexJSONLScanner.scan(previous: [:], roots: [sessions, archived], indexedTitles: [:])
+        XCTAssertEqual(result.filesScanned, 1)
+        XCTAssertEqual(result.entries.count, 3)
+    }
+
+    func testCodexCorruptedCompressedRolloutIsReportedWithoutAdvancing() async throws {
+        let (sessions, archived) = try makeCodexRoots()
+        let id = "aaaaaaa6-6666-4666-8666-666666666666"
+        var frame = try DshTestFixtures.frame(try codexFixtureData())
+        frame.removeLast(frame.count / 2)
+        try frame.write(to: sessions.appendingPathComponent("rollout-2026-07-16T00-00-00-\(id).jsonl.zst"))
+
+        let result = await CodexJSONLScanner.scan(previous: [:], roots: [sessions, archived], indexedTitles: [:])
+        XCTAssertEqual(result.failedFileCount, 1)
+        XCTAssertTrue(result.entries.isEmpty)
+        XCTAssertEqual(result.newState[id]?.offset, 0)
+    }
+
+    func testSourceExistsAcceptsEitherRolloutForm() throws {
+        let plain = tempDir.appendingPathComponent("rollout-a.jsonl")
+        let compressed = URL(fileURLWithPath: plain.path + ".zst")
+        XCTAssertFalse(JSONLDirectoryEnumerator.sourceExists(atPath: plain.path))
+
+        try Data().write(to: compressed)
+        XCTAssertTrue(JSONLDirectoryEnumerator.sourceExists(atPath: plain.path), "明文已被压缩")
+        try FileManager.default.removeItem(at: compressed)
+
+        try Data().write(to: plain)
+        XCTAssertTrue(JSONLDirectoryEnumerator.sourceExists(atPath: compressed.path), "压缩日志已解压回明文")
+    }
+
     // MARK: - Codex fork 重放去重
 
     private static let forkParentID = "019daa2f-0000-7000-8000-000000000001"

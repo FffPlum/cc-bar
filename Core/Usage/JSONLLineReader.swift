@@ -29,6 +29,7 @@ enum JSONLLineReader {
     /// 末尾未结束的残行不推进 offset，整段没有换行时 `newOffset == offset`。
     /// 每批回调都包在 `autoreleasepool` 里：调用方逐行 `JSONSerialization` 产生的
     /// Objective-C 临时对象在长任务中不会一直挂在线程池里，这是全量重扫内存峰值的主因。
+    /// `.jsonl.zst` 透明解压，offset 按解压后的字节计。
     nonisolated static func streamLines(
         url: URL,
         fromOffset offset: UInt64,
@@ -37,6 +38,10 @@ enum JSONLLineReader {
         batchLines: Int = defaultBatchLines,
         onBatch: (ArraySlice<String>) -> Void
     ) -> StreamOutcome {
+        if JSONLDirectoryEnumerator.isZstd(url) {
+            return streamZstdLines(url: url, fromOffset: offset, throughOffset: throughOffset,
+                                   chunkSize: chunkSize, batchLines: batchLines, onBatch: onBatch)
+        }
         guard let handle = try? FileHandle(forReadingFrom: url) else {
             return failureStreamOutcome(for: url)
         }
@@ -60,7 +65,48 @@ enum JSONLLineReader {
         } catch {
             return failureStreamOutcome(for: url)
         }
+        return streamChunks(url: url, fromOffset: offset, throughOffset: throughOffset,
+                            chunkSize: chunkSize, batchLines: batchLines, onBatch: onBatch) { count in
+            try handle.read(upToCount: count)
+        }
+    }
 
+    /// 压缩日志：先解压跳过已消费的 offset，再按与明文相同的整行规则交付。
+    /// 内容比 offset 短时返回实际长度，由调用方按截断处理。
+    nonisolated private static func streamZstdLines(
+        url: URL,
+        fromOffset offset: UInt64,
+        throughOffset: UInt64?,
+        chunkSize: Int,
+        batchLines: Int,
+        onBatch: (ArraySlice<String>) -> Void
+    ) -> StreamOutcome {
+        guard let reader = try? ZstdStreamReader(url: url) else {
+            return failureStreamOutcome(for: url)
+        }
+        let skipped: UInt64
+        do {
+            skipped = try reader.skip(offset)
+        } catch {
+            return failureStreamOutcome(for: url)
+        }
+        if skipped < offset { return .success(newOffset: skipped) }
+        return streamChunks(url: url, fromOffset: offset, throughOffset: throughOffset,
+                            chunkSize: chunkSize, batchLines: batchLines, onBatch: onBatch) { count in
+            try reader.read(upToCount: count)
+        }
+    }
+
+    /// 从 `offset` 处起按块读入、按整行交付；`readChunk` 返回 nil 或空块表示到头。
+    nonisolated private static func streamChunks(
+        url: URL,
+        fromOffset offset: UInt64,
+        throughOffset: UInt64?,
+        chunkSize: Int,
+        batchLines: Int,
+        onBatch: (ArraySlice<String>) -> Void,
+        readChunk: (Int) throws -> Data?
+    ) -> StreamOutcome {
         let newline = UInt8(ascii: "\n")
         var pending = Data()
         var consumed: UInt64 = 0
@@ -78,7 +124,7 @@ enum JSONLLineReader {
                         return
                     }
                     let count = throughOffset.map { Int(min(UInt64(chunkSize), $0 - bytesRead)) } ?? chunkSize
-                    chunk = try handle.read(upToCount: count)
+                    chunk = try readChunk(count)
                 } catch {
                     failure = failureStreamOutcome(for: url)
                     return
@@ -154,6 +200,34 @@ enum JSONLLineReader {
             lines.append(line)
         }
         return lines
+    }
+
+    /// 读出首行（不含换行），最多 `maxBytes` 字节；`.jsonl.zst` 透明解压。打不开返回 nil。
+    nonisolated static func firstLine(url: URL, maxBytes: Int) -> Data? {
+        var handle: FileHandle?
+        var reader: ZstdStreamReader?
+        if JSONLDirectoryEnumerator.isZstd(url) {
+            reader = try? ZstdStreamReader(url: url)
+        } else {
+            handle = try? FileHandle(forReadingFrom: url)
+        }
+        guard handle != nil || reader != nil else { return nil }
+        defer { try? handle?.close() }
+        func readChunk(_ count: Int) -> Data? {
+            if let reader { return try? reader.read(upToCount: count) }
+            return try? handle?.read(upToCount: count)
+        }
+        var data = Data()
+        let newline = UInt8(ascii: "\n")
+        while data.count < maxBytes {
+            guard let chunk = readChunk(256 << 10), !chunk.isEmpty else { break }
+            if let index = chunk.firstIndex(of: newline) {
+                data.append(chunk[chunk.startIndex..<index])
+                break
+            }
+            data.append(chunk)
+        }
+        return data
     }
 
     nonisolated private static func failureStreamOutcome(for url: URL) -> StreamOutcome {
@@ -371,6 +445,8 @@ struct JSONLFileDescriptor: Sendable {
     var size: UInt64
     /// 文件创建时间；取不到时为 0。Claude 扫描器按它排序，让续接 / 分叉对话复制过去的消息归给原对话。
     var creationTime: TimeInterval = 0
+    /// `.jsonl.zst` 压缩日志；此时 `size` 是压缩后的文件大小，不能与解压后的 offset 比较。
+    var isZstd = false
 
     var path: String { url.path }
 }
@@ -383,13 +459,36 @@ enum JSONLDirectoryEnumerator {
         var accessFailed: Bool
     }
 
+    nonisolated static let zstdSuffix = ".jsonl.zst"
+
+    nonisolated static func isZstd(_ url: URL) -> Bool {
+        url.lastPathComponent.lowercased().hasSuffix(zstdSuffix)
+    }
+
+    /// 日志是否仍在。Codex 把冷会话压成同名 `.jsonl.zst`、resume 时再解压回 `.jsonl`，
+    /// 两种形态任一存在都算同一份日志还在。
+    nonisolated static func sourceExists(atPath path: String) -> Bool {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: path) { return true }
+        if path.lowercased().hasSuffix(zstdSuffix) {
+            return fm.fileExists(atPath: String(path.dropLast(".zst".count)))
+        }
+        return path.lowercased().hasSuffix(".jsonl") && fm.fileExists(atPath: path + ".zst")
+    }
+
     /// - Parameter minimumMtime: 非 nil 时只返回修改时间不早于该时刻的文件。
     ///   供周期用量的受限重建过滤"最近窗口之外"的旧日志使用；nil 时行为与原来一致。
     nonisolated static func files(at root: URL, minimumMtime: Date? = nil) -> [JSONLFileDescriptor] {
         enumerate(at: root, minimumMtime: minimumMtime).files
     }
 
-    nonisolated static func enumerate(at root: URL, minimumMtime: Date? = nil) -> Result {
+    /// - Parameter includeZstd: 同时收 `.jsonl.zst`（Codex 压缩的冷会话）。同目录下
+    ///   明文与压缩并存时只取明文，与 Codex 自身的读取优先级一致。
+    nonisolated static func enumerate(
+        at root: URL,
+        minimumMtime: Date? = nil,
+        includeZstd: Bool = false
+    ) -> Result {
         let fm = FileManager.default
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: root.path, isDirectory: &isDir) else {
@@ -411,8 +510,11 @@ enum JSONLDirectoryEnumerator {
             return Result(files: [], accessFailed: true)
         }
         var result: [JSONLFileDescriptor] = []
+        var plainPaths: Set<String> = []
         for case let url as URL in it {
-            guard url.pathExtension.lowercased() == "jsonl" else { continue }
+            let compressed = includeZstd && isZstd(url)
+            guard compressed || url.pathExtension.lowercased() == "jsonl" else { continue }
+            if !compressed { plainPaths.insert(url.path) }
             let values = try? url.resourceValues(forKeys: [
                 .contentModificationDateKey,
                 .creationDateKey,
@@ -426,8 +528,13 @@ enum JSONLDirectoryEnumerator {
                 url: url,
                 modificationTime: modificationDate?.timeIntervalSince1970 ?? 0,
                 size: UInt64(max(0, values?.fileSize ?? 0)),
-                creationTime: values?.creationDate?.timeIntervalSince1970 ?? 0
+                creationTime: values?.creationDate?.timeIntervalSince1970 ?? 0,
+                isZstd: compressed
             ))
+        }
+        if includeZstd {
+            // 明文按 minimumMtime 过滤前就记入 plainPaths：被过滤的明文同样遮住它的压缩副本。
+            result.removeAll { $0.isZstd && plainPaths.contains(String($0.path.dropLast(".zst".count))) }
         }
         return Result(files: result, accessFailed: false)
     }

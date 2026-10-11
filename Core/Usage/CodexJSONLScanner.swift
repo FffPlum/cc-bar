@@ -1,6 +1,7 @@
 import Foundation
 
-/// 扫 `~/.codex/sessions/**/*.jsonl` + `~/.codex/archived_sessions/**/*.jsonl`。
+/// 扫 `~/.codex/sessions/**/*.jsonl` + `~/.codex/archived_sessions/**/*.jsonl`，
+/// 以及 Codex 压缩冷会话后的同名 `.jsonl.zst`（offset 按解压后的字节计）。
 /// 关键事件：
 ///   - `type=turn_context`，`payload.model` 提供当前模型（保留渠道前缀，兼容日期后缀）。
 ///   - `type=event_msg/payload.type=thread_settings_applied`，嵌套 `service_tier` 提供当前 Fast 档位。
@@ -91,14 +92,17 @@ enum CodexJSONLScanner {
         for root in roots {
             let enumeration = JSONLDirectoryEnumerator.enumerate(
                 at: root,
-                minimumMtime: minimumMtime
+                minimumMtime: minimumMtime,
+                includeZstd: true
             )
             if enumeration.accessFailed { failedRootCount += 1 }
             for file in enumeration.files {
                 let id = conversationID(from: file.url) ?? file.path
                 if let historicalBoundary, (historicalBoundary[id]?.offset ?? 0) == 0 { continue }
                 if let existing = filesByID[id] {
-                    if file.modificationTime > existing.modificationTime {
+                    // mtime 相同（压缩与解压都保留原 mtime）时明文优先，与 Codex 一致。
+                    if file.modificationTime > existing.modificationTime
+                        || (file.modificationTime == existing.modificationTime && existing.isZstd && !file.isZstd) {
                         filesByID[id] = file
                     }
                 } else {
@@ -144,8 +148,7 @@ enum CodexJSONLScanner {
                 for index in offset..<end {
                     let file = files[index]
                     let stateKey = conversationID(from: file.url) ?? file.path
-                    let state = previous[stateKey]
-                    if state?.mtime == file.modificationTime, state?.offset == file.size {
+                    if let state = previous[stateKey], isUnchanged(state, file) {
                         batchResults.append((
                             index,
                             scanSingleFile(file: file, previous: previous, indexedTitles: indexedTitles,
@@ -283,11 +286,10 @@ enum CodexJSONLScanner {
         let filenameID = conversationID(from: url)
         let stateKey = filenameID ?? path
         let mtime = file.modificationTime
-        let size = file.size
 
         var state = previous[stateKey] ?? ScanFileState(mtime: 0, offset: 0)
         // mtime 没变 & size 没变 → 跳过，用 state 元数据补种子。
-        if boundary == nil, state.mtime == mtime, state.offset == size {
+        if boundary == nil, isUnchanged(state, file) {
             if let id = state.conversationID ?? filenameID {
                 // 旧版本扫描过的文件没有记录分支 / 父对话：只读一次首行的 session_meta 补齐，
                 // 读到或确认没有后写回（空串表示已检查），之后不再读。
@@ -332,8 +334,13 @@ enum CodexJSONLScanner {
                 readFailed: false
             )
         }
-        // 文件被截断：offset 回到 0 重扫（此时仍由全局 seen 兜底防重复计费）
-        if state.offset > size {
+        // 文件被截断：offset 回到 0 重扫（此时仍由全局 seen 兜底防重复计费）。
+        // 压缩日志按解压后的长度比较；明文压缩前已扫完的 offset 与它相等，从原处续扫。
+        // 读不出解压长度时不重置，交给下面的读取报失败。
+        if state.offset > 0,
+           state.offset > (file.isZstd
+               ? ZstdStreamReader.decompressedSize(of: file.url) ?? state.offset
+               : file.size) {
             resetForTruncation(&state)
         }
         let startsFromBeginning = state.offset == 0
@@ -505,6 +512,8 @@ enum CodexJSONLScanner {
 
         state.mtime = mtime
         state.offset = newOffset
+        // 压缩日志不再追加（Codex 写入前先解压回明文），记下压缩大小，之后据此跳过解压。
+        state.fileSize = file.isZstd ? file.size : nil
         state.lastModel = currentModel
         state.lastServiceTier = currentSpeed
         state.lastCodexTotalUsageSignature = lastTotalUsageSignature
@@ -553,8 +562,16 @@ enum CodexJSONLScanner {
         )
     }
 
+    /// 文件自上次扫描后没有变化。明文比较 offset 与文件大小；压缩日志的 offset 是解压后的字节数，
+    /// 改为比较上次读到结尾时记下的压缩大小（`fileSize`）。
+    private nonisolated static func isUnchanged(_ state: ScanFileState, _ file: JSONLFileDescriptor) -> Bool {
+        guard state.mtime == file.modificationTime else { return false }
+        return file.isZstd ? state.fileSize == file.size : state.offset == file.size
+    }
+
     private nonisolated static func conversationID(from url: URL) -> String? {
-        let name = url.deletingPathExtension().lastPathComponent
+        let plainURL = JSONLDirectoryEnumerator.isZstd(url) ? url.deletingPathExtension() : url
+        let name = plainURL.deletingPathExtension().lastPathComponent
         let pattern = #"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#
         guard let range = name.range(of: pattern, options: .regularExpression) else { return nil }
         return String(name[range])
@@ -667,19 +684,8 @@ enum CodexJSONLScanner {
     /// 只读文件首行（Codex 首行固定是本会话的 session_meta）。
     /// 首行含完整 base_instructions，可能有几十 KB；超过 2MB 仍无换行视为异常，放弃。
     private nonisolated static func firstLineSessionMeta(url: URL) -> [String: Any]? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        var data = Data()
-        let newline = UInt8(ascii: "\n")
-        while data.count < 2 << 20 {
-            guard let chunk = try? handle.read(upToCount: 256 << 10), !chunk.isEmpty else { break }
-            if let index = chunk.firstIndex(of: newline) {
-                data.append(chunk[chunk.startIndex..<index])
-                break
-            }
-            data.append(chunk)
-        }
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let data = JSONLLineReader.firstLine(url: url, maxBytes: 2 << 20),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               (root["type"] as? String) == "session_meta",
               let payload = root["payload"] as? [String: Any]
         else { return nil }

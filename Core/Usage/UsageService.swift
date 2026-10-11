@@ -1749,7 +1749,7 @@ final class UsageService {
         if preserveDeletedConversations, rebuildBasis != nil {
             let deleted = UsageRebuildMerge.deletedConversations(
                 conversationAggregator.snapshot().infos,
-                sourceExists: { FileManager.default.fileExists(atPath: $0) }
+                sourceExists: JSONLDirectoryEnumerator.sourceExists(atPath:)
             )
             for info in deleted where messageLedger.contains(info.key, app: info.app) {
                 ledgerBackedKeys[info.app, default: []].insert(info.key)
@@ -1910,7 +1910,7 @@ final class UsageService {
                 candidateCycles: merged.cycleBuckets,
                 cycleStartByID: cycleStartByID,
                 ledgerBackedKeys: ledgerBackedKeys.values.reduce(into: Set<String>()) { $0.formUnion($1) },
-                sourceExists: { FileManager.default.fileExists(atPath: $0) }
+                sourceExists: JSONLDirectoryEnumerator.sourceExists(atPath:)
             )
         }
         // 补录只填没有任何 Claude 用量的天，必须在保留已删除对话之后判断，否则同一天会补录和保留各算一次。
