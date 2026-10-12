@@ -301,6 +301,10 @@ final class AppState {
     private var quotaFilesForTermination: Set<QuotaFile> = []
     /// load 时被超长自检修复的周期 ID；在启动扫描后触发受限重建。
     private var pendingCycleRepairs: Set<String> = []
+    /// 进行中的额度刷新轮数。大于 0 时周期变化触发的重建请求先攒在
+    /// `batchedCycleRebuildReasons`，整轮结束后一次提交，同时滚动的 Codex / Claude 只重建一次。
+    private var quotaRefreshBatchDepth = 0
+    private var batchedCycleRebuildReasons: [String] = []
     /// 批次 C：额度持久化 coordinator，编码与原子写移出 MainActor。
     private let quotaPersistenceCoordinator = QuotaPersistenceCoordinator()
     /// 批次 C：持久化提交的单调递增序列号。`Task.detached` 的执行顺序无语言保证，
@@ -381,8 +385,11 @@ final class AppState {
             // 两种情况都只需要一次受限重建（最近 `rebuildWindowDays` 天）：
             // 超长周期被回写起点，或启动时丢弃过落在窗口内的孤儿周期桶。
             if !pendingCycleRepairs.isEmpty || usageService.hasPendingOrphanCycleRebuild {
+                let reason = "startup repairedCycles=\(pendingCycleRepairs.count) "
+                    + "orphanBuckets=\(usageService.hasPendingOrphanCycleRebuild)"
                 pendingCycleRepairs = []
-                await usageService.rebuildCycleUsageForRecentChanges()
+                AppLog.info(.usage, "cycle usage rebuild requested \(reason)")
+                await usageService.rebuildCycleUsageForRecentChanges(reasons: [reason])
             }
         }
         // 启动后异步拉一次服务状态;后续由 Scheduler 5 分钟刷新一次
@@ -429,6 +436,8 @@ final class AppState {
     func refreshQuotas(reason: QuotaRefreshReason = .periodic) async {
         guard beginStateOperation() else { return }
         defer { activeStateOperations -= 1 }
+        quotaRefreshBatchDepth += 1
+        defer { endQuotaRefreshBatch() }
         let plan = QuotaRefreshPlan.make(
             showCodex: SettingsStore.shared.showCodex,
             showClaude: SettingsStore.shared.showClaude,
@@ -1308,16 +1317,66 @@ final class AppState {
             sampledAt: sampledAt
         )
         guard next != quotaCycles else { return }
-        let previousPartition = cycleUsagePartition(for: quotaCycles)
-        let previousAccountSegments = quotaCycles.accountSegments
+        let previous = quotaCycles
+        let previousPartition = cycleUsagePartition(for: previous)
         quotaCycles = next
         dirtyQuotaFiles.insert(.cycles)
-        if cycleUsagePartition(for: next) != previousPartition
-            || next.accountSegments != previousAccountSegments
-        {
+        let nextPartition = cycleUsagePartition(for: next)
+        let accountSegmentsChanged = next.accountSegments != previous.accountSegments
+        if nextPartition != previousPartition || accountSegmentsChanged {
             // 周期边界滚动后做受限重建（只重扫最近窗口），不再全量重扫历史日志。
-            Task { await usageService.rebuildCycleUsageForRecentChanges() }
+            let reason = Self.cycleRebuildReason(
+                app: app,
+                previousPartition: previousPartition,
+                nextPartition: nextPartition,
+                accountSegmentsChanged: accountSegmentsChanged,
+                accountKeys: Set((previous.records + next.records).map(\.accountKey))
+            )
+            AppLog.info(.usage, "cycle usage rebuild requested \(reason)")
+            requestCycleUsageRebuild(reason: reason)
         }
+    }
+
+    /// 额度刷新进行中先攒着，整轮结束后合并提交；其余场景（启动补记缓存）直接提交。
+    private func requestCycleUsageRebuild(reason: String) {
+        if quotaRefreshBatchDepth > 0 {
+            batchedCycleRebuildReasons.append(reason)
+        } else {
+            usageService.requestCycleUsageRebuild(reasons: [reason])
+        }
+    }
+
+    private func endQuotaRefreshBatch() {
+        quotaRefreshBatchDepth -= 1
+        guard quotaRefreshBatchDepth == 0, !batchedCycleRebuildReasons.isEmpty else { return }
+        let reasons = batchedCycleRebuildReasons
+        batchedCycleRebuildReasons = []
+        usageService.requestCycleUsageRebuild(reasons: reasons)
+    }
+
+    /// 重建触发原因：周期指纹里消失 / 新增的条目。用于排查重建是否由边界抖动反复触发。
+    /// 条目内含账号键（cycleID 以 accountKey 开头），写日志前折成哈希。
+    nonisolated static func cycleRebuildReason(
+        app: UsageApp,
+        previousPartition: [String],
+        nextPartition: [String],
+        accountSegmentsChanged: Bool,
+        accountKeys: Set<String>
+    ) -> String {
+        func redacted(_ entry: String) -> String {
+            accountKeys.reduce(entry) { text, key in
+                key.isEmpty ? text : text.replacingOccurrences(of: key, with: Redact.account(key))
+            }
+        }
+        let before = Set(previousPartition)
+        let after = Set(nextPartition)
+        let removed = before.subtracting(after).sorted().map(redacted)
+        let added = after.subtracting(before).sorted().map(redacted)
+        var parts = ["app=\(app.rawValue)"]
+        if !removed.isEmpty { parts.append("removed=[\(removed.joined(separator: ", "))]") }
+        if !added.isEmpty { parts.append("added=[\(added.joined(separator: ", "))]") }
+        if accountSegmentsChanged { parts.append("accountSegmentsChanged=true") }
+        return Redact.oneLine(parts.joined(separator: " "), limit: 800)
     }
 
     private func cycleUsagePartition(for payload: QuotaCyclePayload) -> [String] {

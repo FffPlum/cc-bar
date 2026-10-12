@@ -1564,6 +1564,32 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertEqual(old.endAt, earlyResetAt)
     }
 
+    func testCycleRebuildReasonListsChangedEntriesWithRedactedAccount() {
+        let accountKey = "codex:primary:acct-secret-123"
+        let reason = AppState.cycleRebuildReason(
+            app: .codex,
+            previousPartition: [
+                "cycle|\(accountKey)|primary|2000|0.0|active",
+                "cycle|\(accountKey)|secondary|9000|0.0|active",
+            ],
+            nextPartition: [
+                "cycle|\(accountKey)|primary|2000|0.0|2000.0",
+                "cycle|\(accountKey)|primary|4000|2000.0|active",
+                "cycle|\(accountKey)|secondary|9000|0.0|active",
+            ],
+            accountSegmentsChanged: false,
+            accountKeys: [accountKey]
+        )
+
+        XCTAssertFalse(reason.contains("acct-secret-123"), "账号键必须脱敏")
+        XCTAssertTrue(reason.hasPrefix("app=codex"))
+        XCTAssertTrue(reason.contains("removed=[cycle|acct#"))
+        XCTAssertTrue(reason.contains("|primary|2000|0.0|active]"))
+        XCTAssertTrue(reason.contains("|primary|4000|2000.0|active]"))
+        XCTAssertFalse(reason.contains("secondary"), "未变化的条目不应出现")
+        XCTAssertFalse(reason.contains("accountSegmentsChanged"))
+    }
+
     func testCycleStoreKeepsScheduledEndAtUnderSubsecondJitter() throws {
         let sampledAt = Date(timeIntervalSince1970: 1_000)
         let firstReset = sampledAt.addingTimeInterval(18_000)

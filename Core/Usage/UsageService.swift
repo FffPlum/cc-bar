@@ -180,6 +180,10 @@ final class UsageService {
     /// 启动时丢弃过孤儿周期桶，且它们落在受限重建窗口内；由 AppState 在 bootstrap
     /// 末尾触发一次窗口重建补回。
     private(set) var hasPendingOrphanCycleRebuild = false
+    /// 待合并的受限周期重建请求（每条是一次触发原因）。重建在读取周期快照的那一刻整体取走，
+    /// 之后到达的请求归入下一批；同一批只重扫一次日志。
+    private var pendingCycleRebuildReasons: [String] = []
+    private var cycleRebuildRequestTask: Task<Void, Never>?
     /// 存在窗口之外、受限重建补不回的周期用量缺口。设置页据此提示用户手动重算；
     /// 手动「重新计算用量」成功后清除。
     private(set) var cycleUsageNeedsManualRecalculation = false
@@ -901,17 +905,38 @@ final class UsageService {
         }
     }
 
+    /// 周期变化统一走这里登记，不直接调用重建：多个 Provider 同时滚动、或重建排队期间
+    /// 又有新变化时，合并成一次日志重扫。只有一个合并任务在跑；它每轮取走当前全部请求，
+    /// 重建期间新到的请求留给下一轮。
+    func requestCycleUsageRebuild(reasons: [String]) {
+        guard !reasons.isEmpty, !suspendedForTermination, !isPersistingForTermination else { return }
+        pendingCycleRebuildReasons.append(contentsOf: reasons)
+        guard cycleRebuildRequestTask == nil else { return }
+        cycleRebuildRequestTask = Task { [weak self] in
+            guard let self else { return }
+            while !self.pendingCycleRebuildReasons.isEmpty {
+                let batch = self.pendingCycleRebuildReasons
+                self.pendingCycleRebuildReasons = []
+                await self.rebuildCycleUsageForRecentChanges(reasons: batch)
+            }
+            self.cycleRebuildRequestTask = nil
+        }
+    }
+
     /// 周期窗口滚动 / 账号段变化后的受限重建：只重扫最近 `rebuildWindowDays` 天的日志，
     /// 仅重算受影响周期内的桶，历史桶保留。
     /// 触发频率高（5h / weekly 滚动，每天数次），必须保持轻量；
     /// 全量重建只在冷启动且 cycle rollup 无效时发生一次（见 `rebuildCycleUsageIfNeeded`）。
-    func rebuildCycleUsageForRecentChanges() async {
+    /// `reasons` 只用于日志统计本轮合并了多少次触发。
+    func rebuildCycleUsageForRecentChanges(reasons: [String] = []) async {
         guard !suspendedForTermination, !isPersistingForTermination else { return }
         guard let appState, !appState.quotaCycles.records.isEmpty else { return }
+        let started = Date()
         while isScanning || isCycleRebuilding {
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !suspendedForTermination, !isPersistingForTermination else { return }
         }
+        let waitEnded = Date()
 
         isCycleRebuilding = true
         isScanning = true
@@ -926,6 +951,7 @@ final class UsageService {
         // 先提交上次常规扫描之后新追加的日志，推进主 watermark。
         // 否则它们会先被下面的窗口重扫灌入，再被下一次常规增量扫描重复计入。
         guard await drainPendingUsageBeforeCycleRebuild() else { return }
+        let drainEnded = Date()
         // 本轮窗口重建即将覆盖启动时被丢弃的窗口内孤儿桶；drain 失败提前返回时
         // 不清标记，留给下一次触发。
         hasPendingOrphanCycleRebuild = false
@@ -937,6 +963,9 @@ final class UsageService {
             value: -Self.rebuildWindowDays,
             to: now
         ) ?? now
+        // 等待和前置提交期间到达的请求，其周期变化已包含在下面读取的周期快照里，一并取走。
+        let mergedReasons = reasons + pendingCycleRebuildReasons
+        pendingCycleRebuildReasons = []
         let cycles = appState.quotaCycles.records
         let accountSegments = appState.quotaCycles.accountSegments
         let affectedCycleIDs = Self.affectedCycleIDs(
@@ -1018,6 +1047,7 @@ final class UsageService {
         let pi = await piTask
         let opencode = await opencodeTask
         let dsh = await dshTask
+        let scanEnded = Date()
         let affectedCycles = cycles.filter { affectedCycleIDs.contains($0.id) }
         let failedApps = Self.cycleSourceFailedApps(
             Self.cycleRebuildFailedApps(
@@ -1046,6 +1076,18 @@ final class UsageService {
                 .subtracting(failedApps)
                 .subtracting(dshFrozen ? [.dsh] : [])
         )
+        // 全过程计时：commitCycleAggregation 自己的日志只计聚合与落盘，不含前面的日志重扫。
+        let finished = Date()
+        func seconds(_ from: Date, _ to: Date) -> String {
+            String(format: "%.2fs", to.timeIntervalSince(from))
+        }
+        let scanDays = String(format: "%.1f", now.timeIntervalSince(dateFrom) / 86_400)
+        AppLog.info(.usage, """
+            cycle usage range rebuild finished requests=\(mergedReasons.count) \
+            scanDays=\(scanDays) total=\(seconds(started, finished)) \
+            wait=\(seconds(started, waitEnded)) drain=\(seconds(waitEnded, drainEnded)) \
+            scan=\(seconds(drainEnded, scanEnded)) commit=\(seconds(scanEnded, finished))
+            """)
     }
 
     /// 返回与重建扫描区间相交的周期。周期可能开始于 dateFrom 之前、结束于其后，
@@ -1314,7 +1356,8 @@ final class UsageService {
         let elapsed = String(format: "%.2fs", Date().timeIntervalSince(started))
         let tag = initialRebuildApps.isEmpty ? "range rebuild" : "initial rebuild"
         let status = failedApps.isEmpty ? "completed" : "partially completed"
-        AppLog.info(.usage, "cycle usage \(tag) \(status) elapsed=\(elapsed)")
+        // 只计聚合与落盘；受限重建的全过程耗时见其 finished 日志。
+        AppLog.info(.usage, "cycle usage \(tag) \(status) commit=\(elapsed)")
     }
 
     func rebuildCycleUsageIfNeeded() async {
