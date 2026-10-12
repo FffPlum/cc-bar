@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>macOS 原生 AI 额度监控与用量分析工具</b><br>
-  在菜单栏查看多服务剩余额度，按对话、项目和模型分析 Tokens、费用与缓存使用。
+  在菜单栏实时监控 Codex、Claude Code、Cursor、Antigravity 配额与重置时间，本地离线分析 Tokens、费用与对话。
 </p>
 
 <p align="center">
@@ -19,8 +19,8 @@
 
 <p align="center">
   <a href="https://github.com/nanvon/cc-bar/releases/latest">下载安装</a> ·
-  <a href="#-核心特性">功能特性</a> ·
-  <a href="#-快速安装">安装指南</a> ·
+  <a href="#-服务支持矩阵">服务支持</a> ·
+  <a href="#-核心特性">核心特性</a> ·
   <a href="#-数据与隐私安全">安全说明</a> ·
   <a href="#-从源码构建">从源码构建</a> ·
   <a href="https://github.com/nanvon/cc-bar/issues">问题反馈</a> ·
@@ -35,69 +35,59 @@
 
 ---
 
-## ✨ 核心特性
+## ⚡ 服务支持矩阵
 
-cc-bar 展示两类数据：
+cc-bar 展示两类数据：**订阅额度**直连各服务官方接口获取剩余比例与重置时间；**本机用量**由本地日志解析或服务端计量汇总，不上传任何代码、项目数据或会话内容。
 
-* **订阅额度** — 剩余比例、重置时间来自各服务的服务端接口，按订阅和账号展示，见于菜单栏、悬浮窗、Popover 和额度页。
-* **本机用量** — 读取本机会话日志，按 Agent 统计 Tokens 与费用，见于概览、对话和项目页。Popover 的今日 / 本周花费和额度页的周期用量，用对应 Agent 的本机用量估算，不是订阅账单。
-
-### ⚡ 多服务额度监控
-
-* **五种额度服务** — 支持 Codex、Claude Code、Antigravity、Cursor 和 Command Code：
-  * **Codex**：5 小时与周额度、重置倒计时；支持粘贴 `auth.json` 导入多个账号同屏查看，查看额度到期时间及可用的额外重置次数，不切换 CLI 登录状态。
-  * **Claude Code**：5 小时、周额度与模型专项额度；API 失败且无可展示缓存时，手动刷新可使用 CLI 兜底。
-  * **Antigravity**：直接查询云端 API，无需运行本地 IDE；展示 Gemini 5 小时、周额度及 Claude 辅助额度。
-  * **Cursor**：展示 Total、Auto 与 API 额度，识别 Unlimited，并汇总今日与本周的远端计量费用。
-  * **Command Code**：展示 5 小时与周额度，GOAT 套餐附月度 Credits；支持自动探测凭据或在 Keychain 中保存手动 API Key。
-* **菜单栏与桌面悬浮窗** — 分服务选择显示内容，菜单栏支持主要 / 周 / 双窗口模式；悬浮窗支持边缘吸附、位置记忆，不抢占键盘焦点。
-* **后台刷新与服务状态** — 展示官方服务状态和最近刷新时间；额度、日志与服务状态任务合并调度，锁屏或息屏时降频，睡眠时暂停、唤醒后补刷。网络失败保留已有快照，429 后遵守退避。
-
-### 📊 用量、对话与项目分析
-
-* **五种本地数据源与 Cursor 远端计量** — 读取 Codex、Claude Code、Pi、OpenCode 和 DSH（DeepSeek Harness）的本机会话记录；DSH 支持 JSONL 与 zstd 压缩日志。Cursor 用量来自账号全设备远端计量。Antigravity 与 Command Code 提供额度展示，不作为独立用量统计来源。
-* **四个统计页面** — 概览、对话与项目共享日 / 周 / 月粒度、时间范围及自定义日期：
-  * **概览**：总 Tokens、费用、各服务费用与同期变化；堆叠用量图、Token 拆分与缓存命中率。用量构成可按服务、提供商、模型或项目切换，高消耗对话可直接跳转到详情。用量构成、高消耗对话和项目排行默认按 Tokens 排序，可在「设置 → 外观与显示 → 统计」改为按费用。选择单个周期时，日图扩展为近 30 天，周 / 月图扩展为近 14 个周期，汇总仍只统计所选范围。
-  * **对话**：按服务、项目筛选，搜索标题或项目，按最近活动、Tokens 或费用排序。详情展示对话全部时间的输入、输出、缓存写入与读取、请求数、缓存命中率、模型构成，以及 Standard / Fast 档位和费用拆分。
-  * **项目**：按项目汇总 Tokens、费用、对话数与活跃天数，查看每日趋势、工具与模型、分支和高消耗对话；可识别的 Git worktree 自动归入主仓库，并展示各 worktree 的明细。Cursor 远端计量、补录与早期按天汇总历史单列为「未归属」。
-  * **额度**：在同一页查看 Codex 与 Claude Code 当前 5 小时 / 周周期的本机用量、用满预估、官方已用比例和重置倒计时。下方展示额度变化：5 小时视图看今天，周视图按官方重置时刻展示当前与上一额度周期；多账号独立展示。周期用量默认只计 Codex / Claude Code 自己的本机日志；打开「设置 → 外观与显示 → 统计 → 包含其他 Agent 中的 Codex 订阅用量」后，Codex 的周期用量与 Popover 花费同时计入 Pi、OpenCode、DSH 里的 Codex 订阅用量。
-* **费用口径与定价** — 本地费用按日志记录或模型价格估算，用于比较消耗，不等同于订阅账单；Cursor 使用服务端计量费用。支持 Codex Standard / Fast、长上下文阶梯、Claude 缓存 TTL 与 advisor 用量；内置价格表包含 GPT-6.1 Sol、Claude Haiku 5.5、DeepSeek、Gemini、GLM、MiniMax 及 Command Code 的模型变体，并通过 LiteLLM / models.dev 补齐。价格或统计规则变化后自动重算历史费用，日志已删除的对话保留用量。
-* **历史保护与安全重算** — 日统计、对话、周期用量及扫描进度统一保存，当前快照损坏时尝试恢复上一份完整快照。重算以现有日志为准，源日志已清理的对话保留原用量；日志读取不完整或保存失败时保留原数据并提示。
-
-### 💻 原生界面与设置
-
-* **服务与账号** — 一页设置完所有服务：检测到的服务和未检测到的分开列出并给出接入提示，每个服务一个开关同时管额度和用量，并可直接勾选是否显示在菜单栏和悬浮窗；刷新失败会在行内标出，点行尾按钮可查看数据来源。关闭服务后仍保留扫描和历史，重新开启可继续查看。Codex 与 Claude Code 默认开启，Antigravity 检测到登录后默认开启；Cursor、Command Code 与桌面悬浮窗默认关闭，需在设置中手动开启。
-* **截图隐私模式** — 匿名显示账号、项目与对话，遮挡路径、分支和 ID，覆盖统计页、Popover、账号设置及相关提示；保留真实金额、Tokens、模型、时间与图表，不修改原始数据。默认关闭，入口为「设置 → 外观与显示 → 隐私模式」。
-* **macOS 原生体验** — 支持浅色 / 深色外观、中文 / English、静默开机自启、快捷键刷新，以及应用内查看更新日志、下载安装并自动重启。
-* **本地诊断** — 日志自动轮转并默认脱敏；可在设置中导出诊断包，由用户自行检查和分享，应用不会自动上传。
+| 服务 / 工具 | 订阅额度监控 | 额度耗尽提醒 | 本地用量 / 费用统计 | 多账号同屏 | 凭据来源 |
+| :--- | :--- | :---: | :--- | :---: | :--- |
+| **Codex** | 5 小时 / 周额度、重置倒计时 | 支持 | 本地会话（含 `.zst` 压缩日志） | 支持 | `~/.codex/auth.json`（自动续期） |
+| **Claude Code** | 5 小时 / 周 / 模型专属额度 | 支持 | 本地会话日志 | — | Keychain / 本地只读凭据 |
+| **Antigravity** | Gemini 5 小时与周、Claude 辅助 | 支持 | — | — | Google Cloud OAuth（自动续期） |
+| **Cursor** | Total / Auto / API（含 Unlimited） | 支持 | 账号全设备远端计量（今日 / 本期） | — | 本地 state.vscdb（严格只读） |
+| **Command Code** | 5 小时 / 周额度、GOAT 月度 Credits | 支持 | — | — | 本地 5 级只读探测 / Keychain Key |
+| **Pi / OpenCode / DSH** | — | — | 本地会话日志（Pi / OpenCode / DSH 多帧 zstd） | — | 严格只读本地日志与数据库 |
 
 ---
 
-### 📸 界面预览
+## ✨ 核心特性
+
+### ⚡ 实时配额与状态监控
+* **常驻菜单栏与桌面悬浮窗** — 支持主要窗口、周窗口或双窗口模式；桌面悬浮窗边缘吸附、位置记忆，不抢占键盘焦点。
+* **低额度系统通知** — 当 5 小时、周或计费周期额度低于设定阈值时发送 macOS 系统通知，同一周期仅提醒一次，点击通知直达用量统计。
+* **低开销后台调度** — 额度查询、日志扫描与服务状态合并调度；锁屏与息屏降频，睡眠暂停、唤醒补刷，接口 429 自动退避。
+* **多账号无缝并存** — Codex 支持粘贴 `auth.json` 或 PAT 导入多个账号同屏查看剩余额度与额外重置次数，不影响 CLI 登录状态。
+
+### 📊 本地离线用量与项目分析
+* **多维度统计分析** — 概览、对话、项目与额度四个页面，支持日 / 周 / 月粒度与自定义时间范围：
+  * **用量概览**：堆叠图展示总 Tokens、费用与同期变化，按服务、Provider、模型或项目分析构成，统计缓存命中率。
+  * **对话明细**：检索历史会话，查看输入、输出、缓存读写明细、请求数、模型构成与 Standard / Fast 速度档位费用拆分。
+  * **项目分析**：按项目汇总用量趋势、高消耗对话与分支分布；Git worktree 自动归入主仓库。
+  * **额度对比与预估**：对比当前周期的本机用量、用满预估与官方已用比例；支持开启「包含其他 Agent 中的 Codex 订阅用量」，将 Pi、OpenCode、DSH 中消耗的 Codex 额度合并计入。
+* **规则变更自动重算** — 价格表或统计规则变化后自动重新计费；会话日志已清理的对话自动保留历史用量，不影响统计连续性。
 
 <p align="center">
-  <img src="docs/Screenshots/statistics-overview.png" width="720" alt="用量概览"><br>
-  <sub><b>用量概览</b>：按时间范围汇总 Tokens 与费用，查看用量趋势、缓存命中率、用量构成和高消耗对话</sub>
+  <img src="docs/Screenshots/statistics-overview.png" width="720" alt="用量概览">
 </p>
 
-<p align="center">
-  <img src="docs/Screenshots/statistics-conversations.png" width="720" alt="对话明细"><br>
-  <sub><b>对话明细</b>：按项目筛选或搜索对话，查看单次对话的 Token 构成、估算费用、模型与速度档位</sub>
-</p>
+<details>
+  <summary><b>展开查看对话明细、项目分析与额度监控截图</b></summary>
+  <br>
+  <p align="center">
+    <img src="docs/Screenshots/statistics-conversations.png" width="720" alt="对话明细"><br><br>
+    <img src="docs/Screenshots/statistics-projects.png" width="720" alt="项目分析"><br><br>
+    <img src="docs/Screenshots/statistics-quota.png" width="720" alt="额度监控">
+  </p>
+</details>
+
+### 💻 原生体验与隐私控制
+* **一页管理与拖拽排序** — 「设置 → 服务与账号」一页开关所有服务，可整行拖拽自定义服务在菜单栏、Popover、悬浮窗与统计页的全局展示顺序。
+* **截图隐私模式** — 一键匿名遮挡账号邮箱、项目路径、Git 分支与会话 ID，保留真实金额与图表，截图分享无负担。
+* **应用内平滑升级** — 集成 Sparkle 更新器，直接在应用内查看更新说明、一键下载安装并自动重启。
+* **本地诊断与零追踪** — 日志自动轮转且关键字段全脱敏；可手动导出诊断包，应用不含任何用户行为遥测。
 
 <p align="center">
-  <img src="docs/Screenshots/statistics-projects.png" width="720" alt="项目分析"><br>
-  <sub><b>项目分析</b>：按项目查看用量与费用，分析每日趋势、工具与模型、分支和高消耗对话</sub>
-</p>
-
-<p align="center">
-  <img src="docs/Screenshots/statistics-quota.png" width="720" alt="额度监控"><br>
-  <sub><b>额度监控</b>：查看 Codex 与 Claude Code 当前 5 小时和周周期用量、官方已用比例及额度变化记录</sub>
-</p>
-
-<p align="center">
-  <img src="docs/Screenshots/settings.png" width="720" alt="服务与账号设置"><br>
-  <sub><b>服务与账号设置</b>：一页开关服务、选择菜单栏与悬浮窗，并在 Codex 下添加其他账号</sub>
+  <img src="docs/Screenshots/settings.png" width="720" alt="服务与账号设置">
 </p>
 
 ---
