@@ -1,3 +1,4 @@
+import CoreServices
 import XCTest
 @testable import CCBar
 
@@ -563,5 +564,39 @@ final class ScannerIncrementalTests: XCTestCase {
         XCTAssertEqual(filtered.filesScanned, 1)
         XCTAssertNil(filtered.newState[old.path])
         XCTAssertNotNil(filtered.newState[newer.path])
+    }
+
+    func testUsageLogPathMatcherIgnoresUnrelatedWrites() {
+        let home = URL(fileURLWithPath: "/Users/tester", isDirectory: true)
+        let roots = UsageScanRoots(
+            claudeRoot: home.appendingPathComponent(".claude/projects", isDirectory: true),
+            claudeConversationIndex: { ConversationTitleIndex.ClaudeIndex(titles: [:], projects: [:]) },
+            codexRoots: [
+                home.appendingPathComponent(".codex/sessions", isDirectory: true),
+                home.appendingPathComponent(".codex/archived_sessions", isDirectory: true),
+            ],
+            codexTitles: { [:] },
+            piRoot: home.appendingPathComponent(".pi/agent/sessions", isDirectory: true),
+            opencodeDatabaseURL: home.appendingPathComponent(".local/share/opencode/opencode.db"),
+            dshRoot: home.appendingPathComponent(".dsh/sessions", isDirectory: true)
+        )
+        let matcher = UsageLogPathMatcher.standard(roots: roots)
+
+        XCTAssertTrue(matcher.matches("/Users/tester/.claude/projects/-a/s.jsonl"))
+        XCTAssertTrue(matcher.matches("/Users/tester/.codex/sessions"), "日志目录本身新建也算")
+        XCTAssertTrue(matcher.matches("/Users/tester/.codex/archived_sessions/r.jsonl.zst"))
+        XCTAssertTrue(matcher.matches("/Users/tester/.local/share/opencode/opencode.db-wal"))
+        XCTAssertFalse(matcher.matches("/Users/tester/.local/share/opencode/opencode.db-shm"), "只读打开也会写 -shm")
+        XCTAssertFalse(matcher.matches("/Users/tester/.claude/settings.json"))
+        XCTAssertFalse(matcher.matches("/Users/tester/.claude/projects-old/x.jsonl"), "前缀须按路径段匹配")
+        XCTAssertFalse(matcher.matches("/Users/tester/.codex/config.toml"))
+
+        let unrelated = "/Users/tester/.codex/config.toml"
+        XCTAssertFalse(matcher.shouldMark(paths: [unrelated], flags: [0]))
+        XCTAssertTrue(matcher.shouldMark(
+            paths: [unrelated],
+            flags: [FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs)]
+        ), "事件被合并时无法确定路径，按有变化处理")
+        XCTAssertTrue(matcher.shouldMark(paths: [unrelated], flags: []), "路径与标志数量不一致时保守放行")
     }
 }

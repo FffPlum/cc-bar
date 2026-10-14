@@ -1626,6 +1626,50 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertEqual(cycle.latestUsedPercent, 20)
     }
 
+    func testCycleStoreKeepsStartAtUnderEarlierSubsecondJitter() throws {
+        let sampledAt = Date(timeIntervalSince1970: 1_000)
+        let firstReset = sampledAt.addingTimeInterval(18_000)
+        var payload = QuotaCycleStore.record(
+            payload: QuotaCyclePayload(trackingStartedAt: sampledAt),
+            accountKey: "claude:primary",
+            app: .claude,
+            snapshot: snapshot(kind: .fiveHour, usedPercent: 10, reset: firstReset),
+            source: .api,
+            sampledAt: sampledAt
+        )
+        let firstStart = try XCTUnwrap(payload.records.first).startAt
+        // resets_at 逐次略早于此前所有采样时，startAt 不应跟着前移，否则每次都会改变周期指纹。
+        for (index, jitter) in [-0.06, -0.3, -2.0].enumerated() {
+            payload = QuotaCycleStore.record(
+                payload: payload,
+                accountKey: "claude:primary",
+                app: .claude,
+                snapshot: snapshot(
+                    kind: .fiveHour,
+                    usedPercent: 10,
+                    reset: firstReset.addingTimeInterval(jitter)
+                ),
+                source: .api,
+                sampledAt: sampledAt.addingTimeInterval(TimeInterval(index + 1) * 60)
+            )
+        }
+        XCTAssertEqual(payload.records.count, 1)
+        XCTAssertEqual(payload.records.first?.startAt, firstStart, "容差内的提前抖动不应改写 startAt")
+
+        // 提前量达到容差时照常前移。
+        let earlierReset = firstReset.addingTimeInterval(-6)
+        payload = QuotaCycleStore.record(
+            payload: payload,
+            accountKey: "claude:primary",
+            app: .claude,
+            snapshot: snapshot(kind: .fiveHour, usedPercent: 10, reset: earlierReset),
+            source: .api,
+            sampledAt: sampledAt.addingTimeInterval(5 * 60)
+        )
+        XCTAssertEqual(payload.records.count, 1)
+        XCTAssertEqual(payload.records.first?.startAt, earlierReset.addingTimeInterval(-18_000))
+    }
+
     func testCycleStoreRollsScheduledEndAtWhenDriftReachesTolerance() throws {
         let sampledAt = Date(timeIntervalSince1970: 1_000)
         let firstReset = sampledAt.addingTimeInterval(18_000)

@@ -211,7 +211,7 @@ enum QuotaCycleStore {
     /// 活跃周期 resets_at 分钟级漂移时允许继续命中原记录；
     /// 新旧周期边界差超过半小时则必须视为真实滚动，防止低用量提前重置串期。
     nonisolated private static let activeResetDriftTolerance: TimeInterval = 30 * 60
-    /// 活跃周期的 scheduledEndAt 抖动容差。服务端每次返回的 resets_at 都会小幅漂移
+    /// 活跃周期的 scheduledEndAt / startAt 抖动容差。服务端每次返回的 resets_at 都会小幅漂移
     /// （实测 Claude 亚秒级、Codex 1~3 秒），若逐次写入记录，`cycleUsagePartition`
     /// 会把它当成周期边界滚动，触发本不该发生的全量重建。容差内保留既有边界，
     /// 取值远小于真实窗口长度（最短 5 小时），不影响真实滚动的识别。
@@ -602,7 +602,13 @@ enum QuotaCycleStore {
             if let index = matchIndex {
                 let wasActive = next.records[index].endAt > sampledAt
                 next.records[index].limitKind = limit.kind
-                next.records[index].startAt = min(next.records[index].startAt, startAt)
+                // 起点同样按容差更新：startAt 由带抖动的 resets_at 反推，逐次取 min 会让它
+                // 随每个更早的亚秒采样前移，周期指纹随之变化并触发受限重建。
+                if next.records[index].startAt.timeIntervalSince(startAt)
+                    >= Self.scheduledEndJitterTolerance
+                {
+                    next.records[index].startAt = startAt
+                }
                 // 容差内的 resets_at 漂移视为同一边界，保留既有值；只有真正滚动才写入新边界。
                 if abs(scheduledEndAt.timeIntervalSince(next.records[index].scheduledEndAt))
                     >= Self.scheduledEndJitterTolerance

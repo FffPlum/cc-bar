@@ -8,9 +8,16 @@ import os
 /// 隔离，而这个盒子必须能在 FSEvents 的后台回调里直接访问。
 private final class UsageLogChangeFlag: Sendable {
     private let state = OSAllocatedUnfairLock(initialState: true)
+    let matcher = UsageLogPathMatcher.standard()
 
     func mark() {
         state.withLock { $0 = true }
+    }
+
+    /// FSEvents 回调入口：只有本批事件里有用量日志相关的路径才置位。
+    func handle(paths: [String], flags: [FSEventStreamEventFlags]) {
+        guard matcher.shouldMark(paths: paths, flags: flags) else { return }
+        mark()
     }
 
     /// 读取并清零。
@@ -24,6 +31,53 @@ private final class UsageLogChangeFlag: Sendable {
 
     func raise() {
         state.withLock { $0 = true }
+    }
+}
+
+/// 判断 FSEvents 上报的路径是否属于扫描器实际读取的日志。
+///
+/// 监听仍落在 provider 顶层目录（子目录可能尚未创建），但顶层目录里大部分写入与用量无关
+/// （设置、缓存、shell 快照、锁文件等）。尤其 SQLite 只读打开 `opencode.db` 也会改写同目录的
+/// `-shm`：不过滤的话，CCBar 自己的每次扫描都会让下一轮门控放行，门控形同虚设。
+nonisolated struct UsageLogPathMatcher: Sendable {
+    /// 日志目录：路径等于它或位于其下即命中。
+    let directories: [String]
+    /// 精确文件路径。
+    let files: Set<String>
+
+    static func standard(roots: UsageScanRoots = .production) -> UsageLogPathMatcher {
+        let directories = [roots.claudeRoot] + roots.codexRoots + [roots.piRoot, roots.dshRoot]
+        // 只认数据库本体和 WAL；`-shm` 读者也会写，不代表有新数据。
+        let database = roots.opencodeDatabaseURL
+        let files = [
+            database,
+            database.deletingLastPathComponent()
+                .appendingPathComponent(database.lastPathComponent + "-wal", isDirectory: false),
+        ]
+        // FSEvents 上报的是解析过符号链接的真实路径，两种写法都收下。
+        func variants(_ urls: [URL]) -> [String] {
+            Array(Set(urls.flatMap { [$0.path, $0.resolvingSymlinksInPath().path] }))
+        }
+        return UsageLogPathMatcher(directories: variants(directories), files: Set(variants(files)))
+    }
+
+    func matches(_ path: String) -> Bool {
+        if files.contains(path) { return true }
+        return directories.contains { path == $0 || path.hasPrefix($0 + "/") }
+    }
+
+    /// 事件被合并或丢弃、监听根被移动时无法确定具体路径，按有变化处理。
+    func shouldMark(paths: [String], flags: [FSEventStreamEventFlags]) -> Bool {
+        guard paths.count == flags.count else { return true }
+        let uncertain = FSEventStreamEventFlags(
+            kFSEventStreamEventFlagMustScanSubDirs
+                | kFSEventStreamEventFlagUserDropped
+                | kFSEventStreamEventFlagKernelDropped
+                | kFSEventStreamEventFlagRootChanged
+        )
+        return zip(paths, flags).contains { path, flag in
+            flag & uncertain != 0 || matches(path)
+        }
     }
 }
 
@@ -61,7 +115,7 @@ final class UsageLogWatcher {
 
     /// 各扫描器的日志根。监听的是 provider 的顶层目录而不是精确的 sessions 子目录：
     /// 子目录可能尚未创建，而 FSEvents 只监听创建 stream 时已存在的路径。
-    /// 多收到一些无关事件只会让门控多放行一轮，代价远小于漏扫。
+    /// 顶层目录里的无关写入由 `UsageLogPathMatcher` 按文件路径过滤掉。
     private static func candidateRoots() -> [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return [
@@ -122,9 +176,16 @@ final class UsageLogWatcher {
             copyDescription: nil
         )
 
-        let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
+        let callback: FSEventStreamCallback = { _, info, count, eventPaths, eventFlags, _ in
             guard let info else { return }
-            Unmanaged<UsageLogChangeFlag>.fromOpaque(info).takeUnretainedValue().mark()
+            let sink = Unmanaged<UsageLogChangeFlag>.fromOpaque(info).takeUnretainedValue()
+            // UseCFTypes：eventPaths 是 CFArray<CFString>。取不到路径时按有变化处理。
+            guard let paths = unsafeBitCast(eventPaths, to: NSArray.self) as? [String] else {
+                sink.mark()
+                return
+            }
+            let flags = Array(UnsafeBufferPointer(start: eventFlags, count: count))
+            sink.handle(paths: paths, flags: flags)
         }
 
         guard let created = FSEventStreamCreate(
@@ -135,7 +196,12 @@ final class UsageLogWatcher {
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             Self.latency,
             // WatchRoot：日志根被整体移动/重建时收到通知，不至于一直盯着旧 inode。
-            UInt32(kFSEventStreamCreateFlagWatchRoot)
+            // FileEvents + UseCFTypes：逐文件上报路径，供 UsageLogPathMatcher 过滤无关写入。
+            UInt32(
+                kFSEventStreamCreateFlagWatchRoot
+                    | kFSEventStreamCreateFlagFileEvents
+                    | kFSEventStreamCreateFlagUseCFTypes
+            )
         ) else {
             // 建流失败：保持放行，行为与没有门控时一致。
             changeFlag.raise()
