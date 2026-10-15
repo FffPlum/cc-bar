@@ -53,7 +53,7 @@ struct PopoverRootView: View {
     private var header: some View {
         HStack(spacing: 4) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(tr("Usage", "用量"))
+                Text(tr("Quota", "额度"))
                     .font(.system(size: 13, weight: .semibold))
 
                 // 用 TimelineView 每秒重新渲染一次,让 "Xs 前已刷新" 实时滚动。
