@@ -208,6 +208,7 @@ enum DshSessionScanner {
                 state.dshLastTurn = scan.lastTurn
                 state.dshLastStep = scan.lastStep
                 state.dshLastSlotOpen = scan.lastSlotOpen
+                state.dshRequestStartMs = scan.requestStartMs
                 result.newState[log.fileURL.path] = state
                 result.entriesByPath[log.fileURL.path] = scan.entries
                 if restarted, let id = scan.sessionID {
@@ -531,6 +532,8 @@ enum DshSessionScanner {
         var lastStep: Int?
         var lastSlotOpen = false
         var lastEntryIndex: Int?
+        /// 最近一次请求发出的时间（`step/start` / `llm/retry-started`），用于首字延迟。
+        var requestStartMs: Double?
         var restartNeeded = false
         var entries: [UsageEntry] = []
 
@@ -548,6 +551,7 @@ enum DshSessionScanner {
             lastTurn = state.dshLastTurn
             lastStep = state.dshLastStep
             lastSlotOpen = state.dshLastSlotOpen ?? false
+            requestStartMs = state.dshRequestStartMs
         }
     }
 
@@ -617,7 +621,13 @@ enum DshSessionScanner {
             }
             return true
 
+        case "step/start":
+            scan.requestStartMs = (root["time"] as? NSNumber)?.doubleValue
+            return true
+
         case "llm/retry-started":
+            // 重试是一次新请求，首字延迟从重试开始算。
+            scan.requestStartMs = (root["time"] as? NSNumber)?.doubleValue
             if let body = root["data"] as? [String: Any],
                scan.lastTurn == (body["turn"] as? NSNumber)?.intValue,
                scan.lastStep == (body["step"] as? NSNumber)?.intValue {
@@ -671,12 +681,13 @@ enum DshSessionScanner {
             } else {
                 model = modelLabel(provider: scan.routeProvider, model: scan.routeModel)
             }
-            let entry = makeEntry(
+            var entry = makeEntry(
                 conversationID: sessionID,
                 model: model,
                 timestamp: timestamp,
                 usage: usage
             )
+            entry.timing = scan.requestStartMs.flatMap { requestTiming(start: $0, body: body) }
             if let turn, let step, scan.lastSlotOpen,
                scan.lastTurn == turn, scan.lastStep == step,
                let index = scan.lastEntryIndex {
@@ -714,6 +725,29 @@ enum DshSessionScanner {
             }
         }
         return nil
+    }
+
+    /// `data.stream` 里每个 chunk 都带接收时间：最早的是首字，最晚的是结束。
+    /// 文本类 chunk 打包成 `time0` + 逐个间隔 `dt`。
+    nonisolated static func requestTiming(start: Double, body: [String: Any]) -> RequestTiming? {
+        guard let stream = body["stream"] as? [Any] else { return nil }
+        var first: Double?
+        var last: Double?
+        func record(_ value: Double) {
+            first = min(first ?? value, value)
+            last = max(last ?? value, value)
+        }
+        for element in stream {
+            guard let item = element as? [String: Any] else { continue }
+            if let time = (item["time"] as? NSNumber)?.doubleValue { record(time) }
+            if let time0 = (item["time0"] as? NSNumber)?.doubleValue {
+                record(time0)
+                let gaps = (item["dt"] as? [Any])?.reduce(0.0) { $0 + ((($1 as? NSNumber)?.doubleValue) ?? 0) } ?? 0
+                record(time0 + gaps)
+            }
+        }
+        guard let first, let last else { return nil }
+        return RequestTiming(requestStartMs: start, firstTokenMs: first, endMs: last)
     }
 
     /// DSH 的 `tokenUsageValue` 要求 `inputTokens` / `outputTokens` 必填。

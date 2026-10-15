@@ -348,13 +348,14 @@ nonisolated struct UsageMessageLedgerPayload: Sendable, Codable, Equatable {
 
 /// 各来源的统计规则版本。修改解析、去重或归属规则，且会改变已采集的历史数字时，把对应来源加 1：
 /// 用户升级后自动按新规则重建一次历史（日志已删除的对话保留原用量）。只影响新记录的改动不用加。
+/// v2（Claude / Codex / OpenCode / DSH）：新增首字延迟与输出速度，重建一次给现存日志补上计时。
 nonisolated enum UsageStatsRules {
     static let versions: [UsageApp: Int] = [
-        .claude: 1,
-        .codex: 1,
+        .claude: 2,
+        .codex: 2,
         .pi: 1,
-        .opencode: 1,
-        .dsh: 1,
+        .opencode: 2,
+        .dsh: 2,
     ]
 
     static var persisted: [String: Int] {
@@ -554,6 +555,7 @@ nonisolated enum UsageRebuildMerge {
                 existing.cacheReadCostUSD += kept.cacheReadCostUSD
                 existing.cacheCreationCostUSD += kept.cacheCreationCostUSD
                 existing.hasUnpricedUsage = existing.hasUnpricedUsage || kept.hasUnpricedUsage
+                existing.timing.merge(kept.timing)
                 conversationBuckets[conversationKey] = existing
             } else {
                 conversationBuckets[conversationKey] = kept
@@ -567,6 +569,7 @@ nonisolated enum UsageRebuildMerge {
                 day.costUSD += kept.costUSD
                 day.requestCount += kept.requestCount
                 day.hasUnpricedUsage = day.hasUnpricedUsage || kept.hasUnpricedUsage
+                day.timing.merge(kept.timing)
                 dayBuckets[key] = day
             } else {
                 dayBuckets[key] = UsageBucket(
@@ -574,7 +577,7 @@ nonisolated enum UsageRebuildMerge {
                     inputTokens: kept.inputTokens, outputTokens: kept.outputTokens,
                     cacheReadTokens: kept.cacheReadTokens, cacheCreationTokens: kept.cacheCreationTokens,
                     costUSD: kept.costUSD, requestCount: kept.requestCount,
-                    hasUnpricedUsage: kept.hasUnpricedUsage
+                    hasUnpricedUsage: kept.hasUnpricedUsage, timing: kept.timing
                 )
             }
         }

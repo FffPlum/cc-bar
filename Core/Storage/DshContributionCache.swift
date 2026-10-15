@@ -19,6 +19,8 @@ nonisolated struct DshContributionBucket: Sendable, Codable, Equatable {
     var hasUnpricedUsage: Bool
     var firstAt: Date
     var lastAt: Date
+    /// 首字延迟与输出速度累计；旧版缓存没有这个键，读出为 nil。
+    var timing: GenerationTiming?
 
     var costUSD: Decimal { costInput + costOutput + costCacheRead + costCacheCreation }
 }
@@ -59,7 +61,14 @@ nonisolated struct DshContribution: Sendable, Codable, Equatable {
                 usage[index].hasUnpricedUsage = usage[index].hasUnpricedUsage || entry.costBreakdown == nil
                 usage[index].firstAt = min(usage[index].firstAt, entry.timestamp)
                 usage[index].lastAt = max(usage[index].lastAt, entry.timestamp)
+                if entry.timing != nil {
+                    var timing = usage[index].timing ?? .zero
+                    timing.add(entry.timing, outputTokens: entry.outputTokens)
+                    usage[index].timing = timing
+                }
             } else {
+                var timing = GenerationTiming.zero
+                timing.add(entry.timing, outputTokens: entry.outputTokens)
                 usage.append(DshContributionBucket(
                     day: entry.day,
                     model: entry.model,
@@ -75,7 +84,8 @@ nonisolated struct DshContribution: Sendable, Codable, Equatable {
                     costCacheCreation: entry.costBreakdown?.cacheCreation ?? 0,
                     hasUnpricedUsage: entry.costBreakdown == nil,
                     firstAt: entry.timestamp,
-                    lastAt: entry.timestamp
+                    lastAt: entry.timestamp,
+                    timing: timing.isEmpty ? nil : timing
                 ))
             }
         }

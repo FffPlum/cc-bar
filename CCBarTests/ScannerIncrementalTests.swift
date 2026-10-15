@@ -566,6 +566,203 @@ final class ScannerIncrementalTests: XCTestCase {
         XCTAssertNotNil(filtered.newState[newer.path])
     }
 
+    // MARK: - 首字延迟与输出速度
+
+    private func writeLines(_ lines: [String], to url: URL) throws {
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func appendLines(_ lines: [String], to url: URL) throws {
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((lines.joined(separator: "\n") + "\n").utf8))
+    }
+
+    private func claudeUser(_ time: String, toolResult: Bool = false) -> String {
+        let content = toolResult ? #"[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]"# : #""hi""#
+        return #"{"type":"user","sessionId":"timing-session","timestamp":"2026-10-15T00:00:\#(time)Z","message":{"role":"user","content":\#(content)}}"#
+    }
+
+    private func claudeAssistant(_ time: String, id: String, block: String, output: Int, thinkingMs: Int? = nil) -> String {
+        let thinking = thinkingMs.map { #","thinkingDurationMs":\#($0)"# } ?? ""
+        return #"{"type":"assistant","sessionId":"timing-session","cwd":"/tmp/ccbar-fixture","timestamp":"2026-10-15T00:00:\#(time)Z"\#(thinking),"message":{"id":"\#(id)","model":"claude-opus-5-5","stop_reason":"tool_use","content":[{"type":"\#(block)"}],"usage":{"input_tokens":10,"output_tokens":\#(output),"speed":"standard"}}}"#
+    }
+
+    /// 首字 = thinking 块写入时间 − thinkingDurationMs；工具结果穿插在同一消息的块之间不算结束；
+    /// 读到末尾仍可能追加的消息、不以 thinking 开头的消息都不给计时。
+    func testClaudeTimingFromThinkingDuration() throws {
+        let projects = tempDir.appendingPathComponent("projects", isDirectory: true)
+        let container = projects.appendingPathComponent("timing", isDirectory: true)
+        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+        let file = container.appendingPathComponent("timing-session.jsonl")
+        try writeLines([
+            claudeUser("00.000"),
+            claudeAssistant("03.000", id: "m1", block: "thinking", output: 400, thinkingMs: 1000),
+            claudeUser("04.000", toolResult: true),
+            claudeAssistant("06.000", id: "m1", block: "tool_use", output: 400),
+            claudeUser("07.000", toolResult: true),
+            claudeAssistant("09.000", id: "m2", block: "text", output: 150),
+            claudeUser("10.000", toolResult: true),
+            claudeAssistant("13.000", id: "m3", block: "thinking", output: 200, thinkingMs: 500),
+        ], to: file)
+        let index = ConversationTitleIndex.ClaudeIndex(titles: [:], projects: [:])
+
+        let result = ClaudeJSONLScanner.scan(previous: [:], seenMessageIds: [], root: projects, conversationIndex: index)
+        let byOutput = Dictionary(uniqueKeysWithValues: result.entries.map { ($0.outputTokens, $0) })
+        XCTAssertEqual(byOutput[400]?.timing, RequestTiming(firstTokenMs: 2000, generationMs: 4000))
+        XCTAssertNil(byOutput[150]?.timing, "以文本开头的消息没有首字时间")
+        XCTAssertNil(byOutput[200]?.timing, "文件末尾的消息可能还在追加，不给计时")
+        XCTAssertEqual(result.newState[file.path]?.claudeLastInputMs, 1_792_022_410_000)
+    }
+
+    /// 请求发出时间跨增量扫描续接：上一轮只读到提示词，这一轮才读到回复。
+    func testClaudeTimingCarriesRequestStartAcrossScans() throws {
+        let projects = tempDir.appendingPathComponent("projects", isDirectory: true)
+        let container = projects.appendingPathComponent("timing", isDirectory: true)
+        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+        let file = container.appendingPathComponent("timing-session.jsonl")
+        try writeLines([claudeUser("00.000")], to: file)
+        let index = ConversationTitleIndex.ClaudeIndex(titles: [:], projects: [:])
+        let first = ClaudeJSONLScanner.scan(previous: [:], seenMessageIds: [], root: projects, conversationIndex: index)
+        XCTAssertTrue(first.entries.isEmpty)
+
+        try appendLines([
+            claudeAssistant("02.500", id: "m1", block: "thinking", output: 300, thinkingMs: 1500),
+            #"{"type":"system","subtype":"stop_hook_summary","sessionId":"timing-session","timestamp":"2026-10-15T00:00:04.000Z"}"#,
+        ], to: file)
+        let second = ClaudeJSONLScanner.scan(
+            previous: first.newState, seenMessageIds: first.newSeenIds, root: projects, conversationIndex: index
+        )
+        XCTAssertEqual(second.entries.first?.timing, RequestTiming(firstTokenMs: 1000, generationMs: 1500))
+    }
+
+    /// 一轮的最终回答后面常常没有别的行：文件闲置够久时末尾的消息也给计时。
+    func testClaudeTimingClosesLastMessageWhenFileIdle() throws {
+        let projects = tempDir.appendingPathComponent("projects", isDirectory: true)
+        let container = projects.appendingPathComponent("timing", isDirectory: true)
+        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+        let file = container.appendingPathComponent("timing-session.jsonl")
+        try writeLines([
+            claudeUser("00.000"),
+            claudeAssistant("03.000", id: "m1", block: "thinking", output: 300, thinkingMs: 1000),
+            claudeAssistant("06.000", id: "m1", block: "text", output: 300),
+        ], to: file)
+        let idleSince = Date().addingTimeInterval(-(ClaudeJSONLScanner.TimingTracker.idleCloseSeconds + 5))
+        try FileManager.default.setAttributes([.modificationDate: idleSince], ofItemAtPath: file.path)
+        let index = ConversationTitleIndex.ClaudeIndex(titles: [:], projects: [:])
+
+        let result = ClaudeJSONLScanner.scan(previous: [:], seenMessageIds: [], root: projects, conversationIndex: index)
+        XCTAssertEqual(result.entries.first?.timing, RequestTiming(firstTokenMs: 2000, generationMs: 4000))
+    }
+
+    private func codexItem(_ ms: Int, type: String, started: Int, loggedMs: Int? = nil) -> String {
+        let logged = Date(timeIntervalSince1970: Double(loggedMs ?? ms) / 1000)
+        let stamp = ISO8601DateFormatter.ccbarTestFormatter.string(from: logged)
+        return #"{"timestamp":"\#(stamp)","type":"event_msg","payload":{"type":"item_completed","item":{"type":"\#(type)"},"started_at_ms":\#(started),"completed_at_ms":\#(ms)}}"#
+    }
+
+    private func codexUsageRecord(_ ms: Int, output: Int) -> String {
+        let stamp = ISO8601DateFormatter.ccbarTestFormatter.string(from: Date(timeIntervalSince1970: Double(ms) / 1000))
+        return #"{"timestamp":"\#(stamp)","type":"token_usage_record","payload":{"usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":\#(output)}}}"#
+    }
+
+    private func codexTokenCount(_ ms: Int, output: Int, total: Int) -> String {
+        let stamp = ISO8601DateFormatter.ccbarTestFormatter.string(from: Date(timeIntervalSince1970: Double(ms) / 1000))
+        return #"{"timestamp":"\#(stamp)","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":\#(total),"cached_input_tokens":0,"output_tokens":\#(total),"total_tokens":\#(total * 2)},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":\#(output),"total_tokens":\#(100 + output)}}}}"#
+    }
+
+    /// 请求发出 = 上一个非模型条目完成；首字 = 第一个模型条目开始；结束 = token_usage_record。
+    /// 外层 timestamp 与条目毫秒相差过大（fork 重放改写过时间）的条目不参与计时。
+    func testCodexTimingPairsUsageRecordWithTokenCount() async throws {
+        let sessions = tempDir.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        let id = "33333333-3333-4333-8333-333333333333"
+        let t0 = 1_792_022_400_000
+        let file = sessions.appendingPathComponent("rollout-2026-10-15T00-00-00-\(id).jsonl")
+        try writeLines([
+            #"{"timestamp":"2026-10-15T00:00:00Z","type":"session_meta","payload":{"id":"\#(id)","cwd":"/tmp/ccbar-fixture"}}"#,
+            #"{"timestamp":"2026-10-15T00:00:00Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}"#,
+            codexItem(t0, type: "UserMessage", started: t0),
+            codexItem(t0 + 5_000, type: "Reasoning", started: t0 + 2_000),
+            codexItem(t0 + 5_500, type: "AgentMessage", started: t0 + 5_000),
+            codexUsageRecord(t0 + 6_000, output: 300),
+            codexItem(t0 + 9_000, type: "CommandExecution", started: t0 + 6_500),
+            codexTokenCount(t0 + 9_001, output: 300, total: 1_000),
+            codexItem(t0 + 12_000, type: "Reasoning", started: t0 + 10_000, loggedMs: t0 + 60_000),
+            codexUsageRecord(t0 + 13_000, output: 200),
+            codexTokenCount(t0 + 13_001, output: 200, total: 2_000),
+        ], to: file)
+
+        let result = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+        XCTAssertEqual(result.entries.count, 2)
+        let byOutput = Dictionary(uniqueKeysWithValues: result.entries.map { ($0.outputTokens, $0) })
+        XCTAssertEqual(byOutput[300]?.timing, RequestTiming(firstTokenMs: 2000, generationMs: 4000))
+        XCTAssertNil(byOutput[200]?.timing, "时间被改写过的条目不参与计时")
+        XCTAssertNil(result.newState[id]?.codexTiming?.pending)
+    }
+
+    /// 中断的请求等不到 token_usage_record：它的首字时间不能串到下一回合的第一次请求上。
+    func testCodexTimingDiscardsAbortedTurn() async throws {
+        let sessions = tempDir.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        let id = "44444444-4444-4444-8444-444444444444"
+        let t0 = 1_792_022_400_000
+        let stamp = { (ms: Int) in ISO8601DateFormatter.ccbarTestFormatter.string(from: Date(timeIntervalSince1970: Double(ms) / 1000)) }
+        let file = sessions.appendingPathComponent("rollout-2026-10-15T00-00-00-\(id).jsonl")
+        try writeLines([
+            #"{"timestamp":"2026-10-15T00:00:00Z","type":"session_meta","payload":{"id":"\#(id)","cwd":"/tmp/ccbar-fixture"}}"#,
+            #"{"timestamp":"2026-10-15T00:00:00Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}"#,
+            codexItem(t0, type: "UserMessage", started: t0),
+            codexItem(t0 + 3_000, type: "Reasoning", started: t0 + 1_000),
+            codexTokenCount(t0 + 3_500, output: 50, total: 1_000),
+            #"{"timestamp":"\#(stamp(t0 + 4_000))","type":"event_msg","payload":{"type":"turn_aborted"}}"#,
+            #"{"timestamp":"\#(stamp(t0 + 600_000))","type":"event_msg","payload":{"type":"task_started"}}"#,
+            codexItem(t0 + 600_000, type: "UserMessage", started: t0 + 600_000),
+            codexItem(t0 + 605_000, type: "Reasoning", started: t0 + 602_000),
+            codexUsageRecord(t0 + 606_000, output: 300),
+            codexTokenCount(t0 + 606_001, output: 300, total: 2_000),
+        ], to: file)
+
+        let result = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+        let byOutput = Dictionary(uniqueKeysWithValues: result.entries.map { ($0.outputTokens, $0) })
+        XCTAssertNil(byOutput[50]?.timing, "中断的请求没有 token_usage_record，不计时")
+        XCTAssertEqual(byOutput[300]?.timing, RequestTiming(firstTokenMs: 2000, generationMs: 4000))
+    }
+
+    func testGenerationTimingThresholdsAndAverages() {
+        var timing = GenerationTiming.zero
+        timing.add(RequestTiming(firstTokenMs: 1000, generationMs: 2000), outputTokens: 200)
+        timing.add(RequestTiming(firstTokenMs: 3000, generationMs: 400), outputTokens: 500)
+        timing.add(RequestTiming(firstTokenMs: 2000, generationMs: 1000), outputTokens: 50)
+        timing.add(nil, outputTokens: 1000)
+        XCTAssertEqual(timing.firstTokenCount, 3, "首字延迟计入所有有首字时间的请求")
+        XCTAssertEqual(timing.averageFirstTokenSeconds, 2.0)
+        XCTAssertEqual(timing.timedOutputTokens, 200, "生成不足 0.5 秒或输出不足 100 tokens 的请求不计速度")
+        XCTAssertEqual(timing.outputTokensPerSecond, 100)
+        XCTAssertNil(GenerationTiming.zero.outputTokensPerSecond)
+
+        XCTAssertNil(RequestTiming(requestStartMs: 1000, firstTokenMs: 900, endMs: 2000), "首字早于请求发出")
+        XCTAssertNil(RequestTiming(requestStartMs: 0, firstTokenMs: 1000, endMs: 500), "结束早于首字")
+        XCTAssertNil(RequestTiming(requestStartMs: 0, firstTokenMs: 11 * 60 * 1000, endMs: 11 * 60 * 1000))
+    }
+
+    /// 没有计时的桶不写 timing 键；旧快照没有这个键也能读出。
+    func testTimingCodableIsOptional() throws {
+        var bucket = UsageBucket(
+            app: .claude, model: "claude-opus-5-5", speed: .standard, day: Date(timeIntervalSince1970: 0),
+            inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheCreationTokens: 0,
+            costUSD: 0, requestCount: 1, hasUnpricedUsage: false
+        )
+        let plain = try JSONEncoder().encode(bucket)
+        XCTAssertFalse(String(decoding: plain, as: UTF8.self).contains("timing"))
+        XCTAssertEqual(try JSONDecoder().decode(UsageBucket.self, from: plain).timing, .zero)
+
+        bucket.timing.add(RequestTiming(firstTokenMs: 1500, generationMs: 3000), outputTokens: 300)
+        let timed = try JSONDecoder().decode(UsageBucket.self, from: JSONEncoder().encode(bucket))
+        XCTAssertEqual(timed.timing, bucket.timing)
+    }
+
     func testUsageLogPathMatcherIgnoresUnrelatedWrites() {
         let home = URL(fileURLWithPath: "/Users/tester", isDirectory: true)
         let roots = UsageScanRoots(
@@ -599,4 +796,12 @@ final class ScannerIncrementalTests: XCTestCase {
         ), "事件被合并时无法确定路径，按有变化处理")
         XCTAssertTrue(matcher.shouldMark(paths: [unrelated], flags: []), "路径与标志数量不一致时保守放行")
     }
+}
+
+private extension ISO8601DateFormatter {
+    static let ccbarTestFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 }

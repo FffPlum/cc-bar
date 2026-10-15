@@ -99,8 +99,11 @@ final class ConversationAggregator {
                 bucket.cacheReadCostUSD += breakdown?.cacheRead ?? 0
                 bucket.cacheCreationCostUSD += breakdown?.cacheCreation ?? 0
                 bucket.hasUnpricedUsage = bucket.hasUnpricedUsage || breakdown == nil
+                bucket.timing.add(entry.timing, outputTokens: entry.outputTokens)
                 buckets[key] = bucket
             } else {
+                var timing = GenerationTiming.zero
+                timing.add(entry.timing, outputTokens: entry.outputTokens)
                 buckets[key] = ConversationUsageBucket(
                     conversationKey: entry.conversationKey,
                     app: entry.app,
@@ -119,7 +122,8 @@ final class ConversationAggregator {
                     outputCostUSD: breakdown?.output ?? 0,
                     cacheReadCostUSD: breakdown?.cacheRead ?? 0,
                     cacheCreationCostUSD: breakdown?.cacheCreation ?? 0,
-                    hasUnpricedUsage: breakdown == nil
+                    hasUnpricedUsage: breakdown == nil,
+                    timing: timing
                 )
             }
 
@@ -708,6 +712,7 @@ final class ConversationAggregator {
             totals.costUSD += value.costUSD
             totals.requestCount += value.requestCount
             totals.hasUnpricedUsage = totals.hasUnpricedUsage || value.hasUnpricedUsage
+            totals.timing.merge(value.timing)
             costs.input += value.inputCostUSD
             costs.output += value.outputCostUSD
             costs.cacheRead += value.cacheReadCostUSD

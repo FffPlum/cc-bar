@@ -643,4 +643,47 @@ final class OpencodeScannerTests: XCTestCase {
         XCTAssertEqual(result.entries.count, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: dbURL.path + "-wal"))
     }
+
+    // MARK: - 首字延迟与输出速度
+
+    func testV2TimingUsesFirstContentAndStreamEnd() {
+        let streamed: [String: Any] = [
+            "time": ["created": 1_000, "streamed": 6_000, "completed": 9_000],
+            "content": [
+                ["type": "reasoning", "time": ["created": 3_000, "completed": 4_000]],
+                ["type": "tool", "time": ["created": 5_000, "completed": 9_000]],
+            ],
+        ]
+        XCTAssertEqual(OpencodeScanner.v2Timing(streamed), RequestTiming(firstTokenMs: 2_000, generationMs: 3_000))
+
+        var noStreamed = streamed
+        noStreamed["time"] = ["created": 1_000, "completed": 9_000]
+        XCTAssertNil(OpencodeScanner.v2Timing(noStreamed), "含工具调用且没有 streamed 时 completed 包含工具执行时间")
+
+        let textOnly: [String: Any] = [
+            "time": ["created": 1_000, "completed": 4_000],
+            "content": [["type": "reasoning", "time": ["created": 2_000]], ["type": "text", "text": "hi"]],
+        ]
+        XCTAssertEqual(OpencodeScanner.v2Timing(textOnly), RequestTiming(firstTokenMs: 1_000, generationMs: 2_000))
+
+        let textFirst: [String: Any] = [
+            "time": ["created": 1_000, "completed": 4_000],
+            "content": [["type": "text", "text": "hi"]],
+        ]
+        XCTAssertNil(OpencodeScanner.v2Timing(textFirst), "文本项没有时间，无法确定首字")
+    }
+
+    func testLegacyTimingOnlyForSingleStepWithoutTools() {
+        let json: [String: Any] = ["time": ["created": 1_000, "completed": 5_000]]
+        let reasoning = OpencodeScanner.LegacyPart(type: "reasoning", startMs: 2_500)
+        let step = OpencodeScanner.LegacyPart(type: "step-start", startMs: nil)
+        let finish = OpencodeScanner.LegacyPart(type: "step-finish", startMs: nil)
+        XCTAssertEqual(
+            OpencodeScanner.legacyTiming(json, parts: [step, reasoning, finish]),
+            RequestTiming(firstTokenMs: 1_500, generationMs: 2_500)
+        )
+        XCTAssertNil(OpencodeScanner.legacyTiming(json, parts: [step, reasoning, .init(type: "tool", startMs: nil), finish]))
+        XCTAssertNil(OpencodeScanner.legacyTiming(json, parts: [step, reasoning, finish, step, reasoning, finish]))
+        XCTAssertNil(OpencodeScanner.legacyTiming(json, parts: []))
+    }
 }

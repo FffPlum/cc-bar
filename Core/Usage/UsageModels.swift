@@ -13,6 +13,15 @@ nonisolated enum UsageApp: String, Sendable, Codable, Hashable, CaseIterable {
     /// 当前本地扫描器实际支持的数据源。Cursor 虽属于 `UsageApp`，但不在此集合中。
     static let localApps: [UsageApp] = [.codex, .claude, .pi, .opencode, .dsh]
 
+    /// 原生日志能定位到第一个 token 的服务。Pi 日志只有请求开始与结束时间，Cursor 只有远端计量，
+    /// 两者不显示首字延迟和输出速度。
+    var supportsGenerationTiming: Bool {
+        switch self {
+        case .claude, .codex, .opencode, .dsh: return true
+        case .pi, .cursor: return false
+        }
+    }
+
     /// 按 `preferred` 顺序排列 `present` 中的服务；未覆盖的按 `allCases` 默认序追加。
     static func displayOrdered(
         _ present: some Sequence<UsageApp>,
@@ -76,6 +85,79 @@ nonisolated struct UsageEntry: Sendable, Equatable {
     /// 有价时必须与 `costBreakdown?.total` 使用同一个最终费用。
     var costUSD: Decimal?
     var costBreakdown: CostBreakdown?
+    /// 原生日志能定位到第一个 token 时才有；`nil` 的请求不计入首字延迟和输出速度。
+    var timing: RequestTiming? = nil
+}
+
+/// 单次请求的首字延迟与首字之后的生成时长（毫秒）。
+nonisolated struct RequestTiming: Sendable, Equatable, Codable {
+    var firstTokenMs: Int
+    var generationMs: Int
+
+    /// 超出上限视为时间戳异常（例如重放日志改写了时间），不计入。
+    static let maxFirstTokenMs: Double = 10 * 60 * 1000
+    static let maxGenerationMs: Double = 60 * 60 * 1000
+
+    init(firstTokenMs: Int, generationMs: Int) {
+        self.firstTokenMs = firstTokenMs
+        self.generationMs = generationMs
+    }
+
+    /// 三个时间点均为 Unix 毫秒；顺序颠倒或超出上限时返回 nil。
+    init?(requestStartMs: Double, firstTokenMs: Double, endMs: Double) {
+        let firstToken = firstTokenMs - requestStartMs
+        let generation = endMs - firstTokenMs
+        guard firstToken >= 0, generation >= 0,
+              firstToken <= Self.maxFirstTokenMs, generation <= Self.maxGenerationMs else { return nil }
+        self.firstTokenMs = Int(firstToken.rounded())
+        self.generationMs = Int(generation.rounded())
+    }
+}
+
+/// 首字延迟与输出速度的累计量。只累计能拿到首字时间的请求，两项都按总量相除得到加权平均。
+nonisolated struct GenerationTiming: Sendable, Equatable, Codable {
+    /// 计入首字延迟的请求数与延迟总和（毫秒）。
+    var firstTokenCount = 0
+    var firstTokenMs = 0
+    /// 计入输出速度的输出 tokens 与首字之后的生成时长（毫秒）。
+    var timedOutputTokens = 0
+    var generationMs = 0
+
+    static let zero = GenerationTiming()
+    /// 输出太短或生成太快时计时精度不够：只计首字延迟，不计输出速度。
+    static let minimumSpeedOutputTokens = 100
+    static let minimumSpeedGenerationMs = 500
+
+    var isEmpty: Bool { firstTokenCount == 0 && timedOutputTokens == 0 }
+
+    mutating func add(_ timing: RequestTiming?, outputTokens: Int) {
+        guard let timing else { return }
+        firstTokenCount += 1
+        firstTokenMs += timing.firstTokenMs
+        if outputTokens >= Self.minimumSpeedOutputTokens, timing.generationMs >= Self.minimumSpeedGenerationMs {
+            timedOutputTokens += outputTokens
+            generationMs += timing.generationMs
+        }
+    }
+
+    mutating func merge(_ other: GenerationTiming) {
+        firstTokenCount += other.firstTokenCount
+        firstTokenMs += other.firstTokenMs
+        timedOutputTokens += other.timedOutputTokens
+        generationMs += other.generationMs
+    }
+
+    /// 平均首字延迟（秒）；没有可计请求时为 nil。
+    var averageFirstTokenSeconds: Double? {
+        guard firstTokenCount > 0 else { return nil }
+        return Double(firstTokenMs) / Double(firstTokenCount) / 1000
+    }
+
+    /// 平均输出速度（tokens/s）；没有可计请求时为 nil。
+    var outputTokensPerSecond: Double? {
+        guard generationMs > 0, timedOutputTokens > 0 else { return nil }
+        return Double(timedOutputTokens) * 1000 / Double(generationMs)
+    }
 }
 
 /// (day, app, model, speed) 聚合桶；UsageAggregator 内存表的值。
@@ -94,6 +176,7 @@ nonisolated struct UsageBucket: Sendable, Equatable, Codable {
     /// Cursor 远端事件缺少/异常 `chargedCents` 时为 true。
     /// 与本地模型价格缺失（`hasUnpricedUsage`）语义不同，不能互相替代。
     var costIncomplete: Bool = false
+    var timing: GenerationTiming = .zero
 }
 
 nonisolated struct UsageTotals: Sendable, Equatable {
@@ -106,6 +189,7 @@ nonisolated struct UsageTotals: Sendable, Equatable {
     var hasUnpricedUsage = false
     /// Cursor 服务端计量字段是否不完整，仅供诊断；界面仍显示已知 `chargedCents` 合计。
     var costIncomplete = false
+    var timing = GenerationTiming.zero
 
     static let zero = UsageTotals()
 
@@ -118,6 +202,7 @@ nonisolated struct UsageTotals: Sendable, Equatable {
         requestCount += bucket.requestCount
         hasUnpricedUsage = hasUnpricedUsage || bucket.hasUnpricedUsage
         costIncomplete = costIncomplete || bucket.costIncomplete
+        timing.merge(bucket.timing)
     }
 
     mutating func add(_ other: UsageTotals) {
@@ -129,6 +214,7 @@ nonisolated struct UsageTotals: Sendable, Equatable {
         requestCount += other.requestCount
         hasUnpricedUsage = hasUnpricedUsage || other.hasUnpricedUsage
         costIncomplete = costIncomplete || other.costIncomplete
+        timing.merge(other.timing)
     }
 
     /// 含缓存的输入侧 token(input + cache_read + cache_creation)。与 cc-switch / ccusage 的 input 口径一致。
@@ -288,7 +374,7 @@ extension Decimal {
 extension UsageBucket {
     nonisolated enum CodingKeys: String, CodingKey {
         case app, model, speed, day, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUSD, requestCount
-        case hasUnpricedUsage, costIncomplete
+        case hasUnpricedUsage, costIncomplete, timing
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -306,6 +392,7 @@ extension UsageBucket {
         self.requestCount = try c.decodeIfPresent(Int.self, forKey: .requestCount) ?? 0
         self.hasUnpricedUsage = try c.decode(Bool.self, forKey: .hasUnpricedUsage)
         self.costIncomplete = try c.decodeIfPresent(Bool.self, forKey: .costIncomplete) ?? false
+        self.timing = try c.decodeIfPresent(GenerationTiming.self, forKey: .timing) ?? .zero
     }
 
     nonisolated func encode(to encoder: Encoder) throws {
@@ -322,6 +409,8 @@ extension UsageBucket {
         try c.encode(requestCount, forKey: .requestCount)
         try c.encode(hasUnpricedUsage, forKey: .hasUnpricedUsage)
         try c.encode(costIncomplete, forKey: .costIncomplete)
+        // 没有计时数据的桶（Pi、Cursor、旧历史）不写这个键，不增加存储。
+        if !timing.isEmpty { try c.encode(timing, forKey: .timing) }
     }
 }
 

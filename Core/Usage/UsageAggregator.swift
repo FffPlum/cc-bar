@@ -57,8 +57,11 @@ final class UsageAggregator {
                 b.costUSD += e.costUSD ?? 0
                 b.requestCount += e.requestCount
                 b.hasUnpricedUsage = b.hasUnpricedUsage || e.costUSD == nil
+                b.timing.add(e.timing, outputTokens: e.outputTokens)
                 localBuckets[key] = b
             } else {
+                var timing = GenerationTiming.zero
+                timing.add(e.timing, outputTokens: e.outputTokens)
                 localBuckets[key] = UsageBucket(
                     app: e.app,
                     model: e.model,
@@ -70,7 +73,8 @@ final class UsageAggregator {
                     cacheCreationTokens: e.cacheCreationTokens,
                     costUSD: e.costUSD ?? 0,
                     requestCount: e.requestCount,
-                    hasUnpricedUsage: e.costUSD == nil
+                    hasUnpricedUsage: e.costUSD == nil,
+                    timing: timing
                 )
             }
         }

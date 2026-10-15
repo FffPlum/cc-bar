@@ -428,4 +428,38 @@ final class DshSessionScannerTests: XCTestCase {
         let updated = DshContributionStore.apply(scan: second, to: oldContributions).contributions
         XCTAssertEqual(updated["s"]?.usage.reduce(0) { $0 + $1.inputTokens }, 4)
     }
+
+    // MARK: - 首字延迟与输出速度
+
+    /// 请求发出 = `step/start`；首字 = stream 里最早的 chunk；结束 = 最晚的 chunk（含 `time0 + dt`）。
+    func testTimingComesFromStreamChunks() throws {
+        let base = DshTestFixtures.baseTime
+        var assistant = DshTestFixtures.assistant(time: base + 5_100, input: 100, output: 300)
+        var body = try XCTUnwrap(assistant["data"] as? [String: Any])
+        body["stream"] = [
+            ["type": "chunk", "time": base + 2_000, "chunk": ["type": "block-start", "index": 0]],
+            ["type": "text-chunks", "time0": base + 2_100, "index": 0, "dt": [100, 200], "texts": ["a", "b"]],
+            ["type": "chunk", "time": base + 5_000, "chunk": ["type": "finish"]],
+        ]
+        assistant["data"] = body
+        var bytes = Data()
+        bytes.append(DshTestFixtures.line(DshTestFixtures.session(id: "timed")))
+        bytes.append(DshTestFixtures.line(["type": "step/start", "time": base, "data": ["turn": 1, "step": 1]]))
+        bytes.append(DshTestFixtures.line(assistant))
+        try logs.write(project: "p", session: "timed", file: "session.jsonl", bytes: bytes)
+
+        let result = scan()
+        XCTAssertEqual(result.entries.first?.timing, RequestTiming(firstTokenMs: 2_000, generationMs: 3_000))
+        XCTAssertEqual(result.newState.values.first?.dshRequestStartMs, base)
+    }
+
+    /// 没有 stream 或没有请求发出时间时不计时，用量照常入账。
+    func testTimingRequiresStreamAndRequestStart() {
+        let base = DshTestFixtures.baseTime
+        XCTAssertNil(DshSessionScanner.requestTiming(start: base, body: ["usage": ["inputTokens": 1, "outputTokens": 1]]))
+        XCTAssertEqual(
+            DshSessionScanner.requestTiming(start: base, body: ["stream": [["type": "chunk", "time": base + 1_500]]]),
+            RequestTiming(firstTokenMs: 1_500, generationMs: 0)
+        )
+    }
 }

@@ -135,15 +135,18 @@ enum ClaudeJSONLScanner {
             if let fileConversationID, let fileFallbackTitle {
                 fallbackTitles[fileConversationID] = fileFallbackTitle
             }
+            var timingTracker = TimingTracker(lastInputMs: state.claudeLastInputMs)
             // 按批流式解析：单文件不再把整份内容和全部行同时读进内存。
             let outcome = JSONLLineReader.streamLines(url: url, fromOffset: state.offset) { batch in
                 for line in batch {
                     linesParsed += 1
-                    if let title = parseUserTitle(line) {
+                    guard let root = parseRoot(line) else { continue }
+                    timingTracker.observe(root)
+                    if let title = parseUserTitle(root) {
                         fallbackTitles[title.sessionID] = fallbackTitles[title.sessionID] ?? title.title
                         if fileFallbackTitle == nil { fileFallbackTitle = title.title }
                     }
-                    guard let parsed = parseAssistantLine(line) else { continue }
+                    guard let parsed = parseAssistant(root) else { continue }
                     fileConversationID = parsed.sessionID
                     if fileCwd.isEmpty || (fileIsSidechain == true && !parsed.isSidechain) {
                         fileCwd = parsed.cwd
@@ -199,6 +202,11 @@ enum ClaudeJSONLScanner {
                 failedFileCount += 1
                 continue
             }
+            // 文件已有一段时间没再写入，末尾的消息不会再追加：一轮对话的最终回答后面常常
+            // 没有别的行，不在这里结束它就永远拿不到计时（入账后 message.id 已进 seen）。
+            if Date().timeIntervalSince1970 - mtime >= TimingTracker.idleCloseSeconds {
+                timingTracker.close()
+            }
 
             for (id, p) in candidates {
                 // 流式中间行可能暂时没有 speed / stop_reason。此时既不能入账，也不能把
@@ -230,7 +238,8 @@ enum ClaudeJSONLScanner {
                     cacheReadTokens: p.cacheReadTokens,
                     cacheCreationTokens: p.cacheCreationTokens,
                     costUSD: cost?.total,
-                    costBreakdown: cost
+                    costBreakdown: cost,
+                    timing: timingTracker.timing(for: id)
                 ))
                 // advisor 与主调用同属一条 message.id，随主调用只入账一次；不算作独立请求。
                 for advisor in p.advisorUsages {
@@ -289,6 +298,7 @@ enum ClaudeJSONLScanner {
             state.conversationGitBranch = fileGitBranch
             state.conversationIsSidechain = fileIsSidechain
             state.fallbackTitle = fileFallbackTitle
+            state.claudeLastInputMs = timingTracker.lastInputMs
             newState[path] = state
         }
 
@@ -361,6 +371,85 @@ enum ClaudeJSONLScanner {
         var oneHourTokens: Int
     }
 
+    /// 按文件内的行序拼出每条 assistant 消息的计时，只用 Claude Code 自己写入的字段：
+    /// - 请求发出：消息第一行之前最近一条 user 行（提示词或工具结果）的时间；
+    /// - 首字：thinking 块的写入时间减去 `thinkingDurationMs`，不以 thinking 开头的消息没有首字时间；
+    /// - 结束：该消息最后一个内容块的写入时间。
+    /// 消息之后出现了别的 assistant 消息、新的提示词或 system 行才算结束；读到末尾的消息在文件
+    /// 已闲置 `idleCloseSeconds` 时也算结束，否则可能还在追加，不给计时，避免拿半截消息算出偏高的速度。
+    nonisolated struct TimingTracker {
+        /// 同一条消息相邻内容块的写入间隔本机实测 p90 约 8.5 秒、最长约 24 秒，留足余量。
+        static let idleCloseSeconds: TimeInterval = 60
+
+        private(set) var lastInputMs: Double?
+        private var drafts: [String: Draft] = [:]
+        private var openMessageID: String?
+
+        private struct Draft {
+            var requestStartMs: Double?
+            var firstTokenMs: Double?
+            var endMs: Double
+            var closed = false
+        }
+
+        init(lastInputMs: Double?) {
+            self.lastInputMs = lastInputMs
+        }
+
+        mutating func observe(_ root: [String: Any]) {
+            guard let type = root["type"] as? String,
+                  type == "user" || type == "assistant" || type == "system",
+                  let ms = (root["timestamp"] as? String)
+                    .flatMap({ JSONLTimestamp.parse($0) })
+                    .map({ $0.timeIntervalSince1970 * 1000 })
+            else { return }
+            switch type {
+            case "user":
+                // 工具边生成边执行时，工具结果会穿插在同一条消息的内容块之间，不代表消息结束。
+                if !Self.isToolResult(root) { close() }
+                lastInputMs = ms
+            case "system":
+                close()
+                // 请求失败重试时无法确定重试请求的发出时间，下一条消息不计时。
+                if (root["subtype"] as? String) == "api_error" { lastInputMs = nil }
+            default:
+                guard let message = root["message"] as? [String: Any],
+                      let id = message["id"] as? String else { return }
+                if openMessageID != id {
+                    close()
+                    openMessageID = id
+                }
+                var draft = drafts[id] ?? Draft(requestStartMs: lastInputMs, endMs: ms)
+                draft.endMs = max(draft.endMs, ms)
+                if let thinkingMs = (root["thinkingDurationMs"] as? NSNumber)?.doubleValue,
+                   let content = message["content"] as? [[String: Any]],
+                   (content.first?["type"] as? String) == "thinking" {
+                    let first = ms - thinkingMs
+                    draft.firstTokenMs = min(draft.firstTokenMs ?? first, first)
+                }
+                drafts[id] = draft
+            }
+        }
+
+        func timing(for messageID: String) -> RequestTiming? {
+            guard let draft = drafts[messageID], draft.closed,
+                  let start = draft.requestStartMs, let first = draft.firstTokenMs else { return nil }
+            return RequestTiming(requestStartMs: start, firstTokenMs: first, endMs: draft.endMs)
+        }
+
+        /// 结束当前正在拼的消息；扫描器在文件闲置时也会调用。
+        mutating func close() {
+            if let id = openMessageID { drafts[id]?.closed = true }
+            openMessageID = nil
+        }
+
+        private static func isToolResult(_ root: [String: Any]) -> Bool {
+            guard let message = root["message"] as? [String: Any],
+                  let content = message["content"] as? [[String: Any]] else { return false }
+            return content.contains { ($0["type"] as? String) == "tool_result" }
+        }
+    }
+
     private struct ProjectCandidate: Equatable {
         var path: String
         var isSidechain: Bool
@@ -368,8 +457,16 @@ enum ClaudeJSONLScanner {
     }
 
     nonisolated static func parseAssistantLine(_ line: String) -> ParsedAssistant? {
+        parseRoot(line).flatMap(parseAssistant)
+    }
+
+    /// 每行只做一次 JSON 解析，标题、用量、计时共用同一个对象。
+    private nonisolated static func parseRoot(_ line: String) -> [String: Any]? {
         guard let data = line.data(using: .utf8) else { return nil }
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    nonisolated static func parseAssistant(_ root: [String: Any]) -> ParsedAssistant? {
         guard (root["type"] as? String) == "assistant" else { return nil }
         guard let sessionID = root["sessionId"] as? String else { return nil }
         guard let message = root["message"] as? [String: Any] else { return nil }
@@ -480,10 +577,8 @@ enum ClaudeJSONLScanner {
         parsed.stopReason != nil
     }
 
-    private nonisolated static func parseUserTitle(_ line: String) -> (sessionID: String, title: String)? {
-        guard let data = line.data(using: .utf8),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              (root["type"] as? String) == "user",
+    private nonisolated static func parseUserTitle(_ root: [String: Any]) -> (sessionID: String, title: String)? {
+        guard (root["type"] as? String) == "user",
               (root["isSidechain"] as? Bool) != true,
               let sessionID = root["sessionId"] as? String,
               let message = root["message"] as? [String: Any],

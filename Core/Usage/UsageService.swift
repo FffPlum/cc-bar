@@ -2661,6 +2661,7 @@ final class UsageService {
                 dayBucket.costUSD += bucket.costUSD
                 dayBucket.requestCount += bucket.requestCount
                 dayBucket.hasUnpricedUsage = dayBucket.hasUnpricedUsage || bucket.hasUnpricedUsage
+                dayBucket.timing.merge(bucket.timing)
                 dayBuckets[key] = dayBucket
             } else {
                 dayBuckets[key] = UsageBucket(
@@ -2668,7 +2669,7 @@ final class UsageService {
                     inputTokens: bucket.inputTokens, outputTokens: bucket.outputTokens,
                     cacheReadTokens: bucket.cacheReadTokens, cacheCreationTokens: bucket.cacheCreationTokens,
                     costUSD: bucket.costUSD, requestCount: bucket.requestCount,
-                    hasUnpricedUsage: bucket.hasUnpricedUsage
+                    hasUnpricedUsage: bucket.hasUnpricedUsage, timing: bucket.timing
                 )
             }
         }

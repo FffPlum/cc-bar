@@ -39,6 +39,28 @@ nonisolated struct ScanFileState: Sendable, Equatable, Codable {
     var dshLastTurn: Int?
     var dshLastStep: Int?
     var dshLastSlotOpen: Bool?
+    /// DSH 用：最近一次 `step/start` 或 `llm/retry-started` 的时间（Unix 毫秒），作为下一次请求的发出时间。
+    var dshRequestStartMs: Double?
+    /// Claude 用：最近一条 user 行（提示词或工具结果）的时间（Unix 毫秒），作为下一次请求的发出时间。
+    var claudeLastInputMs: Double?
+    /// Codex 用：首字延迟与生成时长的跨批次计时状态（见 `CodexTimingState`）。
+    var codexTiming: CodexTimingState?
+}
+
+/// Codex 一次请求的计时由前后几条记录拼出：输入完成 → 第一个模型条目开始 → `token_usage_record`
+/// → `token_count`。中间隔着工具执行，可能跨两轮增量扫描，因此持久化这几个时间点。
+nonisolated struct CodexTimingState: Sendable, Equatable, Codable {
+    /// 最近一个非模型条目（用户消息、工具调用等）完成的时间，作为下一次请求的发出时间。
+    var requestStartMs: Double?
+    /// 本次请求第一个模型条目（Reasoning / AgentMessage）开始的时间。
+    var firstTokenMs: Double?
+    /// 已由 `token_usage_record` 结算、等待对应 `token_count` 入账的计时与输出 tokens。
+    var pending: RequestTiming?
+    var pendingOutputTokens: Int?
+
+    var isEmpty: Bool {
+        requestStartMs == nil && firstTokenMs == nil && pending == nil && pendingOutputTokens == nil
+    }
 }
 
 /// 文件身份。刻意不用 mtime：追加写会让 mtime 变化，但那是正常增量而不是替换。

@@ -110,12 +110,13 @@ nonisolated struct ConversationUsageBucket: Sendable, Codable, Equatable {
     var cacheReadCostUSD: Decimal
     var cacheCreationCostUSD: Decimal
     var hasUnpricedUsage: Bool
+    var timing: GenerationTiming
 
     enum CodingKeys: String, CodingKey {
         case conversationKey, app, day, model, speed, firstAt, lastAt
         case inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, requestCount
         case costUSD, inputCostUSD, outputCostUSD, cacheReadCostUSD, cacheCreationCostUSD
-        case hasUnpricedUsage
+        case hasUnpricedUsage, timing
     }
 
     init(
@@ -136,7 +137,8 @@ nonisolated struct ConversationUsageBucket: Sendable, Codable, Equatable {
         outputCostUSD: Decimal,
         cacheReadCostUSD: Decimal,
         cacheCreationCostUSD: Decimal,
-        hasUnpricedUsage: Bool
+        hasUnpricedUsage: Bool,
+        timing: GenerationTiming = .zero
     ) {
         self.conversationKey = conversationKey
         self.app = app
@@ -156,6 +158,7 @@ nonisolated struct ConversationUsageBucket: Sendable, Codable, Equatable {
         self.cacheReadCostUSD = cacheReadCostUSD
         self.cacheCreationCostUSD = cacheCreationCostUSD
         self.hasUnpricedUsage = hasUnpricedUsage
+        self.timing = timing
     }
 
     init(from decoder: Decoder) throws {
@@ -178,6 +181,7 @@ nonisolated struct ConversationUsageBucket: Sendable, Codable, Equatable {
         cacheReadCostUSD = Decimal(plainString: try c.decode(String.self, forKey: .cacheReadCostUSD)) ?? 0
         cacheCreationCostUSD = Decimal(plainString: try c.decode(String.self, forKey: .cacheCreationCostUSD)) ?? 0
         hasUnpricedUsage = try c.decode(Bool.self, forKey: .hasUnpricedUsage)
+        timing = try c.decodeIfPresent(GenerationTiming.self, forKey: .timing) ?? .zero
     }
 
     func encode(to encoder: Encoder) throws {
@@ -200,6 +204,7 @@ nonisolated struct ConversationUsageBucket: Sendable, Codable, Equatable {
         try c.encode(cacheReadCostUSD.asPlainString, forKey: .cacheReadCostUSD)
         try c.encode(cacheCreationCostUSD.asPlainString, forKey: .cacheCreationCostUSD)
         try c.encode(hasUnpricedUsage, forKey: .hasUnpricedUsage)
+        if !timing.isEmpty { try c.encode(timing, forKey: .timing) }
     }
 }
 

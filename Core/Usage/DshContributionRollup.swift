@@ -70,6 +70,7 @@ nonisolated enum DshContributionRollup {
                     existing.costUSD += bucket.costUSD
                     existing.requestCount += bucket.requestCount
                     existing.hasUnpricedUsage = existing.hasUnpricedUsage || bucket.hasUnpricedUsage
+                    existing.timing.merge(bucket.timing ?? .zero)
                     dayBuckets[dayKey] = existing
                 } else {
                     dayBuckets[dayKey] = UsageBucket(
@@ -83,7 +84,8 @@ nonisolated enum DshContributionRollup {
                         cacheCreationTokens: bucket.cacheCreationTokens,
                         costUSD: bucket.costUSD,
                         requestCount: bucket.requestCount,
-                        hasUnpricedUsage: bucket.hasUnpricedUsage
+                        hasUnpricedUsage: bucket.hasUnpricedUsage,
+                        timing: bucket.timing ?? .zero
                     )
                 }
 
@@ -107,6 +109,7 @@ nonisolated enum DshContributionRollup {
                     existing.hasUnpricedUsage = existing.hasUnpricedUsage || bucket.hasUnpricedUsage
                     existing.firstAt = min(existing.firstAt, bucket.firstAt)
                     existing.lastAt = max(existing.lastAt, bucket.lastAt)
+                    existing.timing.merge(bucket.timing ?? .zero)
                     conversationBuckets[conversationKeyValue] = existing
                 } else {
                     conversationBuckets[conversationKeyValue] = ConversationUsageBucket(
@@ -127,7 +130,8 @@ nonisolated enum DshContributionRollup {
                         outputCostUSD: bucket.costOutput,
                         cacheReadCostUSD: bucket.costCacheRead,
                         cacheCreationCostUSD: bucket.costCacheCreation,
-                        hasUnpricedUsage: bucket.hasUnpricedUsage
+                        hasUnpricedUsage: bucket.hasUnpricedUsage,
+                        timing: bucket.timing ?? .zero
                     )
                 }
             }

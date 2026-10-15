@@ -359,6 +359,7 @@ enum CodexJSONLScanner {
         var sessionBranch = nonEmpty(state.conversationGitBranch)
         var parentThread = nonEmpty(state.conversationParentSession)
         var fallbackTitle = state.fallbackTitle
+        var timing = state.codexTiming ?? CodexTimingState()
         var entries: [PendingCodexEntry] = []
         var invalidHistoricalRecord = false
         // 按批流式解析：单文件不再把整份内容和全部行同时读进内存。
@@ -408,6 +409,7 @@ enum CodexJSONLScanner {
                     currentSpeed = settings.speed
                     continue
                 }
+                if Self.updateTiming(&timing, root: root, type: type) { continue }
                 guard type == "event_msg",
                       let payload = root["payload"] as? [String: Any],
                       (payload["type"] as? String) == "token_count" else {
@@ -437,6 +439,10 @@ enum CodexJSONLScanner {
                 let model = currentModel ?? "unknown"
                 guard let resolvedID = ownSessionID else { continue }
                 if let totalSignature { lastTotalUsageSignature = totalSignature }
+                // 输出 tokens 与 token_usage_record 一致才认定是同一次请求。
+                let entryTiming = timing.pendingOutputTokens == output ? timing.pending : nil
+                timing.pending = nil
+                timing.pendingOutputTokens = nil
                 let cost = boundary == nil ? Pricing.costBreakdown(
                     app: .codex,
                     model: model,
@@ -460,7 +466,8 @@ enum CodexJSONLScanner {
                     cacheReadTokens: cachedInput,
                     cacheCreationTokens: cacheWrite,
                     costUSD: cost?.total,
-                    costBreakdown: cost
+                    costBreakdown: cost,
+                    timing: entryTiming
                 )
                 entries.append(PendingCodexEntry(
                     entry: entry,
@@ -518,6 +525,7 @@ enum CodexJSONLScanner {
         state.lastServiceTier = currentSpeed
         state.lastCodexTotalUsageSignature = lastTotalUsageSignature
         state.lastCodexEmittingSessionID = emittingSessionID
+        state.codexTiming = timing.isEmpty ? nil : timing
         state.conversationID = ownSessionID
         state.conversationCwd = sessionCwd
         // 从头读过仍没有分支时记空串，避免之后按「未检查」再读首行。
@@ -656,6 +664,59 @@ enum CodexJSONLScanner {
         state.lastServiceTier = nil
         state.lastCodexTotalUsageSignature = nil
         state.lastCodexEmittingSessionID = nil
+        state.codexTiming = nil
+    }
+
+    /// 模型输出条目；其余条目（用户消息、命令、工具、子代理等）完成后才会发出下一次请求。
+    nonisolated private static let modelItemTypes: Set<String> = ["Reasoning", "AgentMessage"]
+
+    /// 处理计时相关记录，返回 true 表示该行已消费。
+    /// - 非模型条目完成：记为下一次请求的发出时间；
+    /// - 第一个模型条目开始：记为首字时间；
+    /// - `token_usage_record`：模型输出结束（含工具调用参数），结算出等待 token_count 的计时。
+    /// - `turn_aborted` / `task_started`：中断的请求等不到 `token_usage_record`，丢弃它留下的时间点，
+    ///   否则会串到下一回合的第一次请求上，把中间的空闲时间算进生成时长。
+    /// fork 重放段会改写外层 timestamp 但保留条目里的原始毫秒，两者相差超过 2 秒的条目不参与计时。
+    nonisolated static func updateTiming(_ timing: inout CodexTimingState, root: [String: Any], type: String?) -> Bool {
+        if type == "event_msg",
+           let kind = (root["payload"] as? [String: Any])?["type"] as? String,
+           kind == "turn_aborted" || kind == "task_started" {
+            // 新回合的请求发出时间由随后的用户消息条目给出；中断的请求发出时间作废。
+            if kind == "turn_aborted" { timing.requestStartMs = nil }
+            timing.firstTokenMs = nil
+            return true
+        }
+        if type == "token_usage_record" {
+            let endMs = (root["timestamp"] as? String).flatMap({ JSONLTimestamp.parse($0) }).map { $0.timeIntervalSince1970 * 1000 }
+            let usage = (root["payload"] as? [String: Any])?["usage"] as? [String: Any]
+            if let start = timing.requestStartMs, let first = timing.firstTokenMs, let endMs,
+               let output = usage?["output_tokens"] as? Int,
+               let measured = RequestTiming(requestStartMs: start, firstTokenMs: first, endMs: endMs) {
+                timing.pending = measured
+                timing.pendingOutputTokens = output
+            } else {
+                timing.pending = nil
+                timing.pendingOutputTokens = nil
+            }
+            timing.requestStartMs = nil
+            timing.firstTokenMs = nil
+            return true
+        }
+        guard type == "event_msg",
+              let payload = root["payload"] as? [String: Any],
+              (payload["type"] as? String) == "item_completed" else { return false }
+        guard let started = (payload["started_at_ms"] as? NSNumber)?.doubleValue,
+              let completed = (payload["completed_at_ms"] as? NSNumber)?.doubleValue,
+              let loggedAt = (root["timestamp"] as? String).flatMap({ JSONLTimestamp.parse($0) }),
+              abs(loggedAt.timeIntervalSince1970 * 1000 - completed) < 2000,
+              let itemType = (payload["item"] as? [String: Any])?["type"] as? String
+        else { return true }
+        if modelItemTypes.contains(itemType) {
+            if timing.firstTokenMs == nil { timing.firstTokenMs = started }
+        } else if timing.firstTokenMs == nil {
+            timing.requestStartMs = completed
+        }
+        return true
     }
 
     /// `session_meta.payload.git.branch`；字段缺失或为空时返回 nil。

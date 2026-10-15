@@ -99,6 +99,8 @@ enum OpencodeScanner {
             let sources = [legacy, v2].compactMap { $0 }
             let workspaceColumns = try columns(db, table: "workspace")
             let hasBranch = workspaceColumns.isSuperset(of: ["id", "branch"])
+            let canReadLegacyParts = try legacy != nil
+                && columns(db, table: "part").isSuperset(of: ["message_id", "session_id", "time_created", "id", "data"])
             var sessions: [String: SessionState] = [:]
             for source in sources {
                 try readSessions(db, source: source, hasBranch: hasBranch, into: &sessions)
@@ -120,6 +122,8 @@ enum OpencodeScanner {
                 var entries: [UsageEntry] = []
                 var inheritedModel: String?
                 var fallbackTitle: String?
+                // v1 的首字时间在 part 表；读不出时只是没有计时，不影响用量。
+                let legacyParts = canReadLegacyParts ? try? legacyTimingParts(db, sessionID: id) : nil
                 for source in sources {
                     let exclusion = !source.isV2 && v2 != nil
                         ? "AND NOT EXISTS (SELECT 1 FROM session_message v JOIN session_v2 s ON s.id = v.session_id WHERE v.id = m.id)"
@@ -167,12 +171,18 @@ enum OpencodeScanner {
                         guard total > 0 || (cost ?? 0) > 0 else { return }
                         let model = parseModel(source.isV2 ? json["model"] : json)
                             ?? inheritedModel ?? "unknown/unknown"
-                        entries.append(makeEntry(
+                        var entry = makeEntry(
                             conversationID: id, model: model,
                             timestamp: Date(timeIntervalSince1970: Double(sqlite3_column_int64(stmt, 1)) / 1000),
                             input: input, output: output, cacheRead: read, cacheWrite: write,
                             totalTokens: total, cost: cost
-                        ))
+                        )
+                        if source.isV2 {
+                            entry.timing = v2Timing(json)
+                        } else if let messageID = columnText(stmt, 0) {
+                            entry.timing = legacyTiming(json, parts: legacyParts?[messageID] ?? [])
+                        }
+                        entries.append(entry)
                     }
                 }
                 if fallbackTitle == nil, nonEmpty(session.title) == nil, legacy != nil {
@@ -308,6 +318,60 @@ enum OpencodeScanner {
             }
         }
         return title
+    }
+
+    /// v1 part 的类型与开始时间（毫秒），按写入顺序。
+    nonisolated struct LegacyPart: Sendable, Equatable {
+        var type: String
+        var startMs: Double?
+    }
+
+    /// 只取计时需要的两个字段，不读 part 正文。
+    private nonisolated static func legacyTimingParts(
+        _ db: OpaquePointer, sessionID: String
+    ) throws -> [String: [LegacyPart]] {
+        var result: [String: [LegacyPart]] = [:]
+        let sql = """
+        SELECT message_id, json_extract(data, '$.type'), json_extract(data, '$.time.start')
+        FROM part WHERE session_id = ?1 ORDER BY time_created, id
+        """
+        try rows(db, sql: sql, sessionID: sessionID) { stmt in
+            guard let messageID = columnText(stmt, 0), let type = columnText(stmt, 1) else { return }
+            let start = sqlite3_column_type(stmt, 2) == SQLITE_NULL ? nil : sqlite3_column_double(stmt, 2)
+            result[messageID, default: []].append(LegacyPart(type: type, startMs: start))
+        }
+        return result
+    }
+
+    /// v2：请求发出 = `time.created`；首字 = 第一个内容项的 `time.created`（文本项没有时间，
+    /// 以文本开头的消息不计时）；结束 = `time.streamed`。旧版没有 `streamed` 时，只有不含工具调用的
+    /// 消息才能用 `time.completed`，含工具的 `completed` 包含了工具执行时间。
+    nonisolated static func v2Timing(_ json: [String: Any]) -> RequestTiming? {
+        guard let time = json["time"] as? [String: Any],
+              let created = (time["created"] as? NSNumber)?.doubleValue,
+              let content = json["content"] as? [[String: Any]],
+              let first = ((content.first?["time"] as? [String: Any])?["created"] as? NSNumber)?.doubleValue
+        else { return nil }
+        let hasTool = content.contains { ($0["type"] as? String) == "tool" }
+        let end = (time["streamed"] as? NSNumber)?.doubleValue
+            ?? (hasTool ? nil : (time["completed"] as? NSNumber)?.doubleValue)
+        guard let end else { return nil }
+        return RequestTiming(requestStartMs: created, firstTokenMs: first, endMs: end)
+    }
+
+    /// v1：只计单步、不含工具调用、以 reasoning / text 开头的消息。请求发出 = `time.created`，
+    /// 首字 = 第一个内容 part 的 `time.start`，结束 = `time.completed`。
+    nonisolated static func legacyTiming(_ json: [String: Any], parts: [LegacyPart]) -> RequestTiming? {
+        guard let time = json["time"] as? [String: Any],
+              let created = (time["created"] as? NSNumber)?.doubleValue,
+              let completed = (time["completed"] as? NSNumber)?.doubleValue,
+              parts.filter({ $0.type == "step-start" }).count == 1,
+              !parts.contains(where: { $0.type == "tool" })
+        else { return nil }
+        let content = parts.filter { $0.type != "step-start" && $0.type != "step-finish" }
+        guard let head = content.first, head.type == "reasoning" || head.type == "text",
+              let first = head.startMs else { return nil }
+        return RequestTiming(requestStartMs: created, firstTokenMs: first, endMs: completed)
     }
 
     /// SQLITE_TRANSIENT 是 C 宏，Swift 中须经 unsafeBitCast 表达「SQLite 自行拷贝文本」。
