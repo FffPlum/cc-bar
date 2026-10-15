@@ -4,7 +4,7 @@ import Observation
 /// 按 (day, app, model, speed) 聚合的内存表。
 ///
 /// 本地日志和远端 Dashboard 结果使用独立分区：本地仅追加，远端按完整自然日替换。
-/// 标记为 `@Observable`：`snapshot()` / `todayCost(...)` / `totals(...)` 在 SwiftUI
+/// 标记为 `@Observable`：`snapshot()` / `subscriptionCost(...)` / `totals(...)` 在 SwiftUI
 /// body 内访问分区时会自动登记依赖，写回后会驱动所有读这个聚合器的视图自动刷新。
 @MainActor
 @Observable
@@ -135,13 +135,18 @@ final class UsageAggregator {
         Array(localBuckets.values) + Array(remoteBuckets.values)
     }
 
-    func todayCost(for app: UsageApp, now: Date = Date()) -> Decimal {
+    func todaySubscriptionCost(for app: UsageApp, now: Date = Date()) -> Decimal {
         let today = UsageDay.startOfDay(for: now)
+        return subscriptionCost(for: app, from: today, to: today.addingTimeInterval(1))
+    }
+
+    /// 额度服务自己日志里的订阅用量费用（判定见 `CycleUsageAggregator.isSubscriptionUsage`），
+    /// 供弹出面板 Codex / Claude 花费使用；只读本地分区，远端分区只有 Cursor。
+    func subscriptionCost(for app: UsageApp, from: Date, to: Date) -> Decimal {
         var sum: Decimal = 0
-        for b in localBuckets.values where b.app == app && b.day == today {
-            sum += b.costUSD
-        }
-        for b in remoteBuckets.values where b.app == app && b.day == today {
+        for b in localBuckets.values
+        where b.app == app && b.day >= from && b.day < to
+            && CycleUsageAggregator.isSubscriptionUsage(app: b.app, model: b.model) {
             sum += b.costUSD
         }
         return sum

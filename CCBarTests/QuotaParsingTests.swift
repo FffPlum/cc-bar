@@ -2351,6 +2351,99 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertEqual(totalInput(includeOtherAgents: true), 131)
     }
 
+    func testSubscriptionUsageMatchesOnlyOfficialModels() {
+        let codex: [(String, Bool)] = [
+            ("gpt-6.1-sol", true),
+            ("codex-auto-review", true),
+            ("o4-mini", true),
+            ("openai/gpt-5.6", true),
+            ("openai-codex/gpt-5.6", true),
+            ("commandcode/deepseek/deepseek-v4.1-flash", false),
+            ("openai/deepseek/deepseek-v4", false),
+            ("grok-4.7", false),
+            ("deepseek-v4", false),
+            ("claude-sonnet-5", false),
+        ]
+        for (model, expected) in codex {
+            XCTAssertEqual(CycleUsageAggregator.isSubscriptionUsage(app: .codex, model: model), expected, model)
+        }
+        let claude: [(String, Bool)] = [
+            ("claude-opus-5", true),
+            ("Claude-Sonnet-5", true),
+            ("deepseek-v4", false),
+            ("glm-5.3", false),
+            ("gpt-6.1-sol", false),
+            ("<synthetic>", false),
+        ]
+        for (model, expected) in claude {
+            XCTAssertEqual(CycleUsageAggregator.isSubscriptionUsage(app: .claude, model: model), expected, model)
+        }
+        XCTAssertTrue(CycleUsageAggregator.isSubscriptionUsage(app: .pi, model: "openai-codex/gpt-5.6"))
+    }
+
+    func testSubscriptionCostExcludesNonSubscriptionModels() {
+        let start = Date(timeIntervalSince1970: 300_000)
+        let day = UsageDay.startOfDay(for: start)
+        func entry(_ app: UsageApp, _ model: String, input: Int, cost: Decimal) -> UsageEntry {
+            UsageEntry(
+                app: app,
+                conversationKey: "\(app.rawValue):\(model)",
+                model: model,
+                speed: .standard,
+                day: day,
+                timestamp: start.addingTimeInterval(60),
+                inputTokens: input,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0,
+                costUSD: cost,
+                costBreakdown: nil
+            )
+        }
+        let entries = [
+            entry(.codex, "gpt-6.1-sol", input: 100, cost: 1),
+            entry(.codex, "commandcode/deepseek/deepseek-v4.1-flash", input: 1_000, cost: 10),
+            entry(.codex, "grok-4.7", input: 1_000, cost: 10),
+            entry(.claude, "claude-opus-5", input: 200, cost: 2),
+            entry(.claude, "deepseek-v4", input: 1_000, cost: 10),
+        ]
+
+        let daily = UsageAggregator()
+        daily.ingestLocal(entries)
+        XCTAssertEqual(daily.subscriptionCost(for: .codex, from: day, to: day.addingTimeInterval(86_400)), 1)
+        XCTAssertEqual(daily.subscriptionCost(for: .claude, from: day, to: day.addingTimeInterval(86_400)), 2)
+        XCTAssertEqual(daily.todaySubscriptionCost(for: .codex, now: start), 1)
+
+        // 周期桶仍保存全部用量，汇总时只计订阅模型。
+        var cycles: [QuotaCycleRecord] = []
+        var segments: [QuotaCycleAccountSegment] = []
+        for app in [UsageApp.codex, .claude] {
+            let cycle = cycleRecord(
+                id: "\(app.rawValue)-weekly",
+                accountKey: "\(app.rawValue):primary",
+                app: app,
+                start: start,
+                end: start.addingTimeInterval(3_600)
+            )
+            cycles.append(cycle)
+            segments.append(QuotaCycleAccountSegment(
+                id: app.rawValue,
+                accountKey: cycle.accountKey,
+                app: app,
+                startAt: start,
+                endAt: nil
+            ))
+        }
+        let aggregator = CycleUsageAggregator()
+        aggregator.ingest(entries: entries, cycles: cycles, accountSegments: segments)
+        XCTAssertEqual(aggregator.snapshot().count, 5)
+        func totalInput(_ app: UsageApp) -> Int? {
+            aggregator.summaries(cycles: cycles, kind: .weekly, app: app).first?.totals.inputTokens
+        }
+        XCTAssertEqual(totalInput(.codex), 100)
+        XCTAssertEqual(totalInput(.claude), 200)
+    }
+
     func testCycleForecastStartsWithAnyObservedUsage() {
         let cycle = cycleRecord(
             id: "forecast",

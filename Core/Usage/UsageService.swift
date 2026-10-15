@@ -2714,7 +2714,7 @@ final class UsageService {
 
     private func publishTotals() {
         guard let appState else { return }
-        appState.codexTodayCost = aggregator.todayCost(for: .codex)
-        appState.claudeTodayCost = aggregator.todayCost(for: .claude)
+        appState.codexTodayCost = aggregator.todaySubscriptionCost(for: .codex)
+        appState.claudeTodayCost = aggregator.todaySubscriptionCost(for: .claude)
     }
 }

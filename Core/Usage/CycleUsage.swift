@@ -291,6 +291,27 @@ final class CycleUsageAggregator {
         }
     }
 
+    /// Codex / Claude 自己日志里的请求是否计入订阅消耗，按模型名近似判断。
+    /// Claude 只认 `claude-*`；Codex 只认 OpenAI 自家模型（可带 `openai/`、`openai-codex/` 前缀），
+    /// 其他渠道前缀（如 `commandcode/...`）和其他厂商模型不算。第三方渠道转发的同名模型、
+    /// API Key 调用在日志里分不出来，仍算订阅。其他 Agent 的归属由 `cycleApp` 决定，这里一律放行。
+    /// 只在展示层使用：周期桶与日桶仍保存全部用量，规则调整无需重建。
+    nonisolated static func isSubscriptionUsage(app: UsageApp, model: String) -> Bool {
+        let name = model.lowercased()
+        switch app {
+        case .claude:
+            return name.hasPrefix("claude-")
+        case .codex:
+            let bare = ["openai-codex/", "openai/"]
+                .first { name.hasPrefix($0) }
+                .map { String(name.dropFirst($0.count)) } ?? name
+            guard !bare.contains("/") else { return false }
+            return ["gpt-", "codex-", "chatgpt-", "o1", "o3", "o4"].contains { bare.hasPrefix($0) }
+        case .pi, .opencode, .dsh, .cursor:
+            return true
+        }
+    }
+
     func load(from snapshot: [CycleUsageBucket]) {
         buckets.removeAll(keepingCapacity: true)
         for bucket in snapshot {
@@ -405,6 +426,7 @@ final class CycleUsageAggregator {
         return buckets != before
     }
 
+    /// 只计订阅消耗：Codex / Claude 自己日志里非订阅模型的桶不计入（见 `isSubscriptionUsage`）。
     /// - Parameter includeOtherAgents: false 时只计周期服务自己的日志（如 Codex 周期只算 Codex 自己的日志）。
     func summaries(
         cycles: [QuotaCycleRecord],
@@ -422,7 +444,8 @@ final class CycleUsageAggregator {
                 var currentAllowanceTotals = UsageTotals.zero
                 var quality: CycleUsageQuality = cycle.boundaryQuality == .observed ? .exact : .estimated
                 for bucket in grouped[cycle.id] ?? []
-                    where includeOtherAgents || bucket.app == cycle.app {
+                    where (includeOtherAgents || bucket.app == cycle.app)
+                        && Self.isSubscriptionUsage(app: bucket.app, model: bucket.model) {
                     totals.add(bucket.usageTotals)
                     if bucket.allowanceSegmentID == cycle.latestAllowanceSegment?.id {
                         currentAllowanceTotals.add(bucket.usageTotals)

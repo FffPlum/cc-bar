@@ -276,8 +276,8 @@ struct PopoverRootView: View {
         let (from, to) = Self.weekBounds()
         if app == .cursor { return cursorCost(from: from, to: to) }
         guard let usageApp = app.usageApp else { return nil }
-        let totals = appState.usageService.aggregator.totals(app: usageApp, from: from, to: to)
-        return totals.costUSD + otherAgentSubscriptionCost(for: app, from: from, to: to)
+        return appState.usageService.aggregator.subscriptionCost(for: usageApp, from: from, to: to)
+            + otherAgentSubscriptionCost(for: app, from: from, to: to)
     }
 
     /// 开关打开时 Codex 花费按订阅口径算：同时计入 Pi / OpenCode / DSH 里的 Codex 订阅用量。
