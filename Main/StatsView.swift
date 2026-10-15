@@ -951,7 +951,10 @@ struct StatsView: View {
                     ))
                 }
             case .claude:
-                let key = QuotaHistoryAccountKey.claudePrimary(email: appState.claudeAccount?.email)
+                let key = QuotaHistoryAccountKey.claudePrimary(
+                    email: appState.claudeAccount?.email,
+                    accountUuid: appState.claudeAccount?.accountUuid
+                )
                 if shouldShowTimelineSection(accountKey: key, snapshot: appState.claudeQuota, accountExists: appState.claudeAccount != nil) {
                     sections.append(timelineSection(
                         accountKey: key,

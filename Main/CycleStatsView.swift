@@ -234,7 +234,10 @@ struct QuotaCycleCardsSection: View {
             return QuotaHistoryAccountKey.codexPrimary(accountId: appState.codexAccount?.accountId)
         case .claude:
             guard appState.claudeAccount != nil else { return nil }
-            return QuotaHistoryAccountKey.claudePrimary(email: appState.claudeAccount?.email)
+            return QuotaHistoryAccountKey.claudePrimary(
+                email: appState.claudeAccount?.email,
+                accountUuid: appState.claudeAccount?.accountUuid
+            )
         case .cursor:
             return nil
         case .pi, .opencode:
