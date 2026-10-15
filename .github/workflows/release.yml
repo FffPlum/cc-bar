@@ -76,12 +76,12 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          # 本版说明在前，近期新功能在后；后者只用于 Release 页，不进入 App 内聚合日志。
+          # 本版说明在前，近期新功能在后；GitHub 会合并连续空行，用 <br> 多留一行空白。
           highlights="release-notes/highlights.md"
           {
             cat "release-notes/${TAG}.md"
             if [[ -f "$highlights" ]] && grep -q '[^[:space:]]' "$highlights"; then
-              printf '\n\n'
+              printf '\n\n<br>\n\n'
               cat "$highlights"
             fi
           } > dist/release-body.md

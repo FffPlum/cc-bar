@@ -104,7 +104,15 @@ def main():
     archive = args.dist / "CCBar.app.zip"
     require(archive.is_file() and archive.stat().st_size > 0, "最终 ZIP 更新包缺失")
     release_notes = args.dist / "release-notes.md"
-    release_notes.write_text("\n\n".join(f"## {item[1]}\n\n{item[2]}" for item in note_files) + "\n", encoding="utf-8")
+    sections = [f"## {item[1]}\n\n{item[2]}" for item in note_files]
+    # 近期新功能放在最前：已发布的客户端会保留第一个版本标题之前的内容，放在末尾会被过滤掉。
+    # 客户端会忽略空行（含零宽空格等），用只含盲文空白 U+2800 的行在它和各版说明之间留出一行空白。
+    highlights_path = root / "release-notes" / "highlights.md"
+    if highlights_path.is_file():
+        highlights = re.sub(r"<!--.*?-->", "", highlights_path.read_text(encoding="utf-8"), flags=re.DOTALL).strip()
+        if highlights:
+            sections.insert(0, f"{highlights}\n\n\u2800")
+    release_notes.write_text("\n\n".join(sections) + "\n", encoding="utf-8")
 
     # 私钥只经 stdin 交给 Sparkle，子进程环境不再携带它，不打印签名工具的原始输出。
     def sign(path):

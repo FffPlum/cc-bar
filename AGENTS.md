@@ -117,7 +117,7 @@ xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destinat
    git push origin vX.Y.Z
    ```
 
-- **更新日志由 AI 在发布前编写**：`release-notes/vX.Y.Z.md` 是该版本唯一的 Release Notes 来源；GitHub Actions 会校验其存在且非空，然后把全文原样放在 Release 正文开头，后面追加 `release-notes/highlights.md` 的近期新功能（为空则不追加）；缺失时不会创建 Release。应用内更新窗口只用各版说明，不含 `highlights.md`。它不是传统的聚合 `CHANGELOG.md`，每个版本只保留一份面向用户的说明。
+- **更新日志由 AI 在发布前编写**：`release-notes/vX.Y.Z.md` 是该版本唯一的 Release Notes 来源；GitHub Actions 会校验其存在且非空，然后把全文原样放在 Release 正文开头，后面追加 `release-notes/highlights.md` 的近期新功能（为空则不追加）；缺失时不会创建 Release。应用内更新内容的最前面也会显示 `highlights.md`，后面再接各版说明。它不是传统的聚合 `CHANGELOG.md`，每个版本只保留一份面向用户的说明。
 - **版本号从 `1.0.0` 重新起算**：仓库早期（`73ddff4` 之前）用过不带 `v` 前缀的 `0.x.y` 裸版本号 tag，那批是历史遗留，不再接续；新发布一律带 `v` 前缀，从 `v1.0.0` 开始。
 - tag 必须和已提交的 `MARKETING_VERSION` 一致，tag 本身不改版本号，只是给已提交好的版本打标记。
 - 打错 tag 可撤销：`git tag -d vX.Y.Z && git push origin :vX.Y.Z`。
