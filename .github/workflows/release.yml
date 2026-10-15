@@ -70,11 +70,27 @@ jobs:
             --dist dist \
             --sign-update "$sparkle_sign_update"
 
+      - name: 生成 Release 正文
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # 本版说明在前，近期新功能在后；后者只用于 Release 页，不进入 App 内聚合日志。
+          highlights="release-notes/highlights.md"
+          {
+            cat "release-notes/${TAG}.md"
+            if [[ -f "$highlights" ]] && grep -q '[^[:space:]]' "$highlights"; then
+              printf '\n\n'
+              cat "$highlights"
+            fi
+          } > dist/release-body.md
+
       - name: 上传到 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           # 不设 name:Release 标题沿用默认的 tag 名(如 v1.0.40)。
-          body_path: release-notes/${{ github.ref_name }}.md
+          body_path: dist/release-body.md
           # 先将产物上传到 draft，全部成功后才使 latest/appcast 对用户可见。
           draft: true
           fail_on_unmatched_files: true

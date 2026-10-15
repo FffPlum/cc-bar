@@ -108,8 +108,8 @@ xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destinat
 这是用户预先授权的固定发布指令，出现这句话（或明显同义的表述，如「发布一下」「发个新版本」）时按下面四步顺序执行，**不用逐步等确认**。`发版` 是首选的最短触发词；tag 推送成功后，立即汇报新版本号、提交、Actions / Release 链接和本版更新说明全文即可。
 
 1. **提交代码**：把当前工作区未提交的改动按仓库惯例的 commit message 风格提交（可用 `git-commit-messages` skill；无关改动分开提交，不要混在一起）。
-2. **编写用户更新说明**：对比上一个 `v*` tag 与当前代码、提交和文档，只提炼真实、用户可感知的新增功能、问题修复、体验优化和必要注意事项；不要罗列 commit、文件、重构、CI 或版本号。创建 `release-notes/vX.Y.Z.md`，先读 [release-notes/README.md](release-notes/README.md)，按其中的撰写流程和自检问题写：开头一句话说出本版最主要的变化，下面不分组列出条目，每条一行；不用分类组头、`#` 标题和图片，不加安装说明等每版重复的固定段落。文件全文原样作为 Release 正文，Release 标题沿用默认的 tag 名。
-3. **版本号 +1**：修改 `ccbar.xcodeproj/project.pbxproj` 里两处 `MARKETING_VERSION`（Debug/Release 配置各一处，要同时改），patch 位 +1（如 `1.0.0` → `1.0.1`），除非用户明确要求升 minor/major。把版本号和 `release-notes/vX.Y.Z.md` 一起单独提交，message 形如 `chore: 发布 vX.Y.Z`。
+2. **编写用户更新说明**：对比上一个 `v*` tag 与当前代码、提交和文档，只提炼真实、用户可感知的新增功能、问题修复、体验优化和必要注意事项；不要罗列 commit、文件、重构、CI 或版本号。创建 `release-notes/vX.Y.Z.md`，先读 [release-notes/README.md](release-notes/README.md)，按其中的撰写流程和自检问题写：开头一句话说出本版最主要的变化，下面不分组列出条目，每条一行；不用分类组头、`#` 标题和图片，不加安装说明等每版重复的固定段落。再按同一文档「近期新功能」一节检查并更新 `release-notes/highlights.md`。Release 正文由本版说明加 `highlights.md` 拼成，Release 标题沿用默认的 tag 名。
+3. **版本号 +1**：修改 `ccbar.xcodeproj/project.pbxproj` 里两处 `MARKETING_VERSION`（Debug/Release 配置各一处，要同时改），patch 位 +1（如 `1.0.0` → `1.0.1`），除非用户明确要求升 minor/major。把版本号、`release-notes/vX.Y.Z.md` 和改动过的 `release-notes/highlights.md` 一起单独提交，message 形如 `chore: 发布 vX.Y.Z`。
 4. **触发远程构建发布**：推送分支 + 打带 `v` 前缀的 tag 触发 [.github/workflows/release.yml](.github/workflows/release.yml)，由 GitHub 的 macOS runner 自动运行 `scripts/build.sh`、读取同名更新说明，并将 `dist/CCBar.dmg`、`dist/CCBar.app.zip`、`dist/appcast.xml`、`dist/release-notes.md` 与 `dist/version.json`（新版读取签名 appcast，version.json 保留给旧客户端；均由 workflow 生成，本地打包不产出）挂到 GitHub Release：
    ```bash
    git push origin main
@@ -117,7 +117,7 @@ xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destinat
    git push origin vX.Y.Z
    ```
 
-- **更新日志由 AI 在发布前编写**：`release-notes/vX.Y.Z.md` 是该版本唯一的 Release Notes 来源；GitHub Actions 会校验其存在且非空，然后把全文原样作为 Release 正文；缺失时不会创建 Release。它不是传统的聚合 `CHANGELOG.md`，每个版本只保留一份面向用户的说明。
+- **更新日志由 AI 在发布前编写**：`release-notes/vX.Y.Z.md` 是该版本唯一的 Release Notes 来源；GitHub Actions 会校验其存在且非空，然后把全文原样放在 Release 正文开头，后面追加 `release-notes/highlights.md` 的近期新功能（为空则不追加）；缺失时不会创建 Release。应用内更新窗口只用各版说明，不含 `highlights.md`。它不是传统的聚合 `CHANGELOG.md`，每个版本只保留一份面向用户的说明。
 - **版本号从 `1.0.0` 重新起算**：仓库早期（`73ddff4` 之前）用过不带 `v` 前缀的 `0.x.y` 裸版本号 tag，那批是历史遗留，不再接续；新发布一律带 `v` 前缀，从 `v1.0.0` 开始。
 - tag 必须和已提交的 `MARKETING_VERSION` 一致，tag 本身不改版本号，只是给已提交好的版本打标记。
 - 打错 tag 可撤销：`git tag -d vX.Y.Z && git push origin :vX.Y.Z`。
