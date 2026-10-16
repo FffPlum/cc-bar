@@ -1,7 +1,6 @@
 import CommonCrypto
 import Foundation
-import LocalAuthentication
-import Security
+import os
 
 /// Claude Desktop 的 Electron 凭据缓存读取器。
 ///
@@ -55,6 +54,19 @@ nonisolated enum ClaudeDesktopAuth {
     private static let expirySkew: TimeInterval = 5
     /// 用户拒绝过钥匙串授权后不再自动重试的标记。
     private static let denialDefaultsKey = "claudeDesktopSafeStorageAccessDeniedV1"
+    /// 用户看过授权说明并选择继续的标记。没有它时不碰钥匙串,见 `deriveEncryptionKey()`。
+    private static let explainedDefaultsKey = "claudeDesktopSafeStorageExplainedV1"
+    /// `security` 的退出码取 OSStatus 低 8 位:44 = errSecItemNotFound,
+    /// 51 = errSecAuthFailed(授权框点「拒绝」),128 = errSecUserCanceled。
+    private static let securityDeniedExitCodes: Set<Int32> = [51, 128]
+
+    /// 派生出的 AES 密钥,进程内缓存。用户只点「允许」(不是「始终允许」)时,
+    /// 每次调用 `security` 都会再弹一次,缓存把它限制在每次启动最多一次。
+    private static let cachedKey = OSAllocatedUnfairLock<Data?>(initialState: nil)
+    /// 串行化钥匙串读取:授权框等用户响应时,并发的刷新排队等结果,不叠出第二个框。
+    private static let keychainReadLock = NSLock()
+    /// 需要读钥匙串、但用户还没看过授权说明时登记,由 AppState 取走后弹说明框。
+    private static let explanationRequest = OSAllocatedUnfairLock(initialState: false)
 
     /// 借到的凭据。刻意不含 refreshToken——调用方拿不到,也就无从误用。
     struct BorrowedToken: Sendable {
@@ -171,37 +183,76 @@ nonisolated enum ClaudeDesktopAuth {
         UserDefaults.standard.bool(forKey: denialDefaultsKey)
     }
 
-    /// 供设置项重置用:清掉"用户拒绝过"的标记,下次过期时会重新尝试。
+    /// 供设置页「授权…」用:清掉"用户拒绝过"的标记,下次需要时会重新尝试。
     static func clearDenial() {
         UserDefaults.standard.removeObject(forKey: denialDefaultsKey)
+    }
+
+    /// 用户在授权说明框里选了「暂不」,与在系统授权框里拒绝同样处理。
+    static func recordDenial() {
+        UserDefaults.standard.set(true, forKey: denialDefaultsKey)
+    }
+
+    static var hasExplainedAccess: Bool {
+        UserDefaults.standard.bool(forKey: explainedDefaultsKey)
+    }
+
+    static func markAccessExplained() {
+        UserDefaults.standard.set(true, forKey: explainedDefaultsKey)
+    }
+
+    /// 取走并清除待弹的授权说明请求。
+    static func takeExplanationRequest() -> Bool {
+        explanationRequest.withLock { requested in
+            defer { requested = false }
+            return requested
+        }
     }
 
     // MARK: - 钥匙串
 
     /// 读 `Claude Safe Storage` 的密码并派生 AES 密钥。
     ///
-    /// 先做一次不允许交互的探测:命中就直接用,不打扰用户。只有确实需要授权时才
-    /// 弹一次系统框;用户拒绝后记下标记,不再反复弹。
+    /// 用户还没看过授权说明时不碰钥匙串,只登记一次说明请求,由 AppState 在主线程
+    /// 先弹说明框——否则系统授权框会在后台刷新时毫无预告地出现,而且申请方显示为
+    /// 「security」,用户看不懂。用户拒绝后记下标记,不再反复弹。
     private static func deriveEncryptionKey() -> Data? {
-        guard let password = readSafeStoragePassword() else { return nil }
-        return pbkdf2SHA1(
-            password: password,
-            salt: Data("saltysalt".utf8),
-            rounds: 1003,
-            keyLength: kCCKeySizeAES128
-        )
+        if let key = cachedKey.withLock({ $0 }) { return key }
+        keychainReadLock.lock()
+        defer { keychainReadLock.unlock() }
+        // 排队期间可能已有别的调用读到。
+        if let key = cachedKey.withLock({ $0 }) { return key }
+        guard !hasUserDeniedAccess else { return nil }
+        guard hasExplainedAccess else {
+            explanationRequest.withLock { $0 = true }
+            AppLog.info(.credentials, "Claude Desktop keychain access not explained yet; waiting for the explanation dialog")
+            return nil
+        }
+        guard let password = readSafeStoragePassword(),
+              let key = pbkdf2SHA1(
+                  password: password,
+                  salt: Data("saltysalt".utf8),
+                  rounds: 1003,
+                  keyLength: kCCKeySizeAES128
+              )
+        else { return nil }
+        cachedKey.withLock { $0 = key }
+        return key
     }
 
+    /// 通过系统自带的 `/usr/bin/security` 读密码,而不是在进程内调 Keychain Services。
+    ///
+    /// cc-bar 是 ad-hoc 签名,钥匙串按 cdhash 识别它,每个版本都不同:进程内读取时,
+    /// 用户点过的「始终允许」在下次更新后就失效,于是每次更新都会再弹一次。授权记在
+    /// 苹果签名的 `security` 上则跨 cc-bar 版本有效。代价与 `ClaudeAuth` 读
+    /// `Claude Code-credentials` 相同:授权后,本机同一用户的其他进程也能经
+    /// `security` 静默读到这条密码。
     private static func readSafeStoragePassword() -> String? {
-        if let password = copySafeStoragePassword(allowInteraction: false) {
-            return password
-        }
-        // 无交互读不到,再弹一次授权框。
-        switch copySafeStoragePasswordStatus(allowInteraction: true) {
+        switch runSecurityFindPassword() {
         case .success(let password):
             return password
         case .denied:
-            UserDefaults.standard.set(true, forKey: denialDefaultsKey)
+            recordDenial()
             AppLog.info(.credentials, "user denied Claude Safe Storage access; will not ask again automatically")
             return nil
         case .missing:
@@ -215,43 +266,38 @@ nonisolated enum ClaudeDesktopAuth {
         case missing
     }
 
-    private static func copySafeStoragePassword(allowInteraction: Bool) -> String? {
-        guard case .success(let password) =
-            copySafeStoragePasswordStatus(allowInteraction: allowInteraction)
-        else { return nil }
-        return password
-    }
-
-    private static func copySafeStoragePasswordStatus(
-        allowInteraction: Bool
-    ) -> PasswordReadResult {
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: safeStorageService,
-            kSecAttrAccount as String: safeStorageAccount,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnData as String: true
+    private static func runSecurityFindPassword() -> PasswordReadResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "find-generic-password",
+            "-s", safeStorageService,
+            "-a", safeStorageAccount,
+            "-w"
         ]
-        if !allowInteraction {
-            let context = LAContext()
-            context.interactionNotAllowed = true
-            query[kSecUseAuthenticationContext as String] = context
-        }
-
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        switch status {
-        case errSecSuccess:
-            guard let data = item as? Data,
-                  let password = String(data: data, encoding: .utf8),
-                  !password.isEmpty
-            else { return .missing }
-            return .success(password)
-        case errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled:
-            return allowInteraction ? .denied : .missing
-        default:
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            AppLog.warn(.credentials, "failed to launch security for Claude Safe Storage: \(Redact.error(error))")
             return .missing
         }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        let status = process.terminationStatus
+        guard status == 0 else {
+            if securityDeniedExitCodes.contains(status) { return .denied }
+            AppLog.info(.credentials, "Claude Safe Storage unavailable (security exit \(status))")
+            return .missing
+        }
+        guard let password = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .newlines),
+            !password.isEmpty
+        else { return .missing }
+        return .success(password)
     }
 
     // MARK: - 解密与解析
@@ -279,10 +325,14 @@ nonisolated enum ClaudeDesktopAuth {
         guard let root = loadConfigJSON() else { return nil }
         var entries: [CacheEntry] = []
         var seen = Set<String>()
+        var undecryptable = false
         for cacheKey in cacheKeys {
-            guard let encoded = root[cacheKey] as? String,
-                  let plaintext = decryptSafeStorage(base64: encoded, key: key),
-                  let cache = try? JSONSerialization.jsonObject(with: Data(plaintext.utf8))
+            guard let encoded = root[cacheKey] as? String else { continue }
+            guard let plaintext = decryptSafeStorage(base64: encoded, key: key) else {
+                undecryptable = true
+                continue
+            }
+            guard let cache = try? JSONSerialization.jsonObject(with: Data(plaintext.utf8))
                     as? [String: Any]
             else { continue }
             for (rawKey, rawValue) in cache {
@@ -293,6 +343,10 @@ nonisolated enum ClaudeDesktopAuth {
                 seen.insert(entry.accessToken)
                 entries.append(entry)
             }
+        }
+        // Claude Desktop 重装后会换一把密钥,缓存的旧密钥解不开;丢掉它,下次重新读。
+        if entries.isEmpty, undecryptable {
+            cachedKey.withLock { $0 = nil }
         }
         return entries.isEmpty ? nil : entries
     }

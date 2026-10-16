@@ -980,7 +980,13 @@ struct SettingsRootView: View {
         let plan = info.plan.flatMap { $0.isEmpty ? nil : $0 }
 
         var sourceLines = [quotaSourceHelp(for: app)]
-        let isDetected: Bool
+        // 拒绝过读取 Claude Desktop 登录的钥匙串授权：Desktop 登录数据还在，按已检测到处理，
+        // 并给出重新授权入口。
+        let claudeDesktopDenied = app == .claude && appState.claudeDesktopAccessDenied
+        let authorizeClaudeDesktop = ServiceAction(title: tr("Authorize…", "授权…")) {
+            appState.authorizeClaudeDesktopAccess()
+        }
+        var isDetected: Bool
         switch app {
         case .codex, .claude:
             let records = localRecordState(for: app == .codex ? .codex : .claude)
@@ -1004,9 +1010,20 @@ struct SettingsRootView: View {
         if let offHint = offHint(for: app), !settings.isProviderEnabled(app) {
             sourceLines.append(offHint)
         }
+        if claudeDesktopDenied {
+            isDetected = true
+            if info.signedIn {
+                sourceLines.append(tr(
+                    "Not allowed to read Claude Desktop's sign-in. When the Claude Code sign-in expires, quota can't fall back to Claude Desktop.",
+                    "未授权读取 Claude 桌面版登录：Claude Code 登录过期后，无法改用桌面版的登录状态查询额度。"
+                ))
+            }
+        }
 
         let subtitle: String
-        if !isDetected {
+        if claudeDesktopDenied, !info.signedIn {
+            subtitle = tr("Not allowed to read Claude Desktop's sign-in", "未授权读取 Claude 桌面版登录")
+        } else if !isDetected {
             subtitle = connectHint(for: app)
         } else if !info.signedIn {
             subtitle = tr("Not signed in · usage only", "未登录 · 只统计用量")
@@ -1029,6 +1046,18 @@ struct SettingsRootView: View {
         if app == .commandCode {
             actions.append(ServiceAction(title: tr("Enter Credentials…", "填写凭据…")) { showCommandCodeSheet = true })
         }
+        if claudeDesktopDenied, info.signedIn {
+            actions.append(authorizeClaudeDesktop)
+        }
+
+        let connectAction: ServiceAction?
+        if claudeDesktopDenied, !info.signedIn {
+            connectAction = authorizeClaudeDesktop
+        } else if !isDetected, app == .commandCode {
+            connectAction = ServiceAction(title: tr("Enter Credentials…", "填写凭据…")) { showCommandCodeSheet = true }
+        } else {
+            connectAction = nil
+        }
 
         return ServiceEntry(
             id: .quota(app),
@@ -1039,9 +1068,7 @@ struct SettingsRootView: View {
             subtitle: subtitle,
             errorDetail: error,
             isDetected: isDetected,
-            connectAction: !isDetected && app == .commandCode
-                ? ServiceAction(title: tr("Enter Credentials…", "填写凭据…")) { showCommandCodeSheet = true }
-                : nil,
+            connectAction: connectAction,
             sourceLines: sourceLines,
             actions: actions,
             isEnabled: serviceEnabledBinding(for: app, settings: settings),
@@ -1507,10 +1534,10 @@ private struct ServiceEntry: Identifiable {
     let errorDetail: String?
     /// 这台 Mac 上检测到了（登录态或本机记录），决定放在「正在使用」还是「未检测到」。
     let isDetected: Bool
-    /// 未检测到时副标题后的按钮（Command Code 手动填写凭据）。
+    /// 副标题后的按钮：未检测到时 Command Code 手动填写凭据；Claude 未授权读取桌面版登录时重新授权。
     let connectAction: ServiceAction?
     let sourceLines: [String]
-    /// 数据来源弹窗底部的操作（Codex 额度重置次数、Command Code 凭据）。
+    /// 数据来源弹窗底部的操作（Codex 额度重置次数、Command Code 凭据、Claude 桌面版重新授权）。
     let actions: [ServiceAction]
     let isEnabled: Binding<Bool>
     /// 菜单栏 / 悬浮窗只跟额度有关；仅有用量的服务为 nil，单元格留空。

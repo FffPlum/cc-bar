@@ -73,6 +73,10 @@ final class AppState {
     }
     var codexError: String?
     var claudeError: String?
+    /// 用户拒绝过读取 Claude Desktop 登录所需的钥匙串授权，且本机有 Desktop 登录数据。
+    /// 设置页据此显示「未授权」和「授权…」入口。
+    var claudeDesktopAccessDenied = false
+    private var isPresentingClaudeDesktopAccessAlert = false
     var antigravityError: String?
     var cursorError: String?
     var commandCodeError: String?
@@ -353,6 +357,7 @@ final class AppState {
         await loadCodex()
         maybeShowKeychainPrompt()
         await loadClaude()
+        handleClaudeDesktopAccessRequest()
         await loadAntigravity()
         // 新安装时 Antigravity 只在检测到凭据时保持默认开启，未登录的机器不显示空卡片。
         if SettingsStore.shared.isFreshInstall, antigravityAccount == nil {
@@ -462,6 +467,7 @@ final class AppState {
         if plan.refreshClaude {
             await loadClaude()
             await loadClaudeQuota(reason: reason)
+            handleClaudeDesktopAccessRequest()
         }
         if plan.refreshAntigravity {
             await loadAntigravity()
@@ -1470,6 +1476,52 @@ final class AppState {
         alert.addButton(withTitle: tr("Continue", "继续"))
         alert.runModal()
         settings.didShowKeychainPrompt = true
+    }
+
+    /// `ClaudeDesktopAuth` 第一次需要读钥匙串时只登记请求、不弹系统授权框；这里先弹
+    /// CCBar 自己的说明，用户选「继续」后再刷新一次，系统授权框随之出现。
+    /// 说明框异步弹出，不阻塞本轮刷新。
+    private func handleClaudeDesktopAccessRequest() {
+        claudeDesktopAccessDenied = ClaudeDesktopAuth.hasUserDeniedAccess
+            && ClaudeDesktopAuth.hasCredentialMaterial
+        guard ClaudeDesktopAuth.takeExplanationRequest() else { return }
+        Task { @MainActor [weak self] in
+            self?.presentClaudeDesktopAccessExplanation()
+        }
+    }
+
+    /// 设置页「授权…」：清掉拒绝标记，重新走说明 → 系统授权。
+    func authorizeClaudeDesktopAccess() {
+        ClaudeDesktopAuth.clearDenial()
+        claudeDesktopAccessDenied = false
+        presentClaudeDesktopAccessExplanation()
+    }
+
+    private func presentClaudeDesktopAccessExplanation() {
+        guard !isPresentingClaudeDesktopAccessAlert, !isPreparingForTermination else { return }
+        isPresentingClaudeDesktopAccessAlert = true
+        defer { isPresentingClaudeDesktopAccessAlert = false }
+
+        let alert = NSAlert()
+        alert.messageText = tr("Allow Reading Claude Desktop Sign-in", "允许读取 Claude 桌面版登录")
+        alert.informativeText = tr(
+            "CCBar reads Claude Desktop's sign-in through the system's security tool to query your quota. macOS will then ask whether \"security\" can access \"Claude Safe Storage\" — choose \"Always Allow\" and CCBar updates won't ask again.",
+            "CCBar 通过系统自带的 security 工具读取 Claude 桌面版的登录状态来查询额度。接下来系统会询问「security」能否访问「Claude Safe Storage」，请选「始终允许」，之后更新 CCBar 不再询问。"
+        )
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: tr("Continue", "继续"))
+        alert.addButton(withTitle: tr("Not Now", "暂不"))
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            ClaudeDesktopAuth.recordDenial()
+            claudeDesktopAccessDenied = ClaudeDesktopAuth.hasCredentialMaterial
+            AppLog.info(.credentials, "user postponed Claude Desktop keychain access")
+            return
+        }
+        ClaudeDesktopAuth.markAccessExplained()
+        Task { [weak self] in
+            await self?.refreshQuotas(reason: .userInitiated)
+        }
     }
 
     /// 读取 Claude 账号。Claude Code CLI 与 Claude Desktop 是两个平等的凭据源：
