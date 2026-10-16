@@ -34,10 +34,6 @@ def decode_key(value, lengths, name):
     return decoded
 
 
-def version_tuple(version):
-    return tuple(int(part) for part in version.split("."))
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", required=True)
@@ -69,7 +65,8 @@ def main():
     require(info.get("SUVerifyUpdateBeforeExtraction") is True, "发布 App 必须在解压前验签")
 
     release_base = f"https://github.com/{args.repository}/releases/download/{args.tag}"
-    history_url = f"https://github.com/{args.repository}/releases/latest/download/release-notes.md"
+    # release-notes.md 只含本版内容，完整历史指向 Release 列表。
+    history_url = f"https://github.com/{args.repository}/releases"
     feed_url = f"https://github.com/{args.repository}/releases/latest/download/appcast.xml"
     require(info.get("SUFeedURL") == feed_url, "App 更新源与发布仓库不一致")
     minimum_os = str(info.get("LSMinimumSystemVersion", ""))
@@ -91,27 +88,22 @@ def main():
             "App 主执行文件包含未知或缺失的架构，停止发布")
 
     root = Path(__file__).resolve().parent.parent
-    note_files = []
-    for note in (root / "release-notes").glob("v*.md"):
-        match = re.fullmatch(r"v(\d+\.\d+\.\d+)\.md", note.name)
-        if match and version_tuple(match[1]) <= version_tuple(version):
-            content = re.sub(r"<!--.*?-->", "", note.read_text(encoding="utf-8"), flags=re.DOTALL).strip()
-            if content:
-                note_files.append((version_tuple(match[1]), match[1], content))
-    note_files.sort(reverse=True)
-    require(note_files and note_files[0][1] == version, "当前版本更新说明缺失或只有注释")
+
+    def read_note(path):
+        return re.sub(r"<!--.*?-->", "", path.read_text(encoding="utf-8"), flags=re.DOTALL).strip()
+
+    # 应用内更新内容与 Release 正文一致：本版说明在前，近期新功能在后，不加版本标题。
+    # 没有版本标题时客户端原样显示全文；客户端会忽略空行，用只含盲文空白 U+2800 的行留出一行空白。
+    note_path = root / "release-notes" / f"{args.tag}.md"
+    require(note_path.is_file() and read_note(note_path), "当前版本更新说明缺失或只有注释")
+    sections = [read_note(note_path)]
+    highlights_path = root / "release-notes" / "highlights.md"
+    if highlights_path.is_file() and read_note(highlights_path):
+        sections += ["\u2800", read_note(highlights_path)]
     args.dist.mkdir(parents=True, exist_ok=True)
     archive = args.dist / "CCBar.app.zip"
     require(archive.is_file() and archive.stat().st_size > 0, "最终 ZIP 更新包缺失")
     release_notes = args.dist / "release-notes.md"
-    sections = [f"## {item[1]}\n\n{item[2]}" for item in note_files]
-    # 近期新功能放在最前：已发布的客户端会保留第一个版本标题之前的内容，放在末尾会被过滤掉。
-    # 客户端会忽略空行（含零宽空格等），用只含盲文空白 U+2800 的行在它和各版说明之间留出一行空白。
-    highlights_path = root / "release-notes" / "highlights.md"
-    if highlights_path.is_file():
-        highlights = re.sub(r"<!--.*?-->", "", highlights_path.read_text(encoding="utf-8"), flags=re.DOTALL).strip()
-        if highlights:
-            sections.insert(0, f"{highlights}\n\n\u2800")
     release_notes.write_text("\n\n".join(sections) + "\n", encoding="utf-8")
 
     # 私钥只经 stdin 交给 Sparkle，子进程环境不再携带它，不打印签名工具的原始输出。
@@ -178,7 +170,7 @@ def main():
         "version": version,
         "page": f"https://github.com/{args.repository}/releases/tag/{args.tag}",
     }, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"已生成并签名 {args.tag} 的更新源、历史日志和旧版版本清单")
+    print(f"已生成并签名 {args.tag} 的更新源、更新说明和旧版版本清单")
 
 
 if __name__ == "__main__":
