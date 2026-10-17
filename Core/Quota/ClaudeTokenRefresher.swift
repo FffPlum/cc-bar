@@ -75,7 +75,16 @@ nonisolated enum ClaudeTokenRefresher {
             return .success(borrowed.accessToken)
         }
         AppLog.info(.credentials, "stored Claude credentials are expired; waiting for Claude Code to refresh")
-        return .failure(.credentialsExpired)
+        return .failure(.credentialsExpired(desktopAccessDenied: desktopAccessDenied(for: account)))
+    }
+
+    /// 借用 Desktop token 是否正卡在"用户拒绝过钥匙串授权"上:Desktop 有登录数据、
+    /// 本机能确认账号,只差授权。检查顺序与 `borrowToken` 的前几道一致。
+    nonisolated private static func desktopAccessDenied(for account: ClaudeAccount) -> Bool {
+        ClaudeDesktopAuth.hasCredentialMaterial
+            && account.accountUuid != nil
+            && account.organizationUuid != nil
+            && ClaudeDesktopAuth.hasUserDeniedAccess
     }
 
     /// 借用 Claude Desktop 的 access_token。Desktop 没装 / 没登录 / 不是同一账号 /

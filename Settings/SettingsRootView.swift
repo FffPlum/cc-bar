@@ -1050,8 +1050,9 @@ struct SettingsRootView: View {
             actions.append(authorizeClaudeDesktop)
         }
 
+        // 已登录时也放在行内：弹出面板的过期提示指引用户到这里授权，入口不能藏在数据来源弹窗里。
         let connectAction: ServiceAction?
-        if claudeDesktopDenied, !info.signedIn {
+        if claudeDesktopDenied {
             connectAction = authorizeClaudeDesktop
         } else if !isDetected, app == .commandCode {
             connectAction = ServiceAction(title: tr("Enter Credentials…", "填写凭据…")) { showCommandCodeSheet = true }
@@ -1534,7 +1535,7 @@ private struct ServiceEntry: Identifiable {
     let errorDetail: String?
     /// 这台 Mac 上检测到了（登录态或本机记录），决定放在「正在使用」还是「未检测到」。
     let isDetected: Bool
-    /// 副标题后的按钮：未检测到时 Command Code 手动填写凭据；Claude 未授权读取桌面版登录时重新授权。
+    /// 副标题后的按钮：未检测到时 Command Code 手动填写凭据；Claude 未授权读取桌面版登录时重新授权（已登录、未登录都显示）。
     let connectAction: ServiceAction?
     let sourceLines: [String]
     /// 数据来源弹窗底部的操作（Codex 额度重置次数、Command Code 凭据、Claude 桌面版重新授权）。

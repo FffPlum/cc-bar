@@ -493,8 +493,10 @@ nonisolated enum QuotaError: Error, CustomStringConvertible {
     /// 本地存着的 access_token 已过期,且 cc-bar 不会自己去刷新
     /// (刷新会作废 Claude Code 手里的 refresh_token,把用户挤下线,
     /// 详见 `ClaudeTokenRefresher` 的说明)。
-    /// 需要用户打开 Claude Code / 运行 `claude`,由它刷新登录态。
-    case credentialsExpired
+    /// 需要用户运行 `claude`,由它刷新登录态。
+    /// `desktopAccessDenied`:改用 Claude Desktop 登录只差钥匙串授权(用户拒绝过),
+    /// 此时提示去设置里授权。
+    case credentialsExpired(desktopAccessDenied: Bool)
 
     var description: String {
         switch self {
@@ -504,8 +506,9 @@ nonisolated enum QuotaError: Error, CustomStringConvertible {
         case .transport(let msg): return "transport: \(msg)"
         case .decode(let msg): return "decode: \(msg)"
         case .tokenRefreshFailed(let msg): return "token refresh failed: \(msg)"
-        case .credentialsExpired:
+        case .credentialsExpired(let desktopAccessDenied):
             return "claude credentials expired; waiting for Claude Code to refresh"
+                + (desktopAccessDenied ? " (Claude Desktop keychain access denied)" : "")
         }
     }
 
@@ -602,10 +605,18 @@ extension QuotaError {
         switch self {
         case .missingToken:
             return tr("Not signed in", "未登录")
-        case .credentialsExpired:
+        case .credentialsExpired(let desktopAccessDenied):
+            // 过期的是 CLI 的 access_token,运行一次 `claude` 就会续期,通常不用重新登录;
+            // Claude 桌面版里的 Claude Code 不会续期这份凭据,所以不写「打开 Claude Code」。
+            if desktopAccessDenied {
+                return tr(
+                    "Sign-in expired — allow reading Claude Desktop in Settings → Services & Accounts",
+                    "登录已过期,请到「设置 → 服务与账号」授权读取 Claude 桌面版"
+                )
+            }
             return tr(
-                "Sign-in expired — open Claude Code to sign in again",
-                "登录已过期,请打开 Claude Code 重新登录"
+                "Sign-in expired — run claude in Terminal once",
+                "登录已过期,请在终端运行一次 claude"
             )
         case .network(let kind):
             return kind.userMessage
