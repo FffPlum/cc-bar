@@ -40,7 +40,7 @@ nonisolated enum QuotaAlertPolicy {
             case .claude:
                 supported = [.fiveHour, .weekly, .modelWeekly].contains(limit.kind)
             case .antigravity:
-                supported = [.fiveHour, .weekly].contains(limit.kind)
+                supported = [.fiveHour, .weekly, .modelWeekly].contains(limit.kind)
             case .cursor:
                 supported = ["cursor-total", "cursor-auto", "cursor-api"].contains(limit.id)
             case .commandCode:

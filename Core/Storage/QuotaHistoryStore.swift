@@ -394,8 +394,11 @@ enum QuotaHistoryStore {
         snapshot: QuotaSnapshot,
         sampledAt: Date
     ) -> QuotaHistoryPayload {
-        let limits = [snapshot.primaryLimit, snapshot.secondaryLimit]
-            .compactMap { $0 }
+        // Argon 成为展示主条后，共享 Gemini 周额度移到 auxiliary，仍按原口径记录时间线。
+        let geminiLimits = snapshot.app == .antigravity ? snapshot.allLimits.filter {
+            $0.id == "gemini-5h" || $0.id == "gemini-weekly"
+        } : []
+        let limits = (geminiLimits.isEmpty ? [snapshot.primaryLimit, snapshot.secondaryLimit].compactMap { $0 } : geminiLimits)
             .filter { $0.kind == .fiveHour || $0.kind == .weekly }
         guard !limits.isEmpty else {
             return prune(payload, now: sampledAt)

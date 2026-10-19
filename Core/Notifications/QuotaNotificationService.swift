@@ -345,6 +345,7 @@ final class QuotaNotificationService {
         case .unknown: period = translate("Quota", "额度")
         }
         if app == .antigravity {
+            if limit.kind == .modelWeekly, let name = limit.displayName { return "\(name) \(period)" }
             let group = limit.id.hasPrefix("gemini-") ? "Gemini" : "Claude"
             return "\(group) \(period)"
         }

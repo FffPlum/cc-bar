@@ -1,6 +1,7 @@
 import Foundation
+import Darwin
 
-/// Antigravity（Google Antigravity / Gemini Code Assist）额度客户端（Cloud Mode）。
+/// Antigravity 额度客户端：优先读取 agy 的结构化额度，Cloud Mode 作为兜底。
 ///
 /// 直连 `https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`，
 /// 使用 `AntigravityCredentials` 读取的 `access_token` 作为 `Bearer`。
@@ -20,6 +21,58 @@ nonisolated enum AntigravityQuotaClient {
         var account: AntigravityAccount
     }
 
+    static func fetchCLIQuota(sessionKey: String) async -> Result<QuotaSnapshot, QuotaError>? {
+        await CLIQuery.shared.fetch(sessionKey: sessionKey)
+    }
+
+    /// CLI 不携带套餐和可核实身份；仅在需要时用有效令牌补充套餐，不混入云端额度。
+    static func fetchPlan(accessToken: String) async -> Result<String?, QuotaError> {
+        var request = URLRequest(url: dailyEndpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("antigravity/1.0 darwin/arm64 google-api-nodejs-client/10.3.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("gl-node/20.0.0", forHTTPHeaderField: "X-Goog-Api-Client")
+        request.httpBody = Data("{}".utf8)
+        request.timeoutInterval = 15
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return .failure(.transport("non-http")) }
+            guard (200..<300).contains(http.statusCode) else {
+                return .failure(.http(http.statusCode, "Antigravity plan lookup failed"))
+            }
+            guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .failure(.decode("Antigravity plan response is not a JSON object"))
+            }
+            return .success(parse(root: root).snapshot.planType)
+        } catch {
+            return .failure(.from(transport: error))
+        }
+    }
+
+    /// agy 1.4.0 的 /quota：command.data.groups，字段使用 snake_case。
+    static func parseCLI(root: [String: Any], fetchedAt: Date = Date()) -> QuotaSnapshot? {
+        guard root["status"] as? String == "SUCCESS",
+              let command = root["command"] as? [String: Any],
+              ["usage", "quota"].contains(command["name"] as? String ?? ""),
+              let data = command["data"] as? [String: Any],
+              let groups = data["groups"] as? [[String: Any]]
+        else { return nil }
+        let normalized = groups.map { group -> [String: Any] in
+            let buckets = (group["buckets"] as? [[String: Any]] ?? []).map { bucket -> [String: Any] in
+                var result = bucket
+                result["bucketId"] = bucket["id"]
+                result["displayName"] = bucket["name"]
+                result["remainingFraction"] = bucket["remaining_fraction"]
+                result["resetTime"] = bucket["reset_time"]
+                return result
+            }
+            return ["displayName": group["name"] as? String ?? "", "buckets": buckets]
+        }
+        let snapshot = parse(root: ["groups": normalized], fetchedAt: fetchedAt).snapshot
+        return snapshot.allLimits.isEmpty ? nil : snapshot
+    }
+
     nonisolated static func fetch(accessToken: String) async -> Result<Fetched, QuotaError> {
         let token = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else { return .failure(.missingToken) }
@@ -34,8 +87,8 @@ nonisolated enum AntigravityQuotaClient {
             case .success:
                 return result
             case .failure(let err):
-                // 401/403 直接返回，不再回退
-                if err.isAuthFailure { return .failure(err) }
+                // 认证失败或限流直接返回，不以另一域名绕过。
+                if err.isAuthFailure || err.isRateLimited { return .failure(err) }
                 lastError = err
                 continue
             }
@@ -181,8 +234,15 @@ nonisolated enum AntigravityQuotaClient {
     /// 富化合并：base 有值则保留，缺失用富化补齐。
     /// 注意：`retrieveUserQuotaSummary` 是权威分组源，当它解析出真实窗口时，
     /// 富化（fetchAvailableModels / retrieveUserQuota 等 per-model 兜底）不得覆盖。
-    /// 因此 merge 只做「缺失补齐」：base 有值一律保留，只有 nil 才由 enrichment 填充。
+    /// 普通富化只补缺失；含 Argon 的完整分组按整组采用，保留独立额度及展示顺序。
     static func merge(base: Fetched, enrichment: Fetched) -> Fetched {
+        if enrichment.snapshot.primaryLimit?.id == "gemini-argon-wtu-weekly" {
+            var snapshot = enrichment.snapshot
+            snapshot.planType = base.snapshot.planType ?? snapshot.planType
+            var account = base.account
+            account.planType = account.planType ?? enrichment.account.planType
+            return Fetched(snapshot: snapshot, account: account)
+        }
         var snap = base.snapshot
         // 仅当 base 无窗口时，用富化结果补齐
         if snap.primaryLimit == nil { snap.primaryLimit = enrichment.snapshot.primaryLimit }
@@ -226,6 +286,7 @@ nonisolated enum AntigravityQuotaClient {
         var weekly: QuotaWindow?     // 非分组源兜底的 weekly
         var geminiWindow: QuotaWindow?
         var geminiWeekly: QuotaWindow?
+        var argonWeekly: QuotaWindow?
         var claude5h: QuotaWindow?   // 仅 retrieveUserQuotaSummary 分组源（3p-5h）
         var claudeWeekly: QuotaWindow? // 仅 retrieveUserQuotaSummary 分组源（3p-weekly）
         var planType: String?
@@ -257,8 +318,9 @@ nonisolated enum AntigravityQuotaClient {
             claudeWeekly = parsed.weekly
             geminiWindow = parsed.geminiWindow ?? geminiWindow
             geminiWeekly = parsed.geminiWeekly ?? geminiWeekly
+            argonWeekly = parsed.argonWeekly
             hasGroupedData = parsed.fiveHour != nil || parsed.weekly != nil
-                || parsed.geminiWindow != nil || parsed.geminiWeekly != nil
+                || parsed.geminiWindow != nil || parsed.geminiWeekly != nil || argonWeekly != nil
             if planType == nil { planType = parsed.planType }
         }
 
@@ -317,29 +379,36 @@ nonisolated enum AntigravityQuotaClient {
         }
 
         // 组装 QuotaSnapshot：
-        // - 分组源（retrieveUserQuotaSummary）可用时，按官方两组四窗口映射：
-        //   primary = Gemini 5h，secondary = Gemini weekly，aux = [Claude 5h, Claude weekly]；
+        // 分组源固定顺序：Argon 周（存在时）→ Gemini 5h / weekly → Claude 5h / weekly。
+        // 前两条分别落 primary / secondary，其余进入 auxiliary；不把 Argon 合入普通 Gemini 周额度。
         // - 无分组源时退化为旧行为：优先 5h 主条，weekly 作副条。
         // 分组源数据优先：即便兜底（buckets/models）也填了 5h，也不覆盖分组语义。
         let primaryLimit: QuotaLimit?
         let secondaryLimit: QuotaLimit?
         let auxiliaryLimits: [QuotaLimit]
         if hasGroupedData {
-            // Gemini 前两行：主条 5h + 副条 weekly（geminiWindow/geminiWeekly 可能缺失一档）
-            primaryLimit = (geminiWindow ?? geminiWeekly).map {
-                let kind = QuotaSnapshot.kind(for: $0, fallback: .fiveHour)
-                let id = kind == .fiveHour ? "gemini-5h" : "gemini-weekly"
-                return QuotaLimit(id: id, kind: kind, displayName: "Gemini \(kind == .fiveHour ? "5H" : "WK")", window: $0, isActive: nil)
+            var limits: [QuotaLimit] = []
+            if let argonWeekly {
+                limits.append(QuotaLimit(id: "gemini-argon-wtu-weekly", kind: .modelWeekly, displayName: "Gemini 4 Argon", window: argonWeekly, isActive: nil))
             }
-            let secondaryWindow = geminiWindow != nil ? geminiWeekly : nil
-            secondaryLimit = secondaryWindow.map {
-                QuotaLimit(id: "gemini-weekly", kind: .weekly, displayName: "Gemini WK", window: $0, isActive: nil)
+            if let geminiWindow {
+                limits.append(QuotaLimit(id: "gemini-5h", kind: .fiveHour, displayName: "Gemini 5H", window: geminiWindow, isActive: nil))
             }
-            // Claude 组两行进 auxiliary（原第三方主副条降级为普通行），使用独立 id 避免与 Gemini 组 weekly 冲突被去重丢弃
-            var aux: [QuotaLimit] = []
-            if let claude5h { aux.append(QuotaLimit(id: "claude-5h", kind: .fiveHour, displayName: "Claude 5H", window: claude5h, isActive: nil)) }
-            if let claudeWeekly { aux.append(QuotaLimit(id: "claude-weekly", kind: .weekly, displayName: "Claude WK", window: claudeWeekly, isActive: nil)) }
-            auxiliaryLimits = aux
+            if let geminiWeekly {
+                limits.append(QuotaLimit(id: "gemini-weekly", kind: .weekly, displayName: "Gemini WK", window: geminiWeekly, isActive: nil))
+            }
+            if let claude5h { limits.append(QuotaLimit(id: "claude-5h", kind: .fiveHour, displayName: "Claude 5H", window: claude5h, isActive: nil)) }
+            if let claudeWeekly { limits.append(QuotaLimit(id: "claude-weekly", kind: .weekly, displayName: "Claude WK", window: claudeWeekly, isActive: nil)) }
+            // 没有 Gemini / Argon 时保留原来的第三方辅助行语义，供旧云端兜底继续补主条。
+            if argonWeekly == nil, geminiWindow == nil, geminiWeekly == nil {
+                primaryLimit = nil
+                secondaryLimit = nil
+                auxiliaryLimits = limits
+            } else {
+                primaryLimit = limits.first
+                secondaryLimit = limits.dropFirst().first
+                auxiliaryLimits = Array(limits.dropFirst(2))
+            }
         } else {
             let primaryWindow = fiveHour ?? weekly
             let secondaryWindow = fiveHour != nil ? weekly : nil
@@ -388,6 +457,7 @@ nonisolated enum AntigravityQuotaClient {
         var weekly: QuotaWindow?
         var geminiWindow: QuotaWindow?
         var geminiWeekly: QuotaWindow?
+        var argonWeekly: QuotaWindow?
         var planType: String?
     }
 
@@ -404,11 +474,17 @@ nonisolated enum AntigravityQuotaClient {
             let groupName = ((group["displayName"] as? String) ?? "").lowercased()
             for bucket in groupBuckets {
                 guard bucket["disabled"] as? Bool != true,
-                      let remaining = remainingFraction(in: bucket) else { continue }
+                      let remaining = remainingFraction(in: bucket), remaining.isFinite,
+                      (0...1).contains(remaining) else { continue }
                 let id = (bucket["bucketId"] as? String ?? "").lowercased()
                 let name = (bucket["displayName"] as? String ?? "").lowercased()
                 let windowTag = (bucket["window"] as? String ?? "").lowercased()
                 let reset = resetDate(value: bucket["resetTime"])
+
+                if id == "gemini-argon-wtu-weekly" {
+                    adoptMin(&result.argonWeekly, remaining: remaining, reset: reset, windowSeconds: 7 * 24 * 3600)
+                    continue
+                }
 
                 // 归属判定：显式 gemini-/3p- 前缀优先；其次组 displayName；
                 // 旧结构缺前缀时按默认第三方（Claude/GPT）处理，Gemini 由组名命中。
@@ -626,4 +702,145 @@ nonisolated enum AntigravityQuotaClient {
         return nil
     }
 
+    // MARK: - Official CLI
+
+    private actor CLIQuery {
+        static let shared = CLIQuery()
+        private var failedSession: String?
+        private var failedAt: Date?
+
+        private var lastError: QuotaError = .transport("Antigravity CLI quota unavailable")
+
+        func fetch(sessionKey: String) async -> Result<QuotaSnapshot, QuotaError>? {
+            if failedSession == sessionKey, let failedAt, Date().timeIntervalSince(failedAt) < 10 * 60 {
+                return .failure(lastError)
+            }
+            guard let executable = AntigravityQuotaClient.cliExecutable() else { return nil }
+            let result = await Task.detached(priority: .utility) { () -> Result<QuotaSnapshot, QuotaError> in
+                guard let output = AntigravityQuotaClient.runCLI(executable: executable),
+                      let root = try? JSONSerialization.jsonObject(with: output.data) as? [String: Any]
+                else { return .failure(.transport("Antigravity CLI quota unavailable")) }
+                if root["status"] as? String != "SUCCESS" {
+                    let message = (root["response"] as? String ?? "").lowercased()
+                    if ["429", "rate limit", "rate_limit", "resource_exhausted"].contains(where: message.contains) {
+                        return .failure(.http(429, "Antigravity CLI quota is rate limited"))
+                    }
+                }
+                guard output.succeeded, let snapshot = AntigravityQuotaClient.parseCLI(root: root) else {
+                    return .failure(.decode("Antigravity CLI quota unavailable"))
+                }
+                return .success(snapshot)
+            }.value
+            switch result {
+            case .failure(let error):
+                failedSession = sessionKey
+                failedAt = Date()
+                lastError = error
+            case .success:
+                failedSession = nil
+                failedAt = nil
+            }
+            return result
+        }
+    }
+
+    private static func cliExecutable() -> URL? {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        let directories = path.split(separator: ":").map(String.init) + [
+            home.appendingPathComponent(".local/bin").path,
+            "/opt/homebrew/bin", "/usr/local/bin",
+            home.appendingPathComponent(".gemini/bin").path,
+        ]
+        return directories.lazy.filter { $0.hasPrefix("/") }.map {
+            URL(fileURLWithPath: $0).appendingPathComponent("agy")
+        }.first { FileManager.default.isExecutableFile(atPath: $0.path) }
+    }
+
+    private struct CLIProcessOutput: Sendable {
+        var data: Data
+        var succeeded: Bool
+    }
+
+    /// 持续排空 stdout，避免管道写满；超时后终止进程，拒收超限或不完整输出。
+    private static func runCLI(executable: URL) -> CLIProcessOutput? {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = ["-p", "/quota", "--output-format", "json", "--log-file", "/dev/null"]
+        var environment = ProcessInfo.processInfo.environment
+        environment["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true"
+        for key in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"] {
+            environment.removeValue(forKey: key)
+        }
+        process.environment = environment
+        process.standardInput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let output = Pipe()
+        process.standardOutput = output
+        let completed = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in completed.signal() }
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        output.fileHandleForWriting.closeFile()
+        let buffer = CLIOutput()
+        let reader = DispatchGroup()
+        reader.enter()
+        DispatchQueue.global(qos: .utility).async {
+            defer { reader.leave() }
+            do {
+                while let chunk = try output.fileHandleForReading.read(upToCount: 8192), !chunk.isEmpty {
+                    if !buffer.append(chunk) {
+                        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                        break
+                    }
+                }
+            } catch {
+                buffer.invalidate()
+            }
+        }
+        let timedOut = completed.wait(timeout: .now() + 20) == .timedOut
+        if timedOut {
+            process.terminate()
+            if completed.wait(timeout: .now() + 0.5) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+                _ = completed.wait(timeout: .now() + 1)
+            }
+        }
+        let drained = reader.wait(timeout: .now() + 1) == .success
+        output.fileHandleForReading.closeFile()
+        guard !timedOut, drained, !process.isRunning, let data = buffer.result() else { return nil }
+        return CLIProcessOutput(data: data, succeeded: process.terminationStatus == 0)
+    }
+
+    nonisolated private final class CLIOutput: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data = Data()
+        private var valid = true
+
+        func append(_ chunk: Data) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard valid, data.count + chunk.count <= 1024 * 1024 else {
+                valid = false
+                return false
+            }
+            data.append(chunk)
+            return true
+        }
+
+        func invalidate() {
+            lock.lock()
+            defer { lock.unlock() }
+            valid = false
+        }
+
+        func result() -> Data? {
+            lock.lock()
+            defer { lock.unlock() }
+            return valid ? data : nil
+        }
+    }
 }

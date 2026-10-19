@@ -864,7 +864,7 @@ enum QuotaCycleStore {
     ) -> QuotaSnapshotSource {
         func rank(_ source: QuotaSnapshotSource) -> Int {
             switch source {
-            case .api: return 4
+            case .api, .antigravityCLI: return 4
             case .cliFallback: return 3
             case .local: return 2
             case .cache: return 1

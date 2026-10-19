@@ -113,6 +113,7 @@ nonisolated enum QuotaSnapshotSource: String, Sendable, Codable {
     case local
     case cache
     case cliFallback
+    case antigravityCLI
 
     var displayName: String {
         switch self {
@@ -120,6 +121,7 @@ nonisolated enum QuotaSnapshotSource: String, Sendable, Codable {
         case .local: return "本机"
         case .cache: return "缓存"
         case .cliFallback: return "Claude CLI"
+        case .antigravityCLI: return "Antigravity CLI"
         }
     }
 }
@@ -270,7 +272,10 @@ nonisolated struct QuotaSnapshot: Sendable, Equatable, Codable {
     }
 
     var weeklyLimit: QuotaLimit? {
-        [primaryLimit, secondaryLimit].compactMap { $0 }.first { $0.kind == .weekly }
+        if app == .antigravity, let primaryLimit, primaryLimit.kind == .modelWeekly {
+            return primaryLimit
+        }
+        return [primaryLimit, secondaryLimit].compactMap { $0 }.first { $0.kind == .weekly }
     }
 
     /// 兼容仍按标准窗口取值的调用点；新展示入口应优先使用 primaryLimit。

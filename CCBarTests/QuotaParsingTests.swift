@@ -127,6 +127,127 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertNil(snap.geminiWeekly)
     }
 
+    private func antigravityGroupsWithArgon(remaining: Double = 0.7531, disabled: Bool = false) -> [[String: Any]] {
+        antigravitySummaryGroups() + [[
+            "displayName": "Gemini 4 Argon",
+            "buckets": [[
+                "bucketId": "gemini-argon-wtu-weekly",
+                "displayName": "Gemini 4 Argon Weekly Limit",
+                "window": "weekly",
+                "remainingFraction": remaining,
+                "resetTime": "2026-10-26T03:40:17Z",
+                "disabled": disabled,
+            ]],
+        ]]
+    }
+
+    private func antigravityCLIRoot(groups: [[String: Any]]) -> [String: Any] {
+        let cliGroups = groups.map { group -> [String: Any] in
+            let buckets = (group["buckets"] as? [[String: Any]] ?? []).map { bucket -> [String: Any] in
+                var result = bucket
+                result["id"] = result.removeValue(forKey: "bucketId")
+                result["name"] = result.removeValue(forKey: "displayName")
+                result["remaining_fraction"] = result.removeValue(forKey: "remainingFraction")
+                result["reset_time"] = result.removeValue(forKey: "resetTime")
+                return result
+            }
+            return ["name": group["displayName"] as? String ?? "", "buckets": buckets]
+        }
+        return ["status": "SUCCESS", "num_turns": 0, "command": ["name": "usage", "data": ["groups": cliGroups]]]
+    }
+
+    func testAntigravityArgonIsPrimaryAndSharedWindowsKeepTheirOrder() {
+        let snapshot = AntigravityQuotaClient.parse(root: ["groups": antigravityGroupsWithArgon()]).snapshot
+        XCTAssertEqual(snapshot.allLimits.map(\.id), [
+            "gemini-argon-wtu-weekly", "gemini-5h", "gemini-weekly", "claude-5h", "claude-weekly",
+        ])
+        XCTAssertEqual(snapshot.allLimits.map(\.displayName), [
+            "Gemini 4 Argon", "Gemini 5H", "Gemini WK", "Claude 5H", "Claude WK",
+        ])
+        XCTAssertEqual(snapshot.primaryLimit?.kind, .modelWeekly)
+        XCTAssertEqual(snapshot.primaryWindow?.remainingPercent ?? 0, 75.31, accuracy: 0.001)
+        XCTAssertEqual(snapshot.auxiliaryLimits.first?.window.remainingPercent ?? 0, 84.39504, accuracy: 0.001)
+        XCTAssertEqual(snapshot.weeklyLimit?.id, "gemini-argon-wtu-weekly")
+        XCTAssertEqual(snapshot.fiveHourLimit?.id, "gemini-5h")
+        XCTAssertTrue(snapshot.modelLimits.isEmpty, "主条中的 Argon 不应再重复显示")
+    }
+
+    func testAntigravityCLIParsesSnakeCaseGroupsAndServerResetTime() throws {
+        let now = Date(timeIntervalSince1970: 1_792_389_600)
+        let snapshot = try XCTUnwrap(AntigravityQuotaClient.parseCLI(
+            root: antigravityCLIRoot(groups: antigravityGroupsWithArgon()), fetchedAt: now
+        ))
+        XCTAssertEqual(snapshot.allLimits.count, 5)
+        XCTAssertEqual(snapshot.primaryWindow?.remainingPercent ?? 0, 75.31, accuracy: 0.001)
+        XCTAssertEqual(snapshot.primaryWindow?.windowSeconds, 604_800)
+        XCTAssertEqual(snapshot.primaryWindow?.resetsAt, ISO8601DateFormatter().date(from: "2026-10-26T03:40:17Z"))
+        XCTAssertEqual(snapshot.fetchedAt, now)
+    }
+
+    func testAntigravityCLIRejectsFailureEmptyAndUnrelatedCommand() {
+        var root = antigravityCLIRoot(groups: antigravityGroupsWithArgon())
+        root["status"] = "ERROR"
+        XCTAssertNil(AntigravityQuotaClient.parseCLI(root: root))
+        XCTAssertNil(AntigravityQuotaClient.parseCLI(root: antigravityCLIRoot(groups: [])))
+        root = ["status": "SUCCESS", "command": ["name": "models", "data": ["groups": antigravitySummaryGroups()]]]
+        XCTAssertNil(AntigravityQuotaClient.parseCLI(root: root))
+    }
+
+    func testAntigravityDisabledOrInvalidArgonDoesNotReplaceSharedWeeklyQuota() throws {
+        for groups in [
+            antigravityGroupsWithArgon(disabled: true),
+            antigravityGroupsWithArgon(remaining: .nan),
+            antigravityGroupsWithArgon(remaining: -0.1),
+            antigravityGroupsWithArgon(remaining: 1.1),
+            antigravitySummaryGroups(), // Ultra 等没有独立 Argon 桶时保留四个共享窗口。
+        ] {
+            let snapshot = try XCTUnwrap(AntigravityQuotaClient.parseCLI(root: antigravityCLIRoot(groups: groups)))
+            XCTAssertEqual(snapshot.allLimits.count, 4)
+            XCTAssertEqual(snapshot.primaryLimit?.id, "gemini-5h")
+            XCTAssertEqual(snapshot.secondaryLimit?.id, "gemini-weekly")
+            XCTAssertEqual(snapshot.secondaryWindow?.remainingPercent ?? 0, 84.39504, accuracy: 0.001)
+        }
+    }
+
+    func testAntigravityArgonRemainsVisibleWhenExhaustedOrMissingReset() throws {
+        var groups = antigravityGroupsWithArgon(remaining: 0)
+        var argon = try XCTUnwrap(groups.last?["buckets"] as? [[String: Any]])
+        argon[0].removeValue(forKey: "resetTime")
+        groups[groups.count - 1]["buckets"] = argon
+        let snapshot = try XCTUnwrap(AntigravityQuotaClient.parseCLI(root: antigravityCLIRoot(groups: groups)))
+        XCTAssertEqual(snapshot.primaryWindow?.remainingPercent, 0)
+        XCTAssertNil(snapshot.primaryWindow?.resetsAt)
+        XCTAssertEqual(snapshot.allLimits.count, 5)
+    }
+
+    func testAntigravityGroupedArgonReplacesOlderBaseWithoutMixingPools() {
+        let base = antigravityFetch(buckets: [
+            antigravityBucket(modelId: "claude-opus-5-5-high", remaining: 0.1, reset: "2026-10-19T11:07:39Z"),
+        ])
+        let enriched = AntigravityQuotaClient.parse(root: ["groups": antigravityGroupsWithArgon()])
+        let merged = AntigravityQuotaClient.merge(base: base, enrichment: enriched).snapshot
+        XCTAssertEqual(merged.allLimits.map(\.id), enriched.snapshot.allLimits.map(\.id))
+        XCTAssertEqual(merged.primaryWindow?.remainingPercent ?? 0, 75.31, accuracy: 0.001)
+    }
+
+    func testAntigravityFiveRowsRoundTripThroughSnapshotCache() throws {
+        let snapshot = AntigravityQuotaClient.parse(root: ["groups": antigravityGroupsWithArgon()]).snapshot
+        let data = try JSONEncoder().encode(snapshot)
+        XCTAssertEqual(try JSONDecoder().decode(QuotaSnapshot.self, from: data), snapshot)
+        let source = try JSONEncoder().encode(QuotaSnapshotSource.antigravityCLI)
+        XCTAssertEqual(try JSONDecoder().decode(QuotaSnapshotSource.self, from: source), .antigravityCLI)
+    }
+
+    func testAntigravityTimelineStillRecordsSharedGeminiWindowsWithArgonPrimary() {
+        let now = Date(timeIntervalSince1970: 1_792_389_600)
+        let snapshot = AntigravityQuotaClient.parse(root: ["groups": antigravityGroupsWithArgon()], fetchedAt: now).snapshot
+        let payload = QuotaHistoryStore.record(
+            payload: QuotaHistoryPayload(dayStart: QuotaHistoryStore.todayStart(now: now)), accountKey: "antigravity:test", app: .antigravity,
+            kind: .antigravityPrimary, snapshot: snapshot, sampledAt: now
+        )
+        XCTAssertEqual(Set(payload.lastSamples.values.map(\.limitID)), ["gemini-5h", "gemini-weekly"])
+    }
+
     /// 无前缀（缺 gemini-/3p-）的旧结构：靠组 displayName 区分 Gemini 与第三方。
     func testAntigravitySummaryGroupsFallbackToGroupNameWhenPrefixMissing() {
         let groups: [[String: Any]] = [

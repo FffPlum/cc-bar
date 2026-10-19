@@ -1880,6 +1880,43 @@ final class AppState {
             markAntigravityFailure(noAccountMessage)
             return
         }
+        // agy 的完整额度（含 Pro 的 Argon 独立周额度）不要求先成功续期旧云端凭据。
+        let sessionKey = account.refreshToken ?? account.accessToken ?? account.source.rawValue
+        let cliResult = await AntigravityQuotaClient.fetchCLIQuota(sessionKey: sessionKey)
+        if case .success(var snapshot)? = cliResult {
+            guard let current = antigravityAccount,
+                  !antigravityIdentityChanged(previous: current, next: account) else { return }
+            account = current
+            account.planType = account.planType ?? antigravityQuota?.planType
+            var planRateLimit: QuotaError?
+            if let token = account.accessToken, !AntigravityCredentials.isExpired(expiryDate: account.expiryDate) {
+                if account.planType == nil {
+                    switch await AntigravityQuotaClient.fetchPlan(accessToken: token) {
+                    case .success(let plan): account.planType = plan
+                    case .failure(let error):
+                        if error.isRateLimited { planRateLimit = error }
+                    }
+                }
+                if account.email == nil, planRateLimit == nil {
+                    account.email = await AntigravityQuotaClient.fetchAccountEmail(accessToken: token)
+                }
+            }
+            guard let current = antigravityAccount,
+                  !antigravityIdentityChanged(previous: current, next: account) else { return }
+            antigravityAccount = account
+            snapshot.planType = account.planType
+            storeAntigravity(snapshot: snapshot, source: .antigravityCLI)
+            if let planRateLimit { markAntigravityFailure(planRateLimit.userMessage, error: planRateLimit) }
+            // CLI JSON 不含可核实账号身份；与 Claude CLI 一样只展示，不生成系统提醒。
+            return
+        }
+        if case .failure(let error)? = cliResult,
+           error.isRateLimited || antigravityQuotaSource == .antigravityCLI
+                || quotaCache.antigravity?.source == .antigravityCLI
+                || antigravityQuota?.primaryLimit?.id == "gemini-argon-wtu-weekly" {
+            markAntigravityFailure(error.userMessage, error: error)
+            return
+        }
         guard account.accessToken != nil else {
             markAntigravityFailure(QuotaError.missingToken.userMessage)
             return
@@ -1932,7 +1969,7 @@ final class AppState {
         }
         if reason == .periodic,
            let lastSuccessAt = antigravityRefreshState.lastSuccessAt,
-           now.timeIntervalSince(lastSuccessAt) < minSuccessInterval
+           now.timeIntervalSince(lastSuccessAt) < 120
         {
             return false
         }
