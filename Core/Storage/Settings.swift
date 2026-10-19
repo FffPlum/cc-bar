@@ -513,7 +513,8 @@ final class SettingsStore {
         for app in QuotaApp.allCases {
             guard let usageApp = app.usageApp else { continue }
             var settings = providers[app, default: .defaults(for: app)]
-            let visible = usage[usageApp, default: usageApp == .cursor ? false : true]
+            // 新接入用量的服务还没有统计开关记录时跟随额度开关，不把已关闭的服务重新打开。
+            let visible = usage[usageApp] ?? (usageApp == .cursor ? false : settings.enabled)
             let merged = settings.enabled || visible
             settings.enabled = merged
             providers[app] = settings
@@ -618,7 +619,7 @@ final class SettingsStore {
         usageServiceVisibility[app] = visible
     }
 
-    /// 按全部服务的顺序返回可见统计服务；没有用量的额度服务（Antigravity / Command Code）跳过。
+    /// 按全部服务的顺序返回可见统计服务；没有用量的额度服务（Command Code）跳过。
     /// Cursor 默认关闭；用户在设置页开启 Cursor 后，才会读取其远端用量缓存并进入统计页。
     var visibleUsageApps: [UsageApp] {
         orderedServices.compactMap(\.usageApp).filter { isUsageServiceEffectivelyVisible($0) }
@@ -637,8 +638,10 @@ final class SettingsStore {
                 }
             }
         }
-        for app in UsageApp.allCases where result[app] == nil {
-            result[app] = app == .cursor ? false : true
+        // 有额度开关的服务不在这里补默认值，由 `mergeServiceSwitches` 按额度开关补齐。
+        let quotaBacked = Set(QuotaApp.allCases.compactMap(\.usageApp))
+        for app in UsageApp.allCases where result[app] == nil && !quotaBacked.contains(app) {
+            result[app] = true
         }
         return result
     }

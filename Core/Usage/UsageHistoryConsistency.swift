@@ -356,6 +356,7 @@ nonisolated enum UsageStatsRules {
         .pi: 1,
         .opencode: 2,
         .dsh: 2,
+        .antigravity: 1,
     ]
 
     static var persisted: [String: Int] {

@@ -44,6 +44,8 @@ nonisolated struct UsageLogPathMatcher: Sendable {
     let directories: [String]
     /// 精确文件路径。
     let files: Set<String>
+    /// SQLite 库所在目录（Antigravity 每个对话一个库）：其下除 `-shm` 外的写入都算变化。
+    var databaseDirectories: [String] = []
 
     static func standard(roots: UsageScanRoots = .production) -> UsageLogPathMatcher {
         let directories = [roots.claudeRoot] + roots.codexRoots + [roots.piRoot, roots.dshRoot]
@@ -58,11 +60,18 @@ nonisolated struct UsageLogPathMatcher: Sendable {
         func variants(_ urls: [URL]) -> [String] {
             Array(Set(urls.flatMap { [$0.path, $0.resolvingSymlinksInPath().path] }))
         }
-        return UsageLogPathMatcher(directories: variants(directories), files: Set(variants(files)))
+        return UsageLogPathMatcher(
+            directories: variants(directories),
+            files: Set(variants(files)),
+            databaseDirectories: variants(AntigravityScanner.conversationDirectories(roots: roots.antigravityRoots))
+        )
     }
 
     func matches(_ path: String) -> Bool {
         if files.contains(path) { return true }
+        if !path.hasSuffix("-shm"), databaseDirectories.contains(where: { path.hasPrefix($0 + "/") }) {
+            return true
+        }
         return directories.contains { path == $0 || path.hasPrefix($0 + "/") }
     }
 
@@ -125,6 +134,9 @@ final class UsageLogWatcher {
             ".local/share/opencode",
             // DSH：默认根 `~/.dsh/sessions`，这里监听顶层目录（sessions 可能尚未创建）。
             ".dsh",
+            // Antigravity：`~/.gemini/antigravity*/conversations` 与 `~/.config/antigravity`。
+            ".gemini",
+            ".config/antigravity",
         ].map { home.appendingPathComponent($0, isDirectory: true).path }
     }
 

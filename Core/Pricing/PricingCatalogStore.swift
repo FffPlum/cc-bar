@@ -81,6 +81,8 @@ nonisolated final class PricingCatalogStore: @unchecked Sendable {
                 case .dsh:
                     // DSH 没有 Fast 档位概念。
                     return nil
+                case .antigravity:
+                    return nil
                 }
             case .unknown:
                 return nil

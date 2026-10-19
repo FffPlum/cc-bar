@@ -45,7 +45,7 @@ nonisolated private struct TieredPricedPeriod: Sendable {
 }
 
 nonisolated enum Pricing {
-    /// 价格表按各厂商官方定价页核对（最近一次 2026-10-08），起点对齐 cc-switch `seed_model_pricing` /
+    /// 价格表按各厂商官方定价页核对（最近一次 2026-10-19），起点对齐 cc-switch `seed_model_pricing` /
     /// CodexBar `CostUsagePricing`。命中不到时返回 nil。键为 `pricingKey(model:)` 归一化后的模型名（循环剥 provider 前缀
     /// `openai-codex/` / `openai/` / `anthropic/` / `deepseek/` / `opencode-go/` / `commandcode/` /
     /// `command-code/` / `antigravity/` / `z-ai/` / `zai/` / `minimax/` 和末尾 `-YYYYMMDD` /
@@ -154,6 +154,15 @@ nonisolated enum Pricing {
         "gemini-3.6-flash":  .init(input: 0.75, output: 3.75,  cacheRead: 0.075, cacheCreation: 0),
         // 3.1 Pro 完整输入超过 200K 时整次请求改按长上下文价（见 contextPriceTiers）。
         "gemini-3.1-pro":    .init(input: 2.00, output: 12.00, cacheRead: 0.20,  cacheCreation: 0),
+        // 4 Argon 当前为促销价，2026-12-01 起的原价见 timedOverrides。
+        "gemini-4-argon":    .init(input: 2.00, output: 10.00, cacheRead: 0.10,  cacheCreation: 0),
+        "gemini-3-flash-preview": .init(input: 0.50, output: 3.00, cacheRead: 0.05, cacheCreation: 0),
+        "gemini-3.5-flash-lite":  .init(input: 0.30, output: 2.50, cacheRead: 0.03, cacheCreation: 0),
+        "gemini-3.1-flash-lite":  .init(input: 0.25, output: 1.50, cacheRead: 0.025, cacheCreation: 0),
+        // 2.5 Pro 完整输入超过 200K 时整次请求改按长上下文价（见 contextPriceTiers）。
+        "gemini-2.5-pro":    .init(input: 1.25, output: 10.00, cacheRead: 0.125, cacheCreation: 0),
+        "gemini-2.5-flash":  .init(input: 0.30, output: 2.50,  cacheRead: 0.03,  cacheCreation: 0),
+        "gemini-2.5-flash-lite": .init(input: 0.10, output: 0.40, cacheRead: 0.01, cacheCreation: 0),
 
         // —— DeepSeek 系列（与 cc-switch seed_model_pricing 对齐）——
         // 缓存语义：通过 Anthropic 兼容端点使用时 input 不含 cache_read，直接乘价。
@@ -331,6 +340,11 @@ nonisolated enum Pricing {
             shortContext: .init(input: 2, output: 12, cacheRead: 0.20, cacheCreation: 0),
             longContext: .init(input: 4, output: 18, cacheRead: 0.40, cacheCreation: 0)
         ),
+        "gemini-2.5-pro": .init(
+            longContextThreshold: 200_000,
+            shortContext: .init(input: 1.25, output: 10, cacheRead: 0.125, cacheCreation: 0),
+            longContext: .init(input: 2.50, output: 15, cacheRead: 0.25, cacheCreation: 0)
+        ),
         // 官方：不超过 100K 用短价，超过 100K 整次请求用长价。1h 缓存写入仍按当时输入价的 2 倍。
         "claude-haiku-5-5": .init(
             longContextThreshold: 100_000,
@@ -424,6 +438,7 @@ nonisolated enum Pricing {
         "gemini-3.6-flash": geminiFlashPeriods,
         "gemini-3.7-flash": geminiFlashPeriods,
         "gemini-3.8-flash": geminiFlashPeriods,
+        "gemini-4-argon": gemini4ArgonPeriods,
         "claude-sonnet-5-5": sonnet55Periods,
         "claude-sonnet-5.5": sonnet55Periods,
     ]
@@ -434,6 +449,14 @@ nonisolated enum Pricing {
         PricedPeriod(
             from: utcDay(year: 2027, month: 1, day: 1),
             price: ModelPrice(input: 1.50, output: 7.50, cacheRead: 0.15, cacheCreation: 0)
+        ),
+    ]
+
+    /// Gemini 4 Argon：表内 $2 / $10 是截至 2026-11-30 的促销价，2026-12-01 起为 $4 / $20。
+    private static let gemini4ArgonPeriods: [PricedPeriod] = [
+        PricedPeriod(
+            from: utcDay(year: 2026, month: 12, day: 1),
+            price: ModelPrice(input: 4, output: 20, cacheRead: 0.20, cacheCreation: 0)
         ),
     ]
 
@@ -569,6 +592,7 @@ nonisolated enum Pricing {
                 case .pi: return nil
                 case .opencode: return nil
                 case .dsh: return nil
+                case .antigravity: return nil
                 }
             }
             switch app {
@@ -596,6 +620,9 @@ nonisolated enum Pricing {
                 return nil
             case .dsh:
                 // DSH 没有 Fast 档位概念。
+                return nil
+            case .antigravity:
+                // Antigravity 没有 Fast 档位概念。
                 return nil
             }
         }
@@ -869,6 +896,9 @@ nonisolated enum Pricing {
                 return nil
             case .dsh:
                 // DSH 无 Fast 档位概念。
+                return nil
+            case .antigravity:
+                // Antigravity 无 Fast 档位概念。
                 return nil
             }
         }

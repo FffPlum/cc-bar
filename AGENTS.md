@@ -7,7 +7,7 @@
 cc-bar 是一个原生 macOS 菜单栏 App，用 Swift / SwiftUI 实现。
 
 - 额度 Provider（`QuotaApp`）：Codex、Claude Code、Antigravity、Cursor、Command Code，外加用户手动导入的其他 Codex 账号。
-- 本地用量数据源（`UsageApp`）：Codex、Claude Code、Pi、OpenCode 走本机日志扫描，Cursor 走远端计量。
+- 本地用量数据源（`UsageApp`）：Codex、Claude Code、Antigravity、Pi、OpenCode、DSH 走本机日志扫描，Cursor 走远端计量。
 - 展示位：菜单栏标签、Popover、主窗口（统计 / 设置）、桌面悬浮窗、首次启动引导。
 
 项目主体功能已开发完成，后续以新需求和迭代为主，不再按初始里程碑推进。

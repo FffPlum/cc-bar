@@ -286,7 +286,7 @@ final class CycleUsageAggregator {
             return model.lowercased().hasPrefix("openai-codex/") ? .codex : nil
         case .opencode:
             return model.lowercased().hasPrefix("openai/") ? .codex : nil
-        case .cursor:
+        case .cursor, .antigravity:
             return nil
         }
     }
@@ -307,7 +307,7 @@ final class CycleUsageAggregator {
                 .map { String(name.dropFirst($0.count)) } ?? name
             guard !bare.contains("/") else { return false }
             return ["gpt-", "codex-", "chatgpt-", "o1", "o3", "o4"].contains { bare.hasPrefix($0) }
-        case .pi, .opencode, .dsh, .cursor:
+        case .pi, .opencode, .dsh, .cursor, .antigravity:
             return true
         }
     }

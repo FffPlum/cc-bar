@@ -952,6 +952,11 @@ struct SettingsRootView: View {
             // 没有默认日志不能据此断定用户未安装 DSH。
             hasRecords = directoryExists(".dsh/sessions")
             installed = exists(".dsh")
+        case .antigravity:
+            // App / IDE / CLI 各有一个数据目录，任一目录下有对话库目录即算有记录。
+            let roots = [".gemini/antigravity", ".gemini/antigravity-cli", ".gemini/antigravity-ide"]
+            hasRecords = roots.contains { directoryExists("\($0)/conversations") }
+            installed = roots.contains { exists($0) }
         case .cursor:
             // Cursor 没有本机记录，用量来自账号远端计量。
             return .missing
@@ -1003,7 +1008,13 @@ struct SettingsRootView: View {
             sourceLines.append(tr("Usage: fetches usage records from your Cursor account online.",
                                   "用量：联网读取 Cursor 账号的用量记录。"))
             isDetected = info.signedIn
-        case .antigravity, .commandCode:
+        case .antigravity:
+            sourceLines.append(tr(
+                "Usage: reads conversation records of the Antigravity app, IDE and CLI in ~/.gemini and calculates tokens and cost on this Mac. Model names in the app's records are partly inferred, so costs are estimates.",
+                "用量：读取 ~/.gemini 中 Antigravity App、IDE 和 CLI 的对话记录，在本机计算 Token 和费用。App 记录里的模型名部分靠推断，费用为估算。"
+            ))
+            isDetected = info.signedIn || localRecordState(for: .antigravity) != .missing
+        case .commandCode:
             sourceLines.append(tr("\(provider.title) does not provide usage data.", "\(provider.title) 不提供用量数据。"))
             isDetected = info.signedIn
         }
@@ -1228,6 +1239,7 @@ struct SettingsRootView: View {
         case .pi: appName = "Pi"
         case .opencode: appName = "OpenCode"
         case .dsh: appName = "DSH"
+        case .antigravity: appName = "Antigravity"
         }
         if progress.filesTotal > 0 {
             return tr(

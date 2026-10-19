@@ -13,7 +13,8 @@ nonisolated enum QuotaApp: String, Sendable, Codable, CaseIterable, Hashable {
         case .codex: return .codex
         case .claude: return .claude
         case .cursor: return .cursor
-        case .antigravity, .commandCode: return nil
+        case .antigravity: return .antigravity
+        case .commandCode: return nil
         }
     }
 }

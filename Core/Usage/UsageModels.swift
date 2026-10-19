@@ -9,16 +9,18 @@ nonisolated enum UsageApp: String, Sendable, Codable, Hashable, CaseIterable {
     case opencode
     /// DSH（DeepSeek Harness）本地会话日志；只接入主窗口普通统计与对话，不进 Cycles 与额度 Timeline。
     case dsh
+    /// Antigravity（2.0 App / IDE / agy CLI）本机对话库；只接入主窗口普通统计与对话，不进 Cycles 与额度 Timeline。
+    case antigravity
 
     /// 当前本地扫描器实际支持的数据源。Cursor 虽属于 `UsageApp`，但不在此集合中。
-    static let localApps: [UsageApp] = [.codex, .claude, .pi, .opencode, .dsh]
+    static let localApps: [UsageApp] = [.codex, .claude, .pi, .opencode, .dsh, .antigravity]
 
     /// 原生日志能定位到第一个 token 的服务。Pi 日志只有请求开始与结束时间，Cursor 只有远端计量，
-    /// 两者不显示首字延迟和输出速度。
+    /// Antigravity 的耗时字段含义未核实，三者不显示首字延迟和输出速度。
     var supportsGenerationTiming: Bool {
         switch self {
         case .claude, .codex, .opencode, .dsh: return true
-        case .pi, .cursor: return false
+        case .pi, .cursor, .antigravity: return false
         }
     }
 

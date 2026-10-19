@@ -112,7 +112,7 @@ nonisolated struct UsageSnapshot: Sendable, Codable {
             // 否则下一次启动会把空状态当成可续扫进度。
             guard scanState.generationID.isEmpty,
                   scanState.claude.isEmpty, scanState.codex.isEmpty, scanState.pi.isEmpty,
-                  scanState.dsh.isEmpty, scanState.opencode == nil,
+                  scanState.dsh.isEmpty, scanState.opencode == nil, scanState.antigravity == nil,
                   scanState.claudeSeenMessageIds.isEmpty, scanState.codexSeenTokenIds.isEmpty,
                   scanState.piSeenEntryIds.isEmpty
             else {

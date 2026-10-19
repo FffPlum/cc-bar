@@ -29,7 +29,7 @@
 | [草案-性能与功耗等价优化方案.md](草案-性能与功耗等价优化方案.md) | 批次 A/B/C/D 已落地(单一时基调度、FSEvents 日志门控、rollup / 额度写盘节流与 `QuotaPersistenceCoordinator`、`QuotaRefreshPlan`、统计概览 `StatsOverviewModel` 单次派生 + revision 缓存) |
 | [草案-Cursor支持-设计方案.md](草案-Cursor支持-设计方案.md) | 已落地：`CursorAuth` 只读 SQLite、`CursorQuotaClient` / `CursorUsageFetcher`、独立 `cursor-usage-rollup.json`、Popover / 菜单栏 / 悬浮窗 / 统计页 / 设置 / Onboarding 全部接入。文档保留接口字段与风险说明的追溯细节 |
 | [草案-CommandCode支持-设计方案.md](草案-CommandCode支持-设计方案.md) | 已落地：`CommandCodeAuth` 五级凭据扫描 + Keychain 手动 Key、`CommandCodeQuotaClient`、设置账号行与凭据 Sheet、Popover / 菜单栏 / 悬浮窗。按设计不进入主窗口用量统计 |
-| [草案-Antigravity支持-设计方案.md](草案-Antigravity支持-设计方案.md) | 已落地：凭据文件检测及云端兜底；2026-10-19 增加 agy JSON 优先取数，Argon 独立周额度作为主条，其后 Gemini 5H / WK、Claude 5H / WK。Debug 编译及 `QuotaParsingTests` 126 项通过（含新增 8 项），用户已验收刷新与五行展示；无本地用量日志，不进入用量统计 |
+| [草案-Antigravity支持-设计方案.md](草案-Antigravity支持-设计方案.md) | 已落地：凭据文件检测及云端兜底；2026-10-19 增加 agy JSON 优先取数，Argon 独立周额度作为主条，其后 Gemini 5H / WK、Claude 5H / WK。Debug 编译及 `QuotaParsingTests` 126 项通过（含新增 8 项），用户已验收刷新与五行展示。2026-10-19 起读取本机对话库（App / IDE / CLI）进入用量统计，见技术实现 §7.4c；Debug 编译及全量单测 507 项通过（含新增 `AntigravityScannerTests` 13 项），待用户手动验收 |
 | [草案-OpenCodeGo支持-设计方案.md](草案-OpenCodeGo支持-设计方案.md) | **未实施**：`QuotaApp` 中没有 opencodeGo，也没有对应的凭据 / 额度客户端。注意区分——`OpencodeScanner`(`~/.local/share/opencode/opencode.db`)是已落地的**本地用量**扫描器，与本草案的 OpenCode Go **订阅额度**不是一回事 |
 | [草案-诊断日志-设计方案.md](草案-诊断日志-设计方案.md) | 已落地：`AppLog` 门面 + `Redact` 脱敏 + `DiagnosticsBundle` 导出，全部 `print` 与散落的 `os.Logger` 已收编，设置页「通用 → 诊断」提供导出 / 打开日志目录 / 详细日志。行为已并入 `技术实现.md` §15 与 `界面布局.md` §4.5.4；草案保留脱敏规则表与取舍依据的追溯细节 |
 | [草案-用量统计增强与对话明细-需求.md](草案-用量统计增强与对话明细-需求.md) | 单对话能力已并入常驻文档;仅保留未实施后续候选 |

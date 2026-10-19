@@ -106,6 +106,7 @@ extension UsageApp {
         // DSH 识别色取官方主题强调蓝（dsh-client-ui-theme 的 deepseek-500 / 深色 deepseek-400，
         // Asset Catalog : DshAccent），用于图表 / 色块；tile 走官方品牌主色黑底，不用此色。
         case .dsh: .dshAccent
+        case .antigravity: .antigravityAccent
         }
     }
 
@@ -117,6 +118,7 @@ extension UsageApp {
         case .pi: "Pi"
         case .opencode: "OpenCode"
         case .dsh: "DSH"
+        case .antigravity: "Antigravity"
         }
     }
 

@@ -245,6 +245,9 @@ struct QuotaCycleCardsSection: View {
         case .dsh:
             // DSH 没有额度周期，额度页不出现该服务。
             return nil
+        case .antigravity:
+            // Antigravity 用量不进周期统计。
+            return nil
         }
     }
 

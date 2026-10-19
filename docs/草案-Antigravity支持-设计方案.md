@@ -1,6 +1,6 @@
 # 重新支持 Antigravity 用量查询实现方案（OpenUsage / CodexBar 架构）
 
-> 状态：**已落地**。`Core/Credentials/AntigravityCredentials.swift`（jetski 优先 + `oauth_creds.json` 兜底、双 client 刷新、secret 从本机官方组件提取）与 `Core/Quota/AntigravityQuotaClient.swift`（`loadCodeAssist` + `retrieveUserQuotaSummary` + `fetchAvailableModels` + `retrieveUserQuota` 四段富化）已实现，Popover、菜单栏、悬浮窗、设置账号行与 Onboarding 均已接入，Provider 默认开启。行为已同步到产品需求 §1/§3/§5、技术实现 §5.5/§6.1、设计风格 §4.2 与界面布局。Antigravity 没有本地日志，不进入主窗口用量统计。本文保留为设计与调研的追溯材料。
+> 状态：**已落地**。`Core/Credentials/AntigravityCredentials.swift`（jetski 优先 + `oauth_creds.json` 兜底、双 client 刷新、secret 从本机官方组件提取）与 `Core/Quota/AntigravityQuotaClient.swift`（`loadCodeAssist` + `retrieveUserQuotaSummary` + `fetchAvailableModels` + `retrieveUserQuota` 四段富化）已实现，Popover、菜单栏、悬浮窗、设置账号行与 Onboarding 均已接入，Provider 默认开启。行为已同步到产品需求 §1/§3/§5、技术实现 §5.5/§6.1、设计风格 §4.2 与界面布局。2026-10-19 起读取本机 `~/.gemini/antigravity*/conversations/*.db` 对话库进入主窗口用量统计，实现见技术实现 §7.4c。本文保留为设计与调研的追溯材料。
 
 > 2026-10-19 更新：优先读取官方 `agy -p "/quota" --output-format json`，旧云端链路仅作兜底。有 `gemini-argon-wtu-weekly` 时，主条显示 Gemini 4 Argon 周额度，其后依次为 Gemini 5H / WK、Claude 5H / WK，共五行。CLI 设置超时、输出大小限制与失败冷却，失败保留已有 CLI 快照；完整行为以产品需求 §3 / §5、技术实现 §6.1 和界面布局为准。下文保留最初云端方案。
 

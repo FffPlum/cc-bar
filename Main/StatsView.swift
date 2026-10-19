@@ -300,6 +300,7 @@ enum StatsServiceFilter: Hashable, CaseIterable {
     case pi
     case opencode
     case dsh
+    case antigravity
 
     var englishLabel: String {
         switch self {
@@ -310,6 +311,7 @@ enum StatsServiceFilter: Hashable, CaseIterable {
         case .pi: return "Pi"
         case .opencode: return "OpenCode"
         case .dsh: return "DSH"
+        case .antigravity: return "Antigravity"
         }
     }
 
@@ -322,6 +324,7 @@ enum StatsServiceFilter: Hashable, CaseIterable {
         case .pi: return "Pi"
         case .opencode: return "OpenCode"
         case .dsh: return "DSH"
+        case .antigravity: return "Antigravity"
         }
     }
 
@@ -334,6 +337,7 @@ enum StatsServiceFilter: Hashable, CaseIterable {
         case .pi: return .pi
         case .opencode: return .opencode
         case .dsh: return .dsh
+        case .antigravity: return .antigravity
         }
     }
 }
@@ -592,7 +596,7 @@ struct StatsView: View {
         case .all: return ordered
         case .codex: return ordered.contains(.codex) ? [.codex] : []
         case .claude: return ordered.contains(.claude) ? [.claude] : []
-        case .cursor, .pi, .opencode, .dsh: return []
+        case .cursor, .pi, .opencode, .dsh, .antigravity: return []
         }
     }
 
@@ -670,6 +674,7 @@ struct StatsView: View {
         case .pi: return .pi
         case .opencode: return .opencode
         case .dsh: return .dsh
+        case .antigravity: return .antigravity
         }
     }
 
@@ -964,7 +969,7 @@ struct StatsView: View {
                         isLoading: appState.refreshState(for: .claude).inFlight
                     ))
                 }
-            case .cursor, .pi, .opencode, .dsh:
+            case .cursor, .pi, .opencode, .dsh, .antigravity:
                 break
             }
         }

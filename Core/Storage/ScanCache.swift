@@ -117,6 +117,9 @@ nonisolated struct ScanState: Sendable, Equatable, Codable {
     var opencode: OpencodeScanner.State?
     /// DSH 扫描 watermark：按规范日志文件路径记录；generation 切换淘汰的文件不再续扫。
     var dsh: [String: ScanFileState] = [:]
+    /// Antigravity 逐对话库文件签名。可选字段兼容旧缓存；nil 时仅从零扫描 Antigravity。
+    /// 贡献与 OpenCode 一样保存在同代 conversation-rollup 中，签名必须与日 / 对话聚合一起提交。
+    var antigravity: AntigravityScanner.State?
 }
 
 /// 保留插入顺序的去重集合，供三个扫描器做跨文件 ID 去重并按「最近 N 条」截断。

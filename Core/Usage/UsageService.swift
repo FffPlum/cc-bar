@@ -12,6 +12,8 @@ nonisolated struct UsageScanRoots: Sendable {
     var piRoot: URL
     var opencodeDatabaseURL: URL
     var dshRoot: URL
+    /// Antigravity 数据根（含 `conversations/`）。默认空：测试不注入就不会读到真实对话库。
+    var antigravityRoots: [URL] = []
 
     static var production: UsageScanRoots {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -25,7 +27,8 @@ nonisolated struct UsageScanRoots: Sendable {
             codexTitles: { ConversationTitleIndex.codexTitles() },
             piRoot: home.appendingPathComponent(".pi/agent/sessions", isDirectory: true),
             opencodeDatabaseURL: OpencodeScanner.defaultDatabaseURL(),
-            dshRoot: DshSessionScanner.defaultRoot
+            dshRoot: DshSessionScanner.defaultRoot,
+            antigravityRoots: AntigravityScanner.defaultRoots()
         )
     }
 }
@@ -1783,6 +1786,7 @@ final class UsageService {
         let piRoot = roots.piRoot
         let opencodeDatabaseURL = roots.opencodeDatabaseURL
         let dshRoot = roots.dshRoot
+        let antigravityRoots = roots.antigravityRoots
         let dshFrozen = isDshHistoryFrozen
         let preservedDshState = cachedScanState?.dsh ?? [:]
 
@@ -1843,6 +1847,9 @@ final class UsageService {
                 ? DshSessionScanner.frozenResult(preserving: preservedDshState)
                 : DshSessionScanner.scan(previous: [:], root: dshRoot, onProgress: progress)
         }.value
+        async let antigravityTask = Task.detached(priority: .utility) {
+            AntigravityScanner.scan(previous: nil, roots: antigravityRoots, onProgress: progress)
+        }.value
 
         let claude = await claudeTask
         var codex = await codexTask
@@ -1850,6 +1857,7 @@ final class UsageService {
         let pi = await piTask
         let opencode = await opencodeTask
         let dsh = await dshTask
+        let antigravity = await antigravityTask
 
         var incomplete: [String] = []
         if claude.failedFileCount > 0 { incomplete.append("Claude Code") }
@@ -1863,15 +1871,17 @@ final class UsageService {
 
         // 需要保留的历史分区（源库中已删除会话、DSH 历史贡献）先按基准装载，
         // 再由完整扫描结果覆盖；不能用空聚合器直接覆盖历史。
+        // Antigravity 读不出的库不进刷新集合，其对话也沿用基准，不算来源不完整。
         let baselineDay = aggregator.snapshotLocal()
         let baselineConversation = conversationAggregator.snapshot()
         let baselineCycles = cycleAggregator.snapshot()
         let candidateDaily = UsageAggregator()
         let candidateConversations = ConversationAggregator()
-        candidateDaily.load(from: baselineDay.filter { $0.app == .opencode || $0.app == .dsh })
+        let sessionReplacedApps: Set<UsageApp> = [.opencode, .dsh, .antigravity]
+        candidateDaily.load(from: baselineDay.filter { sessionReplacedApps.contains($0.app) })
         candidateConversations.load(
-            infos: baselineConversation.infos.filter { $0.app == .opencode || $0.app == .dsh },
-            buckets: baselineConversation.buckets.filter { $0.app == .opencode || $0.app == .dsh }
+            infos: baselineConversation.infos.filter { sessionReplacedApps.contains($0.app) },
+            buckets: baselineConversation.buckets.filter { sessionReplacedApps.contains($0.app) }
         )
 
         candidateDaily.ingestLocal(claude.entries)
@@ -1879,6 +1889,11 @@ final class UsageService {
         candidateDaily.ingestLocal(pi.entries)
         _ = Self.applyOpenCodeScan(
             opencode,
+            aggregator: candidateDaily,
+            conversations: candidateConversations
+        )
+        _ = Self.applyAntigravityScan(
+            antigravity,
             aggregator: candidateDaily,
             conversations: candidateConversations
         )
@@ -1999,7 +2014,8 @@ final class UsageService {
             codex: codex.newState,
             pi: pi.newState,
             opencode: opencode.newState,
-            dsh: dshFrozen ? preservedDshState : dsh.newState
+            dsh: dshFrozen ? preservedDshState : dsh.newState,
+            antigravity: antigravity.newState
         )
         let requiredApps = Self.requiredCycleSourceApps(cycles: cycles)
         let completedApps = incomplete.isEmpty
@@ -2071,6 +2087,7 @@ final class UsageService {
         let piRoot = roots.piRoot
         let opencodeDatabaseURL = roots.opencodeDatabaseURL
         let dshRoot = roots.dshRoot
+        let antigravityRoots = roots.antigravityRoots
         let dshFrozen = isDshHistoryFrozen
         // 账本里的 ID 没有条数上限；基准建立之前账本不完整，旧 seen 列表照常参与去重。
         let claudeKnown = messageLedger.knownIDs(for: .claude)
@@ -2120,6 +2137,13 @@ final class UsageService {
                 ? DshSessionScanner.frozenResult(preserving: prev.dsh)
                 : DshSessionScanner.scan(previous: dshPrevious, root: dshRoot, onProgress: progress)
         }.value
+        async let antigravityTask = Task.detached(priority: .utility) {
+            AntigravityScanner.scan(
+                previous: prev.antigravity,
+                roots: antigravityRoots,
+                onProgress: progress
+            )
+        }.value
 
         let claude = await claudeTask
         var codex = await codexTask
@@ -2127,9 +2151,11 @@ final class UsageService {
         let pi = await piTask
         let opencode = await opencodeTask
         let dsh = await dshTask
+        let antigravity = await antigravityTask
         // DSH 的坏帧、坏文件也要能浮出来（§6 决策 4）；pi / opencode 的既有行为不动。
         let failedFileCount = claude.failedFileCount + codex.failedFileCount
             + dsh.failedFileCount + dsh.failedDirectoryCount + dsh.duplicateSessionCount
+            + antigravity.failedDatabaseCount
 
         aggregator.ingestLocal(claude.entries)
         aggregator.ingestLocal(codex.entries)
@@ -2140,6 +2166,9 @@ final class UsageService {
         let cycleEntries = claude.entries + codex.entries + pi.entries
         let opencodeChanged = Self.applyOpenCodeScan(
             opencode, aggregator: aggregator, conversations: conversationAggregator
+        )
+        let antigravityChanged = Self.applyAntigravityScan(
+            antigravity, aggregator: aggregator, conversations: conversationAggregator
         )
         let conversationChanged = conversationAggregator.ingest(
             entries: claude.entries + codex.entries + pi.entries,
@@ -2226,7 +2255,8 @@ final class UsageService {
 
         // 没有用量或档案变化时仍统一保存完整快照，watermark 也受写盘节流约束。
         let hasNewEntries = !claude.entries.isEmpty || !codex.entries.isEmpty
-            || !pi.entries.isEmpty || opencodeChanged || dshUpdate.changed || dshRebuildReady
+            || !pi.entries.isEmpty || opencodeChanged || antigravityChanged
+            || dshUpdate.changed || dshRebuildReady
         if hasNewEntries || conversationChanged { hasUnwrittenRollupChanges = true }
         // 尚未建立代次时必须立刻落盘，否则内存与磁盘无从对齐。
         let mustWriteRollups = loadedRollupGeneration == nil
@@ -2289,7 +2319,8 @@ final class UsageService {
             pi: pi.newState,
             piSeenEntryIds: piSeen,
             opencode: opencode.newState,
-            dsh: dshStateForScan
+            dsh: dshStateForScan,
+            antigravity: antigravity.newState
         )
         let cycleNeedsWrite = cycleChanged || loadedCycleGeneration == nil
         // 任何一次落盘都是「汇总 + 进度 + 周期 + DSH」的整份提交：不能只写其中一份。
@@ -2311,7 +2342,8 @@ final class UsageService {
             pi: pi.newState,
             piSeenEntryIds: piSeen,
             opencode: opencode.newState,
-            dsh: dshStateForScan
+            dsh: dshStateForScan,
+            antigravity: antigravity.newState
         )
 
         if shouldCommitSnapshot {
@@ -2370,6 +2402,7 @@ final class UsageService {
             pi files=\(pi.filesScanned) lines=\(pi.linesParsed) new=\(pi.entries.count); \
             opencode messages=\(opencode.messagesRead) sessions=\(opencode.refreshedSessionIDs.count) entries=\(opencode.entries.count); \
             dsh files=\(dsh.filesScanned) new=\(dsh.entries.count) unreadable=\(dsh.failedFileCount) directories=\(dsh.failedDirectoryCount) duplicateIDs=\(dsh.duplicateSessionCount); \
+            antigravity databases=\(antigravity.databasesRead) conversations=\(antigravity.refreshedConversationIDs.count) entries=\(antigravity.entries.count) unreadable=\(antigravity.failedDatabaseCount); \
             unreadable=\(failedFileCount); elapsed=\(elapsed)
             """)
         return true
@@ -2619,17 +2652,53 @@ final class UsageService {
         aggregator: UsageAggregator,
         conversations: ConversationAggregator
     ) -> Bool {
-        guard scan.isComplete, !scan.refreshedSessionIDs.isEmpty else { return false }
-        let refreshedKeys = Set(scan.refreshedSessionIDs.map { "opencode:\($0)" })
+        guard scan.isComplete else { return false }
+        return replaceConversations(
+            app: .opencode,
+            refreshedKeys: Set(scan.refreshedSessionIDs.map { "opencode:\($0)" }),
+            entries: scan.entries,
+            seeds: scan.conversationSeeds,
+            aggregator: aggregator,
+            conversations: conversations
+        )
+    }
+
+    /// Antigravity 与 OpenCode 同口径：刷新对话整体替换，源库已删除的对话保留。
+    @discardableResult
+    static func applyAntigravityScan(
+        _ scan: AntigravityScanner.Result,
+        aggregator: UsageAggregator,
+        conversations: ConversationAggregator
+    ) -> Bool {
+        guard scan.isComplete else { return false }
+        return replaceConversations(
+            app: .antigravity,
+            refreshedKeys: Set(scan.refreshedConversationIDs.map { "antigravity:\($0)" }),
+            entries: scan.entries,
+            seeds: scan.conversationSeeds,
+            aggregator: aggregator,
+            conversations: conversations
+        )
+    }
+
+    private static func replaceConversations(
+        app: UsageApp,
+        refreshedKeys: Set<String>,
+        entries: [UsageEntry],
+        seeds: [ConversationSeed],
+        aggregator: UsageAggregator,
+        conversations: ConversationAggregator
+    ) -> Bool {
+        guard !refreshedKeys.isEmpty else { return false }
         let old = conversations.snapshot()
         let refreshed = ConversationAggregator()
-        refreshed.ingest(entries: scan.entries, seeds: scan.conversationSeeds)
+        refreshed.ingest(entries: entries, seeds: seeds)
         let replacement = refreshed.snapshot()
         let infos = old.infos.filter {
-            $0.app == .opencode && !refreshedKeys.contains($0.key)
+            $0.app == app && !refreshedKeys.contains($0.key)
         } + replacement.infos
         let buckets = old.buckets.filter {
-            $0.app == .opencode && !refreshedKeys.contains($0.conversationKey)
+            $0.app == app && !refreshedKeys.contains($0.conversationKey)
         } + replacement.buckets
 
         // 签名改变但用量未变（如流式正文更新）时，不推进 UI revision 或重写 rollup。
@@ -2639,9 +2708,9 @@ final class UsageService {
             if lhs.model != rhs.model { return lhs.model < rhs.model }
             return lhs.speed.rawValue < rhs.speed.rawValue
         }
-        let sameInfos = old.infos.filter { $0.app == .opencode }.sorted { $0.key < $1.key }
+        let sameInfos = old.infos.filter { $0.app == app }.sorted { $0.key < $1.key }
             == infos.sorted { $0.key < $1.key }
-        let sameBuckets = old.buckets.filter { $0.app == .opencode }.sorted(by: bucketOrder)
+        let sameBuckets = old.buckets.filter { $0.app == app }.sorted(by: bucketOrder)
             == buckets.sorted(by: bucketOrder)
         guard !sameInfos || !sameBuckets else { return false }
 
@@ -2665,7 +2734,7 @@ final class UsageService {
                 dayBuckets[key] = dayBucket
             } else {
                 dayBuckets[key] = UsageBucket(
-                    app: .opencode, model: bucket.model, speed: bucket.speed, day: bucket.day,
+                    app: app, model: bucket.model, speed: bucket.speed, day: bucket.day,
                     inputTokens: bucket.inputTokens, outputTokens: bucket.outputTokens,
                     cacheReadTokens: bucket.cacheReadTokens, cacheCreationTokens: bucket.cacheCreationTokens,
                     costUSD: bucket.costUSD, requestCount: bucket.requestCount,
@@ -2673,8 +2742,8 @@ final class UsageService {
                 )
             }
         }
-        aggregator.replaceLocal(app: .opencode, buckets: Array(dayBuckets.values))
-        conversations.replaceLocal(app: .opencode, infos: infos, buckets: buckets)
+        aggregator.replaceLocal(app: app, buckets: Array(dayBuckets.values))
+        conversations.replaceLocal(app: app, infos: infos, buckets: buckets)
         return true
     }
 
