@@ -232,6 +232,7 @@ final class QuotaNotificationService {
                 previous: account.windows[key], window: limit.window, kind: limit.kind,
                 threshold: prefs.threshold, observationID: observation.id, now: observation.observedAt,
                 baseline: baseline, allowBillingCycle: observation.raw.app == .cursor || limit.id == "command-code-monthly"
+                    || limit.id == "opencode-go-monthly"
             ) else { continue }
             account.windows[key] = result.record
             if rebuildingAll { next.baselineEntries[baselineKey]?.insert(key) }
@@ -337,6 +338,7 @@ final class QuotaNotificationService {
     private func limitLabel(_ limit: QuotaLimit, app: QuotaApp) -> String {
         if app == .cursor { return limit.displayName ?? translate("Billing cycle quota", "计费周期额度") }
         if limit.id == "command-code-monthly" { return translate("Monthly credits", "月额度") }
+        if limit.id == "opencode-go-monthly" { return translate("Monthly quota", "月额度") }
         let period: String
         switch limit.kind {
         case .fiveHour:

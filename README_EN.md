@@ -46,6 +46,7 @@ cc-bar presents two types of data: **Subscription Quotas** queried directly from
 | **Antigravity** | Gemini 5h & weekly, Claude auxiliary | Supported | — | — | Google Cloud OAuth (auto-renew) |
 | **Cursor** | Total / Auto / API (incl. Unlimited) | Supported | Remote metering (today / this cycle) | — | Local `state.vscdb` (read-only) |
 | **Command Code** | 5h / weekly quotas, GOAT monthly Credits | Supported | — | — | 5-level auto-detection / Keychain Key |
+| **OpenCode Go** | 5h / weekly / monthly quotas | Supported | — | — | OpenCode / Pi read-only detection / Keychain Key |
 | **Pi / OpenCode / DSH** | — | — | Local sessions (Pi / OpenCode / DSH multi-frame zstd) | — | Strictly read-only local logs & DB |
 
 ---
@@ -128,6 +129,7 @@ Usage logs are parsed and stored locally. Quotas, Cursor remote metering, servic
 | **Antigravity** | `~/.gemini/jetski-standalone-oauth-token`<br>`~/.gemini/oauth_creds.json` (fallback) | Read / Write | Reads the standalone OAuth token first and refreshes near expiry. Cloud Mode queries Google Cloud APIs directly without requiring local IDE processes. |
 | **Cursor** | `~/Library/Application Support/Cursor`<br>`/User/globalStorage/state.vscdb` | **Strictly Read-Only** | Reads only `cursorAuth/accessToken` to construct session cookies for usage queries. Never touches refresh tokens/OAuth and never writes back to SQLite or Keychain. |
 | **Command Code** | 5-level local sources or macOS Keychain | Read / Keychain | Read-only auto-detection in order: `~/.commandcode/auth.json` → `~/.pi/agent/auth.json` → `~/.local/share/opencode/auth.json` → environment variables → Keychain. Settings can also switch to a manual API key stored in the macOS Keychain. |
+| **OpenCode Go** | OpenCode / Pi `auth.json` or macOS Keychain | Read / Keychain | Read-only auto-detection in order: OpenCode `auth.json` → `~/.pi/agent/auth.json` → `OPENCODE_API_KEY` → Keychain, using the `opencode-go` API key. Settings can also switch to a manual API key stored in the macOS Keychain. |
 | **Local Session Logs** | `~/.codex/sessions`, `~/.claude/projects`<br>`~/.pi/agent/sessions`, OpenCode SQLite<br>`~/.dsh/sessions` | **Strictly Read-Only** | Parses usage, model, and project metadata, and reads title indexes or extracts conversation titles from logs. Missing titles may use a user-message excerpt. No conversation content is uploaded and source logs are never modified. |
 
 ### System Permissions & Zero Telemetry Commitment

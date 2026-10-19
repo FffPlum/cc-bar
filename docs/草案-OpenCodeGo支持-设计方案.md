@@ -1,426 +1,189 @@
 # 草案 · OpenCode Go 支持（额度）
 
-> 状态：**未实施**。当前代码里 `QuotaApp` 没有 `opencodeGo`，也没有对应的凭据读取或额度客户端；Popover / 设置 / Onboarding 都没有 OpenCode Go 条目。注意与已落地的 `Core/Usage/OpencodeScanner.swift` 区分——后者扫的是本地 `~/.local/share/opencode/opencode.db` 会话库，属于**用量统计**，与本文的 OpenCode Go **订阅额度**是两件事。本文是范围与技术契约已收敛的设计方案，尚未落地。实现完成并通过验收后，再把最终行为并入正式产品 / 技术 / 界面文档并将本草案归档。接口来源已经抓取并交叉验证：`GET https://opencode.ai/zen/go/v1/usage` 与 Bearer token，响应字段 `usage.{rolling,weekly,monthly}{status, percent, resetsAt}`（百分号为**已用**）。macOS 上的 Go API key 位于 OpenCode 全局数据目录的 `auth.json` 中 `opencode-go` provider 项，默认路径为 `~/.local/share/opencode/auth.json`，兜底环境变量为 `OPENCODE_API_KEY`。第一版订阅额度只进 Popover + 设置 Accounts + Onboarding 检测；菜单栏、悬浮窗不做，也不把订阅额度注入主窗口的 Agent 对话统计。现有 OpenCode / Pi 等 Agent 对话若使用 `opencode-go/<model-id>`，仍按本地日志正常统计 Token 与预估费用，不受本功能影响。
+> 状态：**2026-10-19 修订，按本版实施**。上一版草案写于 Antigravity、Command Code 接入和服务拖拽排序之前，与当前代码有 5 处出入，本版按当前代码和 Command Code 的接入方式修订：
+>
+> 1. 服务顺序：排在 Command Code 之后，用户可在「设置 → 服务与账号」拖拽调整（原文为 Codex → Claude → Cursor → Go）。
+> 2. 展示位：与其他额度服务一致，进入菜单栏和悬浮窗（原文为不进入）。
+> 3. 凭据：复用 Command Code 的「自动读取 + 手动 API Key（钥匙串）」方式，自动读取增加 Pi 的 `auth.json`（原文只读 OpenCode `auth.json` 与环境变量，不支持手动 key）。
+> 4. 状态色：按当前三档（剩余 `>=20%` 中性灰、`<20%` 橙、`=0` 红），不再是四档。
+> 5. `QuotaProviderDescriptor` 已有 `supportsMenuBar` / `supportsFloatingHUD` / `showsCost` 能力字段，无需新增。
+>
+> 另按现有接入方式简化了两处：失败处理统一走 `QuotaError` 与「失败保留已有快照」，不再单设「不可用」状态和隐藏旧数字；首次启动引导页不加 OpenCode Go 行（见 §1.3）。
+>
+> 注意与已落地的 `Core/Usage/OpencodeScanner.swift` 区分：后者扫描本机 `~/.local/share/opencode/opencode.db`，属于**用量统计**；本文是 OpenCode Go **订阅额度**，两者互不影响。
 
 ## 1. 背景、目标与范围
 
 ### 1.1 用户诉求
 
-在 cc-bar 中接入 OpenCode Go **订阅额度**展示，对齐 Codex / Claude Code 的“设置 Accounts 总开关 + Popover 额度卡片”产品形态，但不进入菜单栏 / 悬浮窗，也不作为新的 Agent 对话用量数据源进入主窗口。
+在 cc-bar 中展示 OpenCode Go 订阅的剩余额度，形态与 Command Code 一致：设置里一个服务行（开关 + 凭据设置），Popover、菜单栏、悬浮窗按用户开关展示。
 
 ### 1.2 第一版范围
 
-- **Popover**：在已有 Codex / Claude Code / Cursor 之后新增 OpenCode Go block，显示 rolling（5h）/ weekly / monthly 三档剩余比例，复用现有通用 block 模板。
-- **设置**：Accounts 一栏手工增加 OpenCode Go 一行（自动检测 + Provider 总开关，首次默认关闭）；菜单栏与悬浮窗设置区不显示 Go 占位开关；不新增“统计服务”开关。
-- **Onboarding**：Detect accounts 页加一行 OpenCode Go，只读扫描 `auth.json`，不触发任何写入或 OAuth。
-- **失败态**：沿用通用失败态，不直出远端技术错误。
-- **不可用降级**：端点 404 或字段 shape 变化时，Popover 显示空状态、不显示伪造百分比，保留账号探测。
+- **额度 Provider**：新增 `QuotaApp.opencodeGo`，显示 5 小时 / 周 / 月三个窗口的剩余比例。
+- **Popover / 菜单栏 / 悬浮窗**：与 Command Code 相同，开启后出现；不展示费用，不展示服务状态点。
+- **设置 → 服务与账号**：新增 OpenCode Go 行，含「填写凭据…」入口和凭据面板（自动读取 / 手动 API Key）；首次默认关闭。
+- **额度提醒**：三个窗口接入现有低额度通知；月窗口按「计费周期」开关控制。
+- **诊断**：凭据来源偏好与检测结果进入诊断导出和日志，均脱敏。
 
-### 1.3 第一版明确不做
+### 1.3 第一版不做
 
-- 不画菜单栏 logo / 百分比。
-- 不在桌面悬浮窗出现 OpenCode Go 行。
-- 不把远端 Go 订阅额度、窗口消费或缓存写入主窗口的 Overview / Conversations / Timeline / Cycles / 按服务 / 按提供商 / 按模型面板。
-- 不调用 OpenCode OAuth、不写 OpenCode SQLite、不把 Go key 写入 cc-bar Keychain / UserDefaults / `quota-cache.json` 或日志。额度快照与不可逆账号指纹允许写入现有 `quota-cache.json`，用于重启恢复和同账号失败时保留旧数据。
-- 不从 Go usage 端点构造历史用量、Token、请求数或预估费用；它们不计入 Agent 对话统计。
-- 不改现有按提供商归并（本地日志中的 `opencode-go/<model-id>` 已由 `ModelProvider.opencodeGo` 处理；本需求不新增统计入口或规则）。
-- 不做 Go 套餐消费量折算到本机 token 的反推；本机用量继续走现有 `OpencodeScanner` + Zen pay-as-you-go 路径。
-- 不为 Go 引入新的识别色 assets 或新建 logo SVG（资源占用最小化；识别色沿用 OpenCode 现有的 `OpencodeAccent`；`ServiceTile` 在资源缺失时先显示字母 `G`，正式 logo 后续单独补充）。
+- 不进入主窗口统计（Overview / 对话 / 项目 / 额度 Timeline / Cycles）。Go 端点没有历史用量，也不写额度历史和周期。
+- 不改本地用量链路：OpenCode / Pi 对话里的 `opencode-go/<model-id>` 仍按现有 `ModelProvider.opencodeGo` 归并、按本地日志计费。
+- 不读浏览器 Cookie，不调用 OpenCode Console 内部接口，不用本地消费按 $12 / $30 / $60 估算剩余比例（CodexBar 有这两条备用来源，见 §2.4）。
+- 首次启动引导页不加 OpenCode Go 行：引导页账号列表按 5 行在 520pt 高的窗口里排版，加第 6 行需要重新排版，单独评估。用户可在设置里看到检测结果并开启。
+- 不新增 logo 资源，复用现有 `opencode` 图标，缺失时显示字母 `G`。
 
-### 1.4 两套产品数据的边界
+## 2. 调研结论
 
-“OpenCode Go 订阅额度”与“Agent 对话用量”是两套独立产品能力，名称相近但不能混算：
+### 2.1 远端接口
 
-| 维度 | 订阅额度查询 | Agent 对话用量查询 |
-|---|---|---|
-| 用户问题 | 套餐还剩多少、何时重置 | 哪个 Agent / 会话用了多少 Token、预估多少钱 |
-| 数据来源 | OpenCode Go 远端 `usage` API | Codex、Claude Code、OpenCode、Pi 等 Agent 的本地对话日志；既有 Cursor 远端历史保持原逻辑 |
-| 核心模型 | `QuotaApp.opencodeGo` / `QuotaSnapshot` | `UsageApp` / Conversation / `UsageAggregator` |
-| 设置入口 | Settings → Accounts 的 OpenCode Go 总开关 | 主窗口统计服务可见性；本需求不新增 Go 服务开关 |
-| 展示入口 | Popover 的 Rolling / Weekly / Monthly 剩余比例 | 主窗口 Overview / Conversations / Cycles / 按服务 / 按提供商 / 按模型 |
-| 金额语义 | 套餐窗口额度，不展示本地费用 | 按对话 Token 和定价规则计算的预估费用 |
+OpenCode Go 是 OpenCode 的 $10/月订阅，按美元额度设三个窗口：5 小时 $12、每周 $30、每月 $60。
 
-现有 Agent 对话中出现 `opencode-go/<model-id>` 时，仍按 `UsageApp.opencode` 或实际 Agent 来源进入主窗口，并可由既有 `ModelProvider.opencodeGo` 归并。它表示“该次对话使用了 OpenCode Go 模型提供商”，**不表示**主窗口读取或拆解了 Go 订阅额度。本功能不得过滤、重写或重复计入这些既有对话。
+**端点**：`GET https://opencode.ai/zen/go/v1/usage`，`Authorization: Bearer <API key>`。
 
-## 2. 调研结论与技术选择
-
-### 2.1 远端接口（已交叉验证）
-
-OpenCode Go 是 OpenCode 团队推出的 **$10/月** 订阅，包含三个按美元计费的滚动窗口：
-
-| 窗口 | 上限 | 备注 |
-|---|---|---|
-| rolling（5 小时） | $12 | 5 小时滚动窗口，不是固定自然时段 |
-| weekly | $30 | UTC 自然周（周一 0:00）重置 |
-| monthly | $60 | 按订阅锚定时间重置 |
-
-> 注：文档原文使用 "5 hour / week / month"，响应字段名为 `rolling / weekly / monthly`。本文档统称为三窗口。
-
-**端点**：`GET https://opencode.ai/zen/go/v1/usage`
-**认证**：`Authorization: Bearer <OPENCODE_API_KEY>`
-**响应 schema**（已经通过 [OpenCode 官方源码 `packages/console/app/src/routes/zen/go/v1/usage.ts`](https://github.com/anomalyco/opencode/pull/16513) 抓取并与外部客户端实现交叉确认）：
+**响应**：
 
 ```json
 {
   "usage": {
-    "rolling": { "status": "ok" | "rate-limited", "percent": 4,  "resetsAt": "2026-08-13T16:27:38.287Z" },
-    "weekly":  { "status": "ok" | "rate-limited", "percent": 3,  "resetsAt": "2026-08-17T00:00:00.287Z" },
-    "monthly": { "status": "ok" | "rate-limited", "percent": 1,  "resetsAt": "2026-09-13T06:06:01.287Z" }
+    "rolling": { "status": "ok", "percent": 4, "resetsAt": "2026-08-13T16:27:38.287Z" },
+    "weekly":  { "status": "ok", "percent": 3, "resetsAt": "2026-08-17T00:00:00.287Z" },
+    "monthly": { "status": "rate-limited", "percent": 100, "resetsAt": "2026-09-13T06:06:01.287Z" }
   }
 }
 ```
 
-关键事实：
+- `percent` 是**已用**比例，单位 0～100（`0.5` 表示 0.5%）。
+- `status == "rate-limited"` 表示该窗口已用完，按 100% 已用处理。
+- `resetsAt` 为 UTC ISO8601，可能带毫秒。
+- 401 = key 无效；403（响应含 `EntitlementError`）= key 没有 Go 订阅。
+- 端点只返回当前窗口，没有历史。官方文档写明了三档限额，但没有把该端点列为公开 API，按非公开接口容错处理。
 
-- `percent` 是 **已用**，不是剩余。展示层必须换算为 `100 - percent` 后再走 `statusColor` 四档（>50% 绿 / 20~50% 黄 / <20% 橙 / =0 红）。
-- `status == "rate-limited"` 是有效额度状态，按“100% 已用 / 0% 剩余”展示，复用空档红；即使三个窗口全部命中，也不等于端点不可用。
-- `resetsAt` 是 UTC ISO8601。`windowSeconds` 表示完整窗口长度，不用 `(resetsAt - now)` 这种剩余时长冒充：rolling 固定为 5 小时、weekly 固定为 7 天、monthly 因端点未返回本周期起点而设为 `nil`。第一版不做三窗口之间的依赖推导。
-- 401 = key 无效；403 + `EntitlementError` = key 没有 Go 订阅（免费 / Zen-only）。
-- 端点**只返回当前窗口**，**没有历史用量**。
-- OpenCode 官方文档已经正式说明 Go 套餐与 `$12 / $30 / $60` 三档限额，但尚未把 usage 查询端点列为公开 API；实现仍以官方服务端源码和真实响应为契约，并保持容错。
+### 2.2 交叉验证来源
 
-### 2.2 本地凭据位置
+三个独立来源一致：
 
-macOS 上 OpenCode Desktop / CLI 的认证存放在 OpenCode 全局数据目录：
+| 来源 | 内容 |
+|---|---|
+| OpenCode 官方服务端源码 `packages/console/app/src/routes/zen/go/v1/usage.ts`（[PR #16513](https://github.com/anomalyco/opencode/pull/16513)） | 端点、字段、`percent` 为已用 |
+| CodexBar `Sources/CodexBarCore/Providers/OpenCodeGo/OpenCodeGoUsageFetcher.swift` | 同一端点与 Bearer；`percent` 按 0～100 解析；401 / 403 视为凭据无效 |
+| Pi 扩展 `pi-model-selector` 的 `docs/opencode-go.md` | 同一端点；凭据取 Pi 的 `opencode-go` provider key、`OPENCODE_API_KEY` 或 `auth.json` 的 `opencode-go` 项（`key` / `access` / `apiKey`）；`rate-limited` 按 100% |
 
-```text
-$XDG_DATA_HOME/opencode/auth.json
-# XDG_DATA_HOME 未设置时：~/.local/share/opencode/auth.json
-```
+### 2.3 本地凭据位置
 
-格式（来自 OpenCode 源码 `packages/opencode/src/cli/cmd/auth.ts`）：
+- OpenCode：`$XDG_DATA_HOME/opencode/auth.json`，未设置时 `~/.local/share/opencode/auth.json`，取顶层 `"opencode-go"` 项的 `key`。
+- Pi：`~/.pi/agent/auth.json`，取 `"opencode-go"` 项。
+- 环境变量：`OPENCODE_API_KEY`。从 Finder 启动的 App 通常拿不到终端里设置的环境变量。
 
 ```json
-{
-  "opencode-go": {
-    "type": "api",
-    "key": "sk-...",
-    "metadata": { "...": "..." }
-  }
-}
+{ "opencode-go": { "type": "api", "key": "sk-..." } }
 ```
 
-- 只接受 provider id 为 **`opencode-go`** 且 `type == "api"` 的条目；它与现有 `ModelProvider.opencodeGo` 已识别的字符串一致，也跟 Pi / OpenCode 本地日志里的 `opencode-go/<model-id>` 模型前缀一致。
-- 兜底环境变量：`OPENCODE_API_KEY`。第一版不读取 `OPENCODE_CONFIG_DIR` / `OPENCODE_CONFIG` / `opencode.json`，也不支持 OpenCode 内部的 `OPENCODE_AUTH_CONTENT` 注入；这些属于明确延后项。macOS 从 Finder / Launchpad 启动时通常不会继承终端临时环境变量，环境变量来源变化后以重启 CCBar 为生效边界。
-- key 长期有效（订阅取消才会失效），不需要 OAuth 续期、不需要过期检测。
+key 长期有效，不需要刷新。
 
-### 2.3 第一版组合决策
+### 2.4 不采用的竞品做法
 
-1. **额度和账号检测走同一条只读路径**：每次刷新重读 `auth.json` 的 `opencode-go.key`，不缓存 key、不调用 OAuth。
-2. **`OPENCODE_API_KEY` 环境变量作为低优先级兜底**，仅在 `auth.json` 没有 `opencode-go` 项时使用；不在 UI 区分两种来源（避免把内部探测路径暴露给用户）。
-3. **percent 映射在 `OpenCodeGoQuotaClient` 内部完成**：客户端返回 `QuotaSnapshot` 时将服务端 `percent` 夹在 `0...100` 后赋给 `usedPercent`；剩余比例继续由 `QuotaWindow.remainingPercent` 统一计算，UI 不自行做减法。
-4. **订阅额度不进入 Agent 对话统计**：Go 端点不返回历史，**不**为这份远端数据引入任何用量链路 / cache / 远端分区；`UsageAggregator` 不增加 Go 分区、`UsageApp` 不增加 `.opencodeGo` 枚举值。现有本地 Agent 对话及其 `ModelProvider.opencodeGo` 归并保持原样。
-5. **不可用降级硬编码**：解析层遇到端点消失、响应 envelope 改变或三窗口全部无法解析时，整体标记为“OpenCode Go 不可用”（区别于“未检测到”，后者是没有可用 key），Popover 走空状态，不显示伪造百分比，但保留账号探测和磁盘旧快照。
-6. **失败分级只分两类**：通用失败（沿用 "刷新失败" 文案，不直出错误）+ 不可用降级（端点缺失 / shape 改变）；401 与 403 走通用失败文案（用户场景里二者都等同 "Go 当前不可用"，进一步细分没有用户价值）。
+CodexBar 另有两条来源，本版不采用：
 
-### 2.4 与 Cursor 草案的边界
+- **浏览器 Cookie + Console 内部接口**：需要读取浏览器 Cookie（涉及钥匙串授权），并依赖网页内部的 server function ID，网站改版即失效。
+- **本机 SQLite 估算**：用本机 `opencode-go` 消费按 $12 / $30 / $60 推算百分比。它只统计这台设备，CodexBar 自己也标为估算、说明不能据此判断账号余量。cc-bar 的额度只展示服务端数据。
 
-| 维度 | Cursor | OpenCode Go |
-|---|---|---|
-| 远端数据 | 额度 + 历史用量（独立 cache、按日 replacement） | 仅额度 |
-| 本地 SQLite 读取 | 需要 WAL / immutable fallback | 不需要（`auth.json` 是普通 JSON 文件） |
-| JWT 解析 | 需要（`sub` 拆分 userID） | 不需要（Bearer token 是不透明字符串） |
-| 凭据失效处理 | 只读 + 不刷新 + 过期保留快照 | key 长期有效；订阅取消通过 403 自动收敛 |
-| 远端数据是否进入统计页 | 进入（Dashboard 远端分区） | 不进入；但既有 OpenCode / Pi Agent 本地对话照常统计 |
-| 是否进入 Onboarding | 加入 Detect accounts | 加入 Detect accounts |
-| 是否进入菜单栏 | 进入（已实现） | 不进入 |
-| 是否进入悬浮窗 | 进入（已实现） | 不进入 |
-| 是否改动 `ModelProvider` | 否 | 否（已支持 `opencode-go` 前缀） |
+## 3. 凭据方案
 
-> 本草案不复用 `CursorUsageFetcher` / `CursorUsageCache` / `replaceRemote` / Cursor 远端分区链路——这些都跟 Dashboard 历史用量绑定。Go 没有历史，不需要远端历史分区；仅复用通用 `quota-cache.json` 保存最后一次额度快照和账号摘要。
+与 Command Code 相同的结构，新增 `OpenCodeGoAuth`：
 
-## 3. 额度数据与映射
+**来源偏好**（`SettingsStore.opencodeGoCredentialPreference`，默认自动）：
 
-### 3.1 `QuotaSnapshot` 映射
+- **自动**：依次读取 OpenCode `auth.json` → Pi `auth.json` → `OPENCODE_API_KEY` → 钥匙串里手动保存的 key。
+- **手动 API Key**：只读钥匙串（service `com.nanvon.ccbar.opencode-go`），在凭据面板中粘贴保存，可清除。
 
-Go 的三窗口必须使用稳定且互不相同的 ID，直接构造 `QuotaLimit`，不调用会按 `windowSeconds` 生成 unknown ID 的 `QuotaLimit.standard(kind: .unknown, ...)`。三者设计：
+**校验**：去除首尾空白后至少 10 个字符、只含可打印 ASCII，沿用 `CommandCodeAuth.sanitizeToken` 的规则。
 
-| 位置 | ID | kind | windowSeconds | 来源 | displayName |
-|---|---|---|---:|---|---|
-| `primaryLimit` | `opencode-go-rolling` | `.fiveHour` | `18_000` | `usage.rolling.percent` | `Rolling` |
-| `secondaryLimit` | `opencode-go-weekly` | `.weekly` | `604_800` | `usage.weekly.percent` | `Weekly` |
-| `auxiliaryLimits[0]` | `opencode-go-monthly` | `.unknown` | `nil` | `usage.monthly.percent` | `Monthly` |
+**账号身份**：Go 没有可读的账号信息。内部账号键为 key 的完整 SHA-256 十六进制摘要，只用于缓存绑定、账号切换判断和额度提醒去重；不展示，不写日志。摘要不可逆，不构成凭据片段。
 
-三者统一：
+**安全边界**：
 
-- `window.resetsAt = <服务端 resetsAt>`，原样保留 UTC ISO8601。
-- `window.usedPercent = <服务端 percent>`。
+- key 只发往 `https://opencode.ai/zen/go/v1/usage`，`User-Agent` 为 `cc-bar`，不冒充 OpenCode。
+- 不写 OpenCode / Pi 的任何文件；只有用户手动填写的 key 存入 cc-bar 的钥匙串项。
+- 日志和诊断只记录来源类别与 HTTP 状态，不记录 key、摘要或响应正文。
 
-`planType` 不设置：Go 只有一种套餐，"OpenCode Go" 已经在副标题中体现，不再冗余展示。
+## 4. 额度数据映射
 
-`fetchedAt` 为本次成功拉取时间。
+| 位置 | ID | kind | displayName | windowSeconds | 来源 |
+|---|---|---|---|---:|---|
+| `primaryLimit` | `opencode-go-rolling` | `.fiveHour` | `5HOUR` | 18000 | `usage.rolling` |
+| `secondaryLimit` | `opencode-go-weekly` | `.weekly` | `WEEKLY` | 604800 | `usage.weekly` |
+| `auxiliaryLimits[0]` | `opencode-go-monthly` | `.unknown` | `MONTHLY` | 2592000（约 30 天，与 Command Code 月窗口一致） | `usage.monthly` |
 
-> `rolling` 是服务端配置的 5 小时滚动窗口，`weekly` 是 7 天自然周窗口，因此分别使用 `.fiveHour` / `.weekly` 才符合模型语义。Timeline / Cycles 的隔离由调用链保证：第一版不为 Go 调用 `recordQuotaHistory` / `recordQuotaCycles`，不能靠把真实窗口伪装成 `.unknown` 隔离。monthly 暂无专用 kind，保留 `.unknown`。
+- `usedPercent = clamp(percent, 0...100)`；`status == "rate-limited"` 时取 100。剩余比例由 `QuotaWindow.remainingPercent` 统一计算，状态色走 `statusColor` 三档。
+- `percent` 缺失或不是有限数字时，该窗口不进入快照，不伪造 0%。
+- 三个窗口都无法解析时返回 `QuotaError.decode`。
+- `planType` 不设置；Popover 副标题在没有账号信息时显示 vendor「OpenCode」。
+- 快照沿用 `preservingFutureResetDates`。
 
-### 3.2 percent → 状态色
+## 5. 状态、错误与刷新
 
-`statusColor(remainingPercent:tint:)` 的输入是**剩余**比例。Go 服务端返回**已用**，客户端在 `parse` 内部完成换算：
-
-```text
-remaining = max(0, min(100, 100 - percent))
-window.usedPercent = max(0, min(100, percent))
-```
-
-- `percent` 缺失或非有限数 → 该窗口不进入 `QuotaSnapshot`（与 Cursor 的字段缺失不伪造 0% 一致）。
-- `status == "rate-limited"` → 该窗口按 `usedPercent = 100` 处理，强制红档。
-- 三窗口全部 `rate-limited` → 仍是成功快照，三档都显示 0% 剩余。
-- 三窗口全部缺失或全部解析失败 → 走“OpenCode Go 不可用”状态（详见 §3.4）。
-
-### 3.3 `preservingFutureResetDates`
-
-Go 沿用现有 `QuotaSnapshot.preservingFutureResetDates(from:now:)` 的实现，无需修改——`auxiliaryLimits` 已经在 Cursor 草案落地时遍历过。
-
-### 3.4 不可用 vs 未检测到
-
-两种状态必须有显式区分，否则用户无法判断是「去 OpenCode 订阅」还是「等一会儿再试」：
-
-| 状态 | 触发 | Popover 行为 |
-|---|---|---|
-| 未检测到 | 没有合法 `opencode-go` API key，且 `OPENCODE_API_KEY` 未设 | block 不渲染；Provider 偏好保留，重新检测到后自动恢复 |
-| 凭据失效 | 401 / 403 | block 显示通用“刷新失败”并沿用同账号旧快照；不直出错误 |
-| 不可用 | 端点 404 / envelope 改变 / 三窗口全部无法解析 | block 渲染，但数值与 reset 显示 `—`，无进度条；磁盘旧快照保留但本状态下不展示旧数字 |
-| 正常 | 至少一个窗口成功解析；`rate-limited` 也属于成功窗口 | 展示已成功解析的窗口；缺失窗口不伪造 0% |
-
-实现层不在 `OpenCodeGoQuotaClient` 保存可变静态状态。Client 保持无状态并返回类型化失败；账号检测和展示可用性统一由 `AppState` 承载：
-
-```swift
-nonisolated enum OpenCodeGoAvailability: Sendable, Equatable {
-    case checking
-    case notDetected
-    case available
-    case unavailable
-}
-
-nonisolated enum OpenCodeGoFetchFailure: Error, Sendable, Equatable {
-    case unauthorized
-    case subscriptionRequired
-    case endpointUnavailable
-    case invalidPayload
-    case rateLimited
-    case transport
-    case server(Int)
-}
-```
-
-`PrimaryQuotaState.error / refresh` 继续承载通用失败与退避；`opencodeGoAvailability` 只决定账号探测和不可用布局，避免出现 Client 与 AppState 两套状态源。
-
-## 4. 认证与安全设计
-
-### 4.1 只读采用
-
-第一版完全只读：
-
-- 优先读取 `$XDG_DATA_HOME/opencode/auth.json`，未设置时读取 `~/.local/share/opencode/auth.json`，解析 `opencode-go` 下 `type == "api"` 的 `key`。
-- `OPENCODE_API_KEY` 环境变量作为低优先级兜底（仅在文件未提供时）。
-- **不**读取 `OPENCODE_CONFIG_DIR` / `OPENCODE_CONFIG` / `opencode.json` 里的全局 provider 配置（避免把 OpenCode 整个配置体系背进来，第一版只覆盖最常见路径）。
-- **不**调用 OAuth、不写 OpenCode SQLite，不把 key 写入 cc-bar Keychain / UserDefaults / 任何持久化缓存；仅把额度快照与账号摘要写入通用 `quota-cache.json`。
-- **不**把 key 或其片段写入日志：日志只记录固定错误类别和 HTTP 状态。Go 没有可读账号身份，第一版使用 key 的完整 SHA-256 十六进制摘要作为内部 `accountID`，只用于账号切换和缓存绑定，不展示、不记录。
-
-实现独立的 `OpenCodeGoAuth`：
-
-```swift
-nonisolated enum OpenCodeGoAuth {
-    struct Session: Sendable, Equatable {
-        let apiKey: String
-        let accountID: String          // SHA-256(apiKey) 完整 hex
-        let source: Source             // .authFile / .environment
-    }
-
-    enum Source: Sendable, Equatable {
-        case authFile(URL)
-        case environment
-    }
-
-    static func defaultAuthURL(home: URL, environment: [String: String]) -> URL { ... }
-    static func load(
-        authURL: URL = defaultAuthURL(...),
-        environment: [String: String] = ProcessInfo.processInfo.environment
-    ) throws -> Session? { ... }
-}
-```
-
-读取规则：
-
-1. auth.json 存在 → 解析顶层 `"opencode-go"`，仅接受 `type == "api"`；`key` 去除首尾空白后非空且不含控制字符才返回 `.authFile`。
-2. 文件不存在、没有该项、类型不符或 key 为空 → 读取 `environment["OPENCODE_API_KEY"]`，通过同样校验后返回 `.environment`。
-3. auth.json 损坏 / 无法读取 → 记录固定本地读取错误，不抛出 key 或完整路径；本轮账号态为未检测到，不影响其他 Provider。第一版不在损坏文件上静默采用环境变量，避免用另一个隐式凭据掩盖本地配置损坏。
-4. 都没有 → 返回 `nil`。
-
-> 第一版**不**做 OS 钥匙串回退。OpenCode 不写钥匙串，回退无意义。
-
-### 4.2 账号切换
-
-Go 没有传统意义上的"账号"概念，只有 key。一个用户理论上可以同时持有多个 Go 订阅 key（个人 + 团队），但每个 `auth.json` / 环境变量只能写一个值，且 OpenCode CLI / Desktop 只用一个。**第一版只展示一个 key**，策略：
-
-- 把完整 SHA-256 `accountID` 作为内部账号身份。
-- 每次刷新前重读 `auth.json` / 环境变量，发现 `accountID` 变化时视为账号切换，立即清空内存旧快照和 `quota-cache.json` 中旧 Go 记录，再请求新账号，防止“新 key + 旧额度”短暂串号。
-- `loadQuotaCache()` 读取到 Go 记录时先暂存；只有账号检测完成且缓存 `accountID` 与当前摘要一致，才把快照公开到 `primaryQuotaStates`。账号检测完成前 Popover 不渲染 Go，避免启动瞬间闪出上一个账号的缓存。
-- 未检测到 key 时不展示 block，但可以保留同摘要缓存供 key 恢复后复用；检测到不同 key 时必须删除旧记录。
-
-### 4.3 凭据失效
+沿用 Command Code 的刷新门禁与失败处理：
 
 | 情况 | 行为 |
 |---|---|
-| key 为空或含控制字符 | 不发请求；无环境变量兜底时视为未检测到，记录固定本地错误类别 |
-| 401 | `.unauthorized`；保留同账号旧快照；本轮不立即重试 |
-| 403 `EntitlementError` | `.subscriptionRequired`；保留同账号旧快照；本轮不立即重试 |
-| 404 | `.endpointUnavailable`；保留磁盘旧快照但 UI 不展示旧数字；本轮不立即重试 |
-| 200 但 envelope 改变 / 三窗口全无效 | `.invalidPayload`；行为同 endpointUnavailable |
-| 429 | `.rateLimited`；保留并展示旧快照，进入现有 10 分钟退避，手动刷新不绕过 |
-| 网络 / 5xx | `.transport` / `.server`；保留并展示旧快照，显示通用失败 |
+| 未检测到 key | 账号为空；开启时 Popover 显示「未找到登录信息」 |
+| 401 / 403 | 重读一次凭据，key 变化则用新 key 重试；未变化则显示失败。403 且响应含 `EntitlementError` 时提示「该 API Key 没有 OpenCode Go 订阅」，其余显示「登录已失效,请重新登录」 |
+| 429 | 进入现有 10 分钟退避，手动刷新不绕过 |
+| 网络 / 5xx / 404 / 响应无法识别 | `QuotaError.userMessage` 文案；保留并展示已有快照 |
+| key 变化（账号键变化） | 立即清空内存与 `quota-cache.json` 中的旧 Go 快照，再请求新 key |
+| 启动时缓存账号键与当前 key 不一致 | 同上，清空后再请求 |
 
-“本轮不立即重试”不等于永久停刷：后续 Scheduler 仍按设置周期发起下一轮，key 恢复或重新订阅后自动回到正常态。账号摘要变化优先于“保留旧快照”：新 key 绝不能沿用旧 key 的缓存。
+- 定时刷新 60 秒最小间隔、`inFlight` 去重与其他服务相同。
+- 开启开关、保存凭据后立即刷新一次。
 
-### 4.4 安全边界
+## 6. 默认值与顺序
 
-- 凭据只发送到 `https://opencode.ai/zen/go/v1/usage`，不发送到其他域名。
-- 不调用 OAuth，不写 OpenCode SQLite，不把 key 写入 cc-bar Keychain / UserDefaults / quota cache；只持久化额度快照与不可逆账号摘要。
-- 日志只记录固定错误类别与 HTTP 状态；不记录 key、摘要或响应 body。
-- 请求设置能识别 CCBar 的专用 `User-Agent`，避免使用宽泛或冒充 OpenCode CLI 的标识。
-- 429 遵守现有退避策略（10 分钟），手动刷新不绕过。
-- 网络失败保留最后一次完整快照。
+- `ProviderDisplaySettings.defaults(for: .opencodeGo)` = `enabled: false, menuBar: true, floatingHUD: true`，与 Command Code 相同：关闭时不联网；用户开启后直接出现在菜单栏和悬浮窗。
+- `QuotaProviderDescriptor.allProviders` 末尾追加 OpenCode Go：Codex → Claude Code → Antigravity → Cursor → Command Code → OpenCode Go，其后是 Pi → OpenCode → DSH。已保存过顺序的用户，新服务追加在列表末尾（`normalizedServiceOrder` 现有行为）。
+- `usageApp = nil`：设置列表里 OpenCode Go（额度）与 OpenCode（本地用量）是两行，各自开关。
 
-## 5. 架构改动清单
+## 7. 改动清单
 
-### 5.1 新增文件
+### 7.1 新增文件
 
 | 文件 | 职责 |
 |---|---|
-| `Core/Credentials/OpenCodeGoAuth.swift` | `Session` 模型、auth.json 解析、`OPENCODE_API_KEY` 兜底、完整 `accountID` 派生；不含 OAuth |
-| `Core/Quota/OpenCodeGoQuotaClient.swift` | `GET /zen/go/v1/usage`、Bearer 构造、响应解码、窗口映射与类型化错误；客户端保持无状态 |
-| `CCBarTests/OpenCodeGoAuthTests.swift` | 认证路径、格式校验、环境变量兜底、账号摘要与安全输入测试 |
-| `CCBarTests/OpenCodeGoQuotaClientTests.swift` | 三窗口、部分窗口、rate-limited、HTTP 与响应结构测试 |
+| `Core/Credentials/OpenCodeGoAuth.swift` | 凭据会话、来源、自动 / 手动读取、钥匙串存取、账号键 |
+| `Core/Quota/OpenCodeGoQuotaClient.swift` | 请求端点、解析响应、映射 `QuotaSnapshot` |
+| `Settings/OpenCodeGoCredentialSheet.swift` | 凭据面板，结构同 `CommandCodeCredentialSheet` |
+| `CCBarTests/OpenCodeGoQuotaTests.swift` | 能力、凭据读取顺序、解析与边界用例 |
 
-首版不新增 logo 文件。`ServiceTile` 沿用现有无资源 fallback，显示字母 `G`；正式图标属于后续视觉需求，不阻塞功能接入。
+### 7.2 修改文件
 
-### 5.2 修改文件与真实影响面
-
-| 文件 / 模块 | 改动 |
+| 文件 | 改动 |
 |---|---|
-| `Core/Quota/QuotaModels.swift` | 新增 `QuotaApp.opencodeGo`；`QuotaProviderDescriptor.primaryProviders` 末尾追加 Go；Descriptor 增加并统一消费 `supportsMenuBar`、`supportsFloatingHUD`、`showsCost` 能力，Go 均为 `false`；`usageApp` 为 `nil` |
-| `Core/Quota/QuotaRefreshPlan.swift` | `refreshOpenCodeGo` 加入按 Provider 启用的调度构造 |
-| `Core/AppState.swift` | 新增账号、可用性和额度状态；认证加载、账号切换清理、缓存待验证、类型化失败映射；接入 `refreshQuotas`、`refreshNow` 与 Onboarding 检测；不写额度历史 / 周期存储 |
-| `Core/Storage/Settings.swift` | `providerDisplaySettings[.opencodeGo]` 首次默认 `enabled/menuBar/floatingHUD = false`；`enabled` 是 Settings → Accounts 的订阅额度总开关，另外两个字段因能力不支持而始终不进入对应 UI；旧 UserDefaults 缺 key 时自然取默认，不做迁移 |
-| `Core/Storage/QuotaCache.swift` | 不升 schema 版本；现有动态 providers map 可保存 Go 快照及完整账号摘要；恢复时必须先校验当前摘要，摘要不符或尚未确认时不得暴露旧数字 |
-| `MenuBar/PopoverRootView.swift` | Go block 复用 Provider block；仅在检测到账户且总开关启用时出现；支持部分有效窗口、不可用无进度条、同账号旧快照 + 通用失败；不显示费用 |
-| `MenuBar/MenuBarLabel.swift` | 按 `supportsMenuBar` 过滤 Provider；Go 不渲染，也不出现在设置候选项 |
-| `Floating/FloatingContentView.swift` | 按 `supportsFloatingHUD` 过滤 Provider；Go 不渲染，也不出现在设置候选项 |
-| `Main/StatsView.swift` | **不**为订阅额度改动；`visibleUsageApps` 仍保持 Codex / Claude Code / Cursor / Pi / OpenCode。既有 OpenCode / Pi Agent 对话即使模型 Provider 为 `opencode-go`，也继续正常展示 |
-| `Main/CycleStatsView.swift` | **不**改 |
-| `Settings/SettingsRootView.swift` | Accounts 当前为手写行：显式新增 Go 订阅额度总开关与刷新；菜单栏 / 悬浮窗设置继续由 Descriptor 生成并按能力过滤，不添加禁用占位；Agent 对话统计设置不增加独立的 Go 服务开关 |
-| `Onboarding/OnboardingView.swift` | Detect accounts 当前为手写行：显式追加 Go，并纳入 `anyDetected`；未检测到时沿用现有状态 |
-| `Main/DesignSystem.swift` | 仅给 `QuotaApp.tintColor` 补 `.opencodeGo: .opencodeAccent`；当前不存在 `providerName` / `vendorName` 方法，不新增无必要抽象 |
-| `Core/L10n.swift` | 预计不改；项目当前通过调用点内联 `tr(en, zh)`，Go 文案遵循同一方式 |
-| `Core/Usage/Pricing.swift` | **不**为订阅额度改动；现有 `opencode-go` Agent 对话继续沿用既有本地模型定价与预估费用链路 |
-| `Core/Usage/ModelProvider.swift` | **不**改（已支持 `opencode-go/` 前缀） |
-| `ccbar.xcodeproj/project.pbxproj` | 显式加入新增 Swift 源文件、测试文件引用及对应 Build Phase；本工程不是自动同步文件组，不能只在磁盘创建文件 |
-| 正式文档 / README | 功能通过验收后并入产品、技术、布局、设计和 README；随后归档本草案 |
+| `Core/Quota/QuotaModels.swift` | `QuotaApp.opencodeGo`、`usageApp = nil`、Descriptor 追加 |
+| `Core/Quota/QuotaRefreshPlan.swift` | `refreshOpenCodeGo` |
+| `Core/Storage/Settings.swift` | 默认显示设置、凭据来源偏好 |
+| `Core/Storage/QuotaCache.swift` | `opencodeGo` 便捷访问器（schema 不变） |
+| `Core/AppState.swift` | 账号、额度状态、加载 / 刷新 / 存储 / 失败、提醒身份、日志 |
+| `Core/Notifications/QuotaAlertPolicy.swift` | 支持三个 Go 窗口 ID |
+| `Core/Diagnostics/DiagnosticsBundle.swift` | 凭据偏好与账号检测行 |
+| `Main/DesignSystem.swift` | `tintColor` 用 `.opencodeAccent` |
+| `Main/StatsView.swift` | 额度页筛选的穷举分支 |
+| `MenuBar/PopoverRootView.swift` | 副标题、今日费用、服务状态的穷举分支 |
+| `Settings/SettingsRootView.swift` | 服务行、凭据入口、来源说明、接入提示、关闭态说明、凭据面板 |
+| `CCBarTests/QuotaAlertTests.swift` | 全服务提醒用例加入 Go |
+| `ccbar.xcodeproj/project.pbxproj` | 新文件引用 |
 
-`QuotaProviderDescriptor.primaryProviders` 顺序固定为：
+## 8. 验证
 
-```text
-Codex → Claude Code → Cursor → OpenCode Go
-```
+- 单元测试：凭据读取顺序与手动模式、key 校验、响应解析（全部窗口、部分窗口、`rate-limited`、percent 越界、字段缺失、ISO8601 带 / 不带毫秒）、能力与默认值。
+- Debug 编译。
+- 没有真实 Go 订阅 key 时无法联调；真实响应的边界情况（如无订阅时的确切返回）靠用户反馈修正。
 
-后续若再加入 Provider，重新评审排序与能力，不在本需求中预留虚拟位置。
-
-### 5.3 不动的链路（显式边界）
-
-| 模块 | 原因 |
-|---|---|
-| `UsageAggregator.ingestLocal` / `replaceRemote` | Go 订阅额度不是 Agent 对话历史，不进入聚合；既有本地对话聚合不变 |
-| `UsageApp` 枚举 | 不新增 `.opencodeGo`；现有 OpenCode / Pi 等 Agent 来源保持原枚举与统计方式 |
-| `CycleUsage` | 不写入 Go 订阅额度；既有 Agent 对话周期统计不变 |
-| `QuotaHistoryStore` / `QuotaCycleStore` | Go 端点没有历史额度采样，Timeline / Cycles 第一版不增加订阅额度视图 |
-| `CursorUsageFetcher` / `CursorUsageCache` | 与 Cursor Dashboard 绑定，Go 不复用 |
-| `ModelProvider` 归并规则 | 已支持 `opencode-go/` 前缀，不改 |
-| `Pricing.normalize` | 已支持 `opencode-go/` 剥离 |
-
-## 6. 产品口径
-
-- **产品归属**：OpenCode Go 在本需求中是 `QuotaApp` 订阅额度 Provider，不是新的 `UsageApp` Agent 工具。Settings → Accounts 总开关只控制远端额度刷新与 Popover 卡片，不控制主窗口中的任何 Agent 对话。
-- **账户范围**：Go 订阅额度来自远端账号，覆盖该账号所有设备，与本机 `OpencodeScanner` 读取的 Agent 对话 SQLite 完全独立。本地 OpenCode 今日费用（`UsageAggregator.todayCost(for: .opencode)`）聚合的是本机 Agent 用量，无法代表 Go 订阅窗口，因此 Go 卡片不展示今日 / 本周费用，也不改现有本地统计。
-- **Token / 请求数**：Go usage 端点不返回 Token / 请求数，第一版不根据订阅额度构造“按模型用量统计”。本地对话已有 Token 与预估费用继续照常展示，包括模型 Provider 为 `opencode-go` 的对话。
-- **额度窗口语义**：rolling 为 5 小时滚动窗口、weekly 为 7 天窗口、monthly 为订阅月；三个窗口彼此独立，不做依赖推导。
-- **percent 口径**：`100 - percent` = 剩余比例；UI 永远只展示剩余。
-- **rate-limited**：是有效窗口结果，与 `usedPercent = 100` 等价展示，触发 0% 剩余红档；三个窗口全命中仍是成功快照。
-- **覆盖范围**：Go 端点不返回历史，无覆盖范围 / 不完整概念；首次认证检测完成前不渲染卡片，避免启动闪现旧账号数字。
-- **来源说明**：Bearer 端点、`auth.json` 路径和完整 SHA-256 账号摘要只留在技术实现与本草案；Popover 不增加 Go 专属 tooltip、不直出技术错误。
-
-## 7. 界面文案
-
-| EN | 中文 | 出现位置 |
-|---|---|---|
-| `OpenCode Go` | `OpenCode Go` | Provider 名称 |
-| `OpenCode` | `OpenCode` | Provider vendor 名 |
-| `Go` | `Go` | 副标简化 |
-| `Rolling` | `Rolling` | Popover 额度标签（与 Codex 5HOUR 同形，不翻译） |
-| `Weekly` | `Weekly` | 同上 |
-| `Monthly` | `Monthly` | 同上 |
-| `OpenCode Go unavailable` | `OpenCode Go 暂不可用` | Popover 不可用态副行 |
-| `Refresh failed` | `刷新失败` | Popover 通用失败态 |
-| `Read-only access` | `仅读取` | Onboarding 复用既有文案 |
-| `Detected from OpenCode auth.json` | `已从 OpenCode auth.json 读取` | Onboarding 副标；兼容 XDG 路径且不暴露完整本机路径 |
-
-文案在调用点使用现有 `tr(en, zh)`，不建立不存在的 L10n 词条注册表；不直出 `EntitlementError` / `AuthError` 等技术错误。
-
-## 8. 风险与降级
+## 9. 风险
 
 | 风险 | 处理 |
 |---|---|
-| usage 端点仍是实现契约、字段可能变化 | 集中解码；未知额外字段忽略，envelope 或三窗口全无效则 `.invalidPayload`；磁盘快照保留但 UI 不展示旧数字 |
-| 端点 404 / 关闭 | `.endpointUnavailable`；账户仍可检测，卡片显示不可用且无进度条；不展示旧数字 |
-| 401 / 403 `EntitlementError` | 同账号旧快照继续展示并附通用刷新失败；本轮不立即重试，后续 Scheduler 仍会重试 |
-| key 撤销 / 订阅取消 | 下一轮刷新进入 401 / 403 降级；key 或订阅恢复后由后续调度自动恢复 |
-| 账号切换（key 被换） | 完整 `accountID` 变化时立即清旧内存与持久化快照，新账号不得继承旧数字 |
-| rate-limited 三窗口全部命中 | 作为有效成功快照，三个窗口均显示 0% 剩余红档 |
-| 用户同时通过 OpenCode 改 key | 每次刷新前重读 auth；文件读取保持只读，不假设其它进程的写入时机或方式 |
-| `auth.json` 损坏 / 非 JSON | 固定类别日志 + "未检测到"；不抛错影响其它 Provider，也不回退使用同文件中的不可信内容 |
-| key 含换行、NUL 等控制字符 | 去除首尾空白后再拒绝任意控制字符；为空视为无凭据；不记录原值 |
-| macOS GUI 环境变量变化 | `OPENCODE_API_KEY` 仅作兜底；环境变化通常需重启 App 才生效，界面不承诺热更新 |
-| 429 | 现有 10 分钟退避；手动刷新不绕过 |
-| 网络 / 5xx | 同账号旧快照继续展示并附通用失败；无旧快照时显示不可用 |
-| 启动读取到旧缓存 | 当前认证摘要确认前不向 UI 发布 Go 缓存；确认匹配后再恢复，避免旧账号闪现 |
-| 服务识别 / 风控 | 使用 CCBar 专用 `User-Agent`，不冒充 OpenCode CLI |
-
-## 9. 实施顺序
-
-1. **模型、认证与客户端**：新增 `QuotaApp` / Descriptor 能力、`OpenCodeGoAuth`、无状态 `OpenCodeGoQuotaClient` 及类型化结果；同时编写认证和客户端单元测试。
-2. **状态、缓存与调度**：接入 `AppState` / `QuotaRefreshPlan`；实现账号切换、缓存摘要校验、失败降级与 429 退避；补对应状态测试。
-3. **能力隔离**：菜单栏、悬浮窗和相关设置统一按 Descriptor 能力过滤；确认远端 Go 订阅额度不进入 Agent 对话聚合、费用、Timeline 与 Cycles，同时既有 `opencode-go` 模型对话不被过滤或重复计入。
-4. **界面接入**：Popover、Settings Accounts、Onboarding 和 tint；Accounts / Onboarding 按当前手写结构显式增加 Go，不借机重构成通用列表。
-5. **工程接入**：把新增源文件与测试文件显式加入 `ccbar.xcodeproj/project.pbxproj`。
-6. **静态与自动化验证**：代码审阅、`git diff --check`、认证 / 客户端 / 缓存 / 调度的聚焦测试。运行 Xcode 测试或 Debug build 前按仓库规则单独征得同意。
-7. **真实验收与文档收口**：经用户允许后使用本机真实 key 做只读网络联调和 App 手动验收；通过后并入正式产品、技术、布局、设计与 README 文档，再将本草案归档到 `历史参考/`。
-
-## 10. 验收标准
-
-- `QuotaApp.opencodeGo` 不破坏 Codex / Claude / Cursor；旧 `quota-cache.json` 无需 schema 迁移即可解码，Go 缓存仅在完整账号摘要匹配后恢复。
-- `QuotaProviderDescriptor.primaryProviders` 顺序为 Codex → Claude Code → Cursor → OpenCode Go；Popover、Settings Accounts 与 Onboarding 保持一致。
-- 认证依次支持 `$XDG_DATA_HOME/opencode/auth.json`、默认 `~/.local/share/opencode/auth.json` 和 `OPENCODE_API_KEY` 兜底；仅接受 `opencode-go.type == "api"` 且非空、无控制字符的 key。
-- 检测到账户且总开关启用时，Popover 显示有效窗口：`Rolling` / `Weekly` / `Monthly`；未检测到账户时整个 block 不渲染。
-- `percent` 作为已用比例并规范化到 `0...100`，UI 展示剩余；窗口 `windowSeconds` 分别为 `18000`、`604800`、`nil`。
-- 单个无效窗口不拖垮其它有效窗口；三窗口全无效或 envelope 改变显示不可用且不展示旧数字。
-- 单个或全部 `rate-limited` 均为成功结果，显示 0% 剩余红档，不标记不可用。
-- 401 / 403 保留并展示同账号旧快照和通用失败；404 / invalid payload 保留磁盘快照但 UI 不展示旧数字；429 / 网络 / 5xx 展示同账号旧快照和通用失败。
-- “本轮不立即重试”不阻止后续 Scheduler；429 进入现有 10 分钟退避，手动刷新不绕过。
-- key 切换后立即清理旧账号内存和持久化快照；启动时认证摘要确认前不闪现旧账号数字；`accountID` 使用完整 SHA-256，不记录到日志。
-- key 不进入 cc-bar Keychain / UserDefaults / quota cache / 日志；额度快照和不可逆完整账号摘要可进入现有 `quota-cache.json`；key 只发送到 `https://opencode.ai/zen/go/v1/usage`。
-- OpenCode Go 订阅额度不出现在菜单栏、悬浮窗及二者设置中，也不注入主窗口统计 / Timeline / Cycles / 按服务 / 按提供商 / 按模型；`SettingsStore.usageServiceVisibility` 不新增独立 Go 开关。
-- Go 订阅额度接入不触发 `UsageApp`、`ModelProvider` 或 Agent 对话归并规则变更；现有 `OpencodeScanner` 的 SQLite 扫描路径与 prefix 剥离路径都不动，使用 `opencode-go/<model-id>` 的既有对话仍正常进入 Token 与预估费用统计。
-- Go 卡片不复用本地 OpenCode 今日费用，不展示今日 / 本周费用；本地日志 full rebuild 与 Go 额度互不影响。
-- 请求使用 CCBar 专用 `User-Agent`；日志只记录固定错误类别和必要 HTTP 状态，不记录 key、摘要或响应 body。
-- 不调用 OpenCode OAuth、不写 OpenCode SQLite / UserDefaults / cc-bar Keychain。
-- 首版 `ServiceTile` fallback 显示字母 `G`，不要求新增 SVG 或 SF Symbol 特例。
-- 新增 Swift 与测试文件已加入 Xcode 工程引用和对应 Build Phase；聚焦测试通过。Debug build、真实 key 网络联调和手动 UI 验收分别记录，不互相替代。
-
-## 11. 实施门禁与完成定义
-
-本草案经本轮修订后是 **OpenCode Go 第一版的可执行实现基线**：字段映射、状态语义、改动文件、明确不改范围、实施顺序和验收标准均已收敛。实现过程中若远端真实响应与本文契约不一致，应先回到本文修订契约，不在代码中静默猜字段。
-
-实施前无需再做一轮架构设计，但仍有以下门禁：
-
-1. 用户明确下达“开始实现”后再修改代码；本次“修订草案”不等于已授权代码实现。
-2. 首版已固定产品决定：OpenCode Go 订阅额度与 Agent 对话用量严格分离；Accounts 提供首次默认关闭的总开关；不持久化 key、允许缓存快照和完整账号摘要；Go 卡片不展示本地费用；菜单栏 / 悬浮窗不提供占位开关；首版使用字母 `G` fallback。若要改变其中任何一项，先修订本文。
-3. 实现完成不等于功能验收完成。至少需要代码静态审阅和聚焦测试；Xcode Debug build 属于编译验证，需另行同意；真实 key 网络联调及 App 手动验收需用户允许读取本机凭据并向指定端点发起只读请求。
-4. 只有实现、自动化验证、真实响应核对和界面验收均完成后，才将内容并入正式文档并归档本草案。
+| 端点非公开，字段可能变化 | 集中解析；无法解析时报「返回的数据无法识别」，保留已有快照 |
+| key 存在多处、不同步 | 自动模式按固定顺序取第一个可用 key；需要指定时用手动模式 |
+| 环境变量从 Finder 启动拿不到 | 只作兜底；设置面板提示改用手动 key |
+| 服务识别 / 风控 | 专用 `User-Agent`，遵守 429 退避 |

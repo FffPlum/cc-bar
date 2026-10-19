@@ -139,7 +139,7 @@ def decode_date(value):
 
 ### 4.1 当前额度
 
-`quota-cache.json` 的入口是 `providers`（键如 `codex`、`claude`、`cursor`、`antigravity`、`commandCode`）和可选的 `importedCodex`。
+`quota-cache.json` 的入口是 `providers`（键如 `codex`、`claude`、`cursor`、`antigravity`、`commandCode`、`opencodeGo`）和可选的 `importedCodex`。
 
 每条记录包括 `snapshot`、`source`、`updatedAt`，可能带 `accountID`。额度在 snapshot 的 `primaryLimit`、`secondaryLimit`、`auxiliaryLimits`、`modelLimits` 中，窗口字段为：
 

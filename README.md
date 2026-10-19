@@ -46,6 +46,7 @@ cc-bar 展示两类数据：**订阅额度**直连各服务官方接口获取剩
 | **Antigravity** | Gemini 5 小时与周、Claude 辅助 | 支持 | — | — | Google Cloud OAuth（自动续期） |
 | **Cursor** | Total / Auto / API（含 Unlimited） | 支持 | 账号全设备远端计量（今日 / 本期） | — | 本地 state.vscdb（严格只读） |
 | **Command Code** | 5 小时 / 周额度、GOAT 月度 Credits | 支持 | — | — | 本地 5 级只读探测 / Keychain Key |
+| **OpenCode Go** | 5 小时 / 周 / 月额度 | 支持 | — | — | OpenCode / Pi 本地只读探测 / Keychain Key |
 | **Pi / OpenCode / DSH** | — | — | 本地会话日志（Pi / OpenCode / DSH 多帧 zstd） | — | 严格只读本地日志与数据库 |
 
 ---
@@ -128,6 +129,7 @@ cc-bar 展示两类数据：**订阅额度**直连各服务官方接口获取剩
 | **Antigravity** | `~/.gemini/jetski-standalone-oauth-token`<br>`~/.gemini/oauth_creds.json` (兜底) | 读 / 写 | 优先读取独立 OAuth Token，临期自动续期回写。Cloud Mode 直连 Google 云端 API，无需本地 IDE 运行。 |
 | **Cursor** | `~/Library/Application Support/Cursor`<br>`/User/globalStorage/state.vscdb` | **严格只读** | 仅读 `cursorAuth/accessToken` 构造 Cookie 查询用量，绝不碰 refresh token/OAuth，不写回 Cursor SQLite 或 Keychain。 |
 | **Command Code** | 5 级本地来源或 macOS Keychain | 读 / Keychain | 只读自动探测按 `~/.commandcode/auth.json` → `~/.pi/agent/auth.json` → `~/.local/share/opencode/auth.json` → 环境变量 → Keychain 依次尝试；也可在设置中切换为手动 API Key，由 macOS Keychain 保存。 |
+| **OpenCode Go** | OpenCode / Pi 的 `auth.json` 或 macOS Keychain | 读 / Keychain | 只读自动探测按 OpenCode `auth.json` → `~/.pi/agent/auth.json` → 环境变量 `OPENCODE_API_KEY` → Keychain 依次尝试，读取其中的 `opencode-go` API Key；也可在设置中切换为手动 API Key，由 macOS Keychain 保存。 |
 | **本地会话日志** | `~/.codex/sessions`、`~/.claude/projects`<br>`~/.pi/agent/sessions`、OpenCode SQLite<br>`~/.dsh/sessions` | **严格只读** | 解析用量、模型及项目元数据，读取标题索引或从日志提取对话标题；标题缺失时可能使用用户消息摘要。不上传会话内容，不改写源日志。 |
 
 ### 系统权限与零遥测承诺

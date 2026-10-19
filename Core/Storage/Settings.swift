@@ -97,11 +97,11 @@ struct ProviderDisplaySettings: Sendable, Codable, Equatable {
         floatingHUD: true
     )
 
-    /// Cursor 与 Command Code 首次出现时保持关闭；只有用户主动开启后，
+    /// Cursor、Command Code 与 OpenCode Go 首次出现时保持关闭；只有用户主动开启后，
     /// 才会进入远端刷新链路，避免未配置的机器产生后台失败状态。
     /// Antigravity 默认开启（云端凭据直连，无本地进程依赖）。
     ///
-    /// Command Code 的 `menuBar` / `floatingHUD` 刻意留 true，与 Cursor 的三项全 false 不同：
+    /// Command Code 与 OpenCode Go 的 `menuBar` / `floatingHUD` 刻意留 true，与 Cursor 的三项全 false 不同：
     /// 子开关只在 `enabled` 为真时才生效（见 `effectiveMenuBarVisibility` /
     /// `effectiveFloatingVisibility`），所以关闭状态下两者行为完全一致；差别在用户后来打开
     /// 总开关的那一刻——Command Code 直接出现在菜单栏和悬浮窗，Cursor 还要再开两个子开关。
@@ -113,7 +113,7 @@ struct ProviderDisplaySettings: Sendable, Codable, Equatable {
             enabledByDefault
         case .cursor:
             ProviderDisplaySettings(enabled: false, menuBar: false, floatingHUD: false)
-        case .commandCode:
+        case .commandCode, .opencodeGo:
             ProviderDisplaySettings(enabled: false, menuBar: true, floatingHUD: true)
         }
     }
@@ -156,6 +156,15 @@ nonisolated enum ServiceOrderItem: Hashable, Sendable {
         case .usage(let app): return app
         }
     }
+}
+
+/// OpenCode Go 凭据来源偏好，取值与 `CommandCodeCredentialPreference` 相同。
+/// 声明为 nonisolated：凭据读取在后台任务里比较它。
+nonisolated enum OpenCodeGoCredentialPreference: String, CaseIterable, Identifiable, Codable, Sendable {
+    case automatic
+    case manual
+
+    var id: String { rawValue }
 }
 
 enum CommandCodeCredentialPreference: String, CaseIterable, Identifiable, Codable {
@@ -212,6 +221,11 @@ final class SettingsStore {
     // Command Code 凭据来源偏好
     var commandCodeCredentialPreference: CommandCodeCredentialPreference {
         didSet { defaults.set(commandCodeCredentialPreference.rawValue, forKey: Keys.commandCodeCredentialPreference) }
+    }
+
+    // OpenCode Go 凭据来源偏好
+    var opencodeGoCredentialPreference: OpenCodeGoCredentialPreference {
+        didSet { defaults.set(opencodeGoCredentialPreference.rawValue, forKey: Keys.opencodeGoCredentialPreference) }
     }
 
     // 兼容现有调用方的语义化入口。
@@ -402,6 +416,8 @@ final class SettingsStore {
         didCompleteOnboarding = defaults.object(forKey: Keys.didCompleteOnboarding) as? Bool ?? false
         let ccpRaw = defaults.string(forKey: Keys.commandCodeCredentialPreference) ?? CommandCodeCredentialPreference.automatic.rawValue
         commandCodeCredentialPreference = CommandCodeCredentialPreference(rawValue: ccpRaw) ?? .automatic
+        let ogpRaw = defaults.string(forKey: Keys.opencodeGoCredentialPreference) ?? OpenCodeGoCredentialPreference.automatic.rawValue
+        opencodeGoCredentialPreference = OpenCodeGoCredentialPreference(rawValue: ogpRaw) ?? .automatic
         Self.mergeServiceSwitches(providers: &providerDisplaySettings, usage: &usageServiceVisibility)
         saveProviderDisplaySettings()
         saveServiceOrder()
@@ -772,5 +788,6 @@ final class SettingsStore {
         static let floatingFrameW = "ccbar.settings.floatingFrame.w"
         static let floatingFrameH = "ccbar.settings.floatingFrame.h"
         static let commandCodeCredentialPreference = "ccbar.settings.commandCodeCredentialPreference"
+        static let opencodeGoCredentialPreference = "ccbar.settings.opencodeGoCredentialPreference"
     }
 }

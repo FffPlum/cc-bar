@@ -189,6 +189,7 @@ enum DiagnosticsBundle {
         out.row("auto check updates", String(settings.autoCheckForUpdates))
         out.row("verbose logging", String(settings.verboseLogging))
         out.row("command code credential", settings.commandCodeCredentialPreference.rawValue)
+        out.row("opencode go credential", settings.opencodeGoCredentialPreference.rawValue)
         out.row("onboarding completed", String(settings.didCompleteOnboarding))
         for provider in QuotaProviderDescriptor.allProviders {
             out.row(
@@ -237,6 +238,11 @@ enum DiagnosticsBundle {
                 + " source=\(c.source.displayName) plan=\(c.planType ?? "—")")
         } else {
             out.row("command code", "not loaded: \(Redact.message(appState.commandCodeError))")
+        }
+        if let c = appState.opencodeGoAccount {
+            out.row("opencode go", "source=\(c.source.rawValue)")
+        } else {
+            out.row("opencode go", "not loaded: \(Redact.message(appState.opencodeGoError))")
         }
         out.row("imported codex accounts", String(appState.importedCodexAccounts.count))
     }

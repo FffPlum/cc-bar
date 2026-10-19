@@ -589,7 +589,7 @@ struct StatsView: View {
             switch provider.app {
             case .codex: return .codex
             case .claude: return .claude
-            case .antigravity, .cursor, .commandCode: return nil
+            case .antigravity, .cursor, .commandCode, .opencodeGo: return nil
             }
         }
         switch serviceFilter {

@@ -71,6 +71,13 @@ final class AppState {
             }
         }
     }
+    var opencodeGoAccount: OpenCodeGoAuthSession? {
+        didSet {
+            if oldValue?.apiKey != opencodeGoAccount?.apiKey {
+                primaryAlertEntryVersions[.opencodeGo, default: 0] &+= 1
+            }
+        }
+    }
     var codexError: String?
     var claudeError: String?
     /// 用户拒绝过读取 Claude Desktop 登录所需的钥匙串授权，且本机有 Desktop 登录数据。
@@ -80,6 +87,7 @@ final class AppState {
     var antigravityError: String?
     var cursorError: String?
     var commandCodeError: String?
+    var opencodeGoError: String?
 
     // MARK: 导入的 Codex 副账号
     //
@@ -182,6 +190,22 @@ final class AppState {
         get { refreshState(for: .commandCode) }
         set { updatePrimaryState(.commandCode) { $0.refresh = newValue } }
     }
+    var opencodeGoQuota: QuotaSnapshot? {
+        get { quotaSnapshot(for: .opencodeGo) }
+        set { updatePrimaryState(.opencodeGo) { $0.snapshot = newValue } }
+    }
+    var opencodeGoQuotaError: String? {
+        get { quotaError(for: .opencodeGo) }
+        set { updatePrimaryState(.opencodeGo) { $0.error = newValue } }
+    }
+    var opencodeGoQuotaSource: QuotaSnapshotSource? {
+        get { quotaSource(for: .opencodeGo) }
+        set { updatePrimaryState(.opencodeGo) { $0.source = newValue } }
+    }
+    var opencodeGoRefreshState: QuotaRefreshState {
+        get { refreshState(for: .opencodeGo) }
+        set { updatePrimaryState(.opencodeGo) { $0.refresh = newValue } }
+    }
     var quotaHistory = QuotaHistoryPayload()
     var quotaCycles = QuotaCyclePayload()
 
@@ -233,6 +257,9 @@ final class AppState {
             let account = commandCodeAccount
             // user.id 是稳定身份；login / name / email 的变化不重置提醒机会。
             return QuotaAlertIdentity(app: app, accountID: nonEmpty(account?.userID), userID: nonEmpty(account?.orgID))
+        case .opencodeGo:
+            // Go 没有账号资料，只能用 key 的完整 SHA-256 摘要区分账号；摘要不可逆，不含 key 片段。
+            return QuotaAlertIdentity(app: app, accountID: opencodeGoAccount?.accountKey, userID: nil)
         }
     }
 
@@ -244,6 +271,7 @@ final class AppState {
         case .antigravity: name = antigravityAccount?.email
         case .cursor: name = cursorAccount?.email
         case .commandCode: name = commandCodeAccount?.login ?? commandCodeAccount?.email
+        case .opencodeGo: name = nil
         }
         return nonEmpty(name) ?? QuotaProviderDescriptor.descriptor(for: app)?.title ?? app.rawValue
     }
@@ -368,6 +396,7 @@ final class AppState {
         // 是否请求其远端额度仍由 Provider / Stats 开关控制。
         await loadCursor()
         await loadCommandCode(allowDuringTermination: true)
+        await loadOpenCodeGo(allowDuringTermination: true)
         recordCachedQuotaCycleObservations()
         logCredentialSummary()
 
@@ -454,12 +483,14 @@ final class AppState {
             showCursor: SettingsStore.shared.isProviderEnabled(.cursor)
                 || SettingsStore.shared.isUsageServiceVisible(.cursor),
             showCommandCode: SettingsStore.shared.isProviderEnabled(.commandCode),
+            showOpenCodeGo: SettingsStore.shared.isProviderEnabled(.opencodeGo),
             hasVisibleImported: importedCodexAccounts.contains(where: \.visibleInPopover)
         )
         AppLog.debug(.quota, """
             refresh plan reason=\(reason) codex=\(plan.refreshCodex) claude=\(plan.refreshClaude) \
             antigravity=\(plan.refreshAntigravity) cursor=\(plan.refreshCursor) \
-            commandCode=\(plan.refreshCommandCode) imported=\(plan.refreshImported)
+            commandCode=\(plan.refreshCommandCode) opencodeGo=\(plan.refreshOpenCodeGo) \
+            imported=\(plan.refreshImported)
             """)
         if plan.refreshCodex {
             await loadCodex()
@@ -485,6 +516,10 @@ final class AppState {
         if plan.refreshCommandCode {
             await loadCommandCode()
             await loadCommandCodeQuota(reason: reason)
+        }
+        if plan.refreshOpenCodeGo {
+            await loadOpenCodeGo()
+            await loadOpenCodeGoQuota(reason: reason)
         }
         if plan.refreshImported {
             await loadAllImportedCodexQuotas(
@@ -1754,6 +1789,47 @@ final class AppState {
         saveQuotaCache()
     }
 
+    /// 只读 OpenCode / Pi 的 auth.json、环境变量或 cc-bar 钥匙串里的手动 key。
+    /// key 变化（含启动时与缓存的账号键不一致）先清掉旧快照，避免新 key 显示旧额度。
+    func loadOpenCodeGo(allowDuringTermination: Bool = false) async {
+        guard beginStateOperation(allowDuringTermination: allowDuringTermination) else { return }
+        defer { activeStateOperations -= 1 }
+        let pref = SettingsStore.shared.opencodeGoCredentialPreference
+        let next = await Task.detached(priority: .utility) {
+            OpenCodeGoAuth.load(preference: pref)
+        }.value
+
+        guard let next else {
+            opencodeGoAccount = nil
+            opencodeGoError = "未检测到 OpenCode Go API Key"
+            return
+        }
+
+        let changedFromRuntime = opencodeGoAccount.map { $0.apiKey != next.apiKey } ?? false
+        let changedFromCache: Bool = {
+            guard opencodeGoAccount == nil,
+                  let cachedID = quotaCache.opencodeGo?.accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !cachedID.isEmpty
+            else { return false }
+            return cachedID != next.accountKey
+        }()
+        if changedFromRuntime || changedFromCache {
+            resetOpenCodeGoQuotaState()
+        }
+
+        opencodeGoAccount = next
+        opencodeGoError = nil
+    }
+
+    private func resetOpenCodeGoQuotaState() {
+        opencodeGoQuota = nil
+        opencodeGoQuotaSource = nil
+        opencodeGoQuotaError = nil
+        opencodeGoRefreshState = QuotaRefreshState()
+        quotaCache.opencodeGo = nil
+        saveQuotaCache()
+    }
+
     private func loadCodexQuota(reason: QuotaRefreshReason) async {
         guard beginCodexRefresh(reason: reason) else { return }
         let alertEntryVersion = codexAlertEntryVersion
@@ -2138,6 +2214,76 @@ final class AppState {
         }
     }
 
+    private func beginOpenCodeGoRefresh(reason: QuotaRefreshReason) -> Bool {
+        guard !isPreparingForTermination else { return false }
+        let now = Date()
+        guard !opencodeGoRefreshState.inFlight else { return false }
+        if let backoffUntil = opencodeGoRefreshState.backoffUntil, backoffUntil > now {
+            markOpenCodeGoFailure(backoffMessage(until: backoffUntil))
+            return false
+        }
+        if reason == .periodic,
+           let lastSuccessAt = opencodeGoRefreshState.lastSuccessAt,
+           now.timeIntervalSince(lastSuccessAt) < minSuccessInterval
+        {
+            return false
+        }
+        opencodeGoRefreshState.inFlight = true
+        opencodeGoRefreshState.lastAttemptAt = now
+        return true
+    }
+
+    private func loadOpenCodeGoQuota(reason: QuotaRefreshReason) async {
+        guard beginOpenCodeGoRefresh(reason: reason) else { return }
+        let alertEntryVersion = primaryQuotaAlertVersion(for: .opencodeGo)
+        let alertSettingsVersion = SettingsStore.shared.quotaAlertRuntimeVersion
+        defer { opencodeGoRefreshState.inFlight = false }
+
+        guard let session = opencodeGoAccount else {
+            markOpenCodeGoFailure(noAccountMessage)
+            return
+        }
+
+        let result = await OpenCodeGoQuotaClient.fetch(apiKey: session.apiKey)
+        switch result {
+        case .success(let snapshot):
+            let alertCurrent = primaryQuotaAlertVersion(for: .opencodeGo) == alertEntryVersion
+            storeOpenCodeGo(snapshot: snapshot, source: .api)
+            if alertCurrent { observePrimaryQuota(snapshot, settingsVersion: alertSettingsVersion) }
+        // 与 Command Code 相同：被代理拦截的 401 / 403 不说明 key 失效。
+        // key 可能已在 OpenCode / Pi 里更换，重读一次，变了才用新 key 重试。
+        case .failure(let error) where (error.httpStatusCode == 401 || error.httpStatusCode == 403)
+            && !error.looksLikeInterceptedResponse:
+            let previousKey = session.apiKey
+            await loadOpenCodeGo()
+            guard let reloaded = opencodeGoAccount, reloaded.apiKey != previousKey else {
+                markOpenCodeGoFailure(openCodeGoAuthFailureMessage(error), error: error)
+                return
+            }
+            let retryEntryVersion = primaryQuotaAlertVersion(for: .opencodeGo)
+            let retried = await OpenCodeGoQuotaClient.fetch(apiKey: reloaded.apiKey)
+            switch retried {
+            case .success(let snapshot):
+                let alertCurrent = primaryQuotaAlertVersion(for: .opencodeGo) == retryEntryVersion
+                storeOpenCodeGo(snapshot: snapshot, source: .api)
+                if alertCurrent { observePrimaryQuota(snapshot, settingsVersion: alertSettingsVersion) }
+            case .failure(let retryError):
+                markOpenCodeGoFailure(openCodeGoAuthFailureMessage(retryError), error: retryError)
+            }
+        case .failure(let error):
+            markOpenCodeGoFailure(error.userMessage, error: error)
+        }
+    }
+
+    /// 403 且响应含 `EntitlementError` 表示 key 有效但没有 Go 订阅（例如只开通了 Zen），
+    /// 此时提示「重新登录」没有用。
+    private func openCodeGoAuthFailureMessage(_ error: QuotaError) -> String {
+        if case .http(403, let body) = error, body.localizedCaseInsensitiveContains("entitlement") {
+            return tr("This API key has no OpenCode Go subscription", "该 API Key 没有 OpenCode Go 订阅")
+        }
+        return error.userMessage
+    }
+
     /// Cursor 用量接口同样使用 Cursor.app 的只读登录态。401 时只重读一次 SQLite，
     /// 且 token 必须实际变化才重试；不调用 OAuth refresh，也不影响已成功的额度快照。
     ///
@@ -2357,6 +2503,26 @@ final class AppState {
         saveQuotaCache()
     }
 
+    private func storeOpenCodeGo(snapshot: QuotaSnapshot, source: QuotaSnapshotSource) {
+        let updatedAt = Date()
+        let mergedSnapshot = snapshot.preservingFutureResetDates(from: opencodeGoQuota, now: updatedAt)
+        opencodeGoQuota = mergedSnapshot
+        opencodeGoQuotaSource = source
+        opencodeGoQuotaError = nil
+        opencodeGoRefreshState.lastSuccessAt = updatedAt
+        opencodeGoRefreshState.lastError = nil
+        opencodeGoRefreshState.lastErrorIsNetwork = false
+        opencodeGoRefreshState.backoffUntil = nil
+        opencodeGoRefreshState.source = source
+        quotaCache.opencodeGo = QuotaCacheRecord(
+            snapshot: mergedSnapshot,
+            source: source,
+            updatedAt: updatedAt,
+            accountID: opencodeGoAccount?.accountKey
+        )
+        saveQuotaCache()
+    }
+
     private func markCodexFailure(_ message: String, error: QuotaError? = nil) {
         codexQuotaError = message
         codexRefreshState.lastError = message
@@ -2390,6 +2556,15 @@ final class AppState {
         commandCodeRefreshState.lastErrorIsNetwork = error?.isNetworkFailure == true
         if error?.isRateLimited == true {
             commandCodeRefreshState.backoffUntil = Date().addingTimeInterval(rateLimitBackoff)
+        }
+    }
+
+    private func markOpenCodeGoFailure(_ message: String, error: QuotaError? = nil) {
+        opencodeGoQuotaError = message
+        opencodeGoRefreshState.lastError = message
+        opencodeGoRefreshState.lastErrorIsNetwork = error?.isNetworkFailure == true
+        if error?.isRateLimited == true {
+            opencodeGoRefreshState.backoffUntil = Date().addingTimeInterval(rateLimitBackoff)
         }
     }
 
@@ -2457,6 +2632,11 @@ final class AppState {
                 """)
         } else {
             AppLog.info(.credentials, "command code not loaded: \(Redact.message(commandCodeError))")
+        }
+        if let c = opencodeGoAccount {
+            AppLog.info(.credentials, "opencode go source=\(c.source.rawValue)")
+        } else {
+            AppLog.info(.credentials, "opencode go not loaded: \(Redact.message(opencodeGoError))")
         }
     }
 
@@ -2544,6 +2724,19 @@ final class AppState {
                 lines.append((
                     "commandCode", .warn,
                     "command code fetch failed: \(Redact.message(commandCodeQuotaError ?? commandCodeError))"
+                ))
+            }
+        }
+        if settings.isProviderEnabled(.opencodeGo) {
+            if let q = opencodeGoQuota {
+                lines.append((
+                    "opencodeGo", .info,
+                    "opencode go source=\(opencodeGoQuotaSource?.rawValue ?? "—") \(format(q))"
+                ))
+            } else {
+                lines.append((
+                    "opencodeGo", .warn,
+                    "opencode go fetch failed: \(Redact.message(opencodeGoQuotaError ?? opencodeGoError))"
                 ))
             }
         }
