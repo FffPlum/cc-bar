@@ -10,6 +10,8 @@
 >
 > 另按现有接入方式简化了两处：失败处理统一走 `QuotaError` 与「失败保留已有快照」，不再单设「不可用」状态和隐藏旧数字；首次启动引导页不加 OpenCode Go 行（见 §1.3）。
 >
+> 2026-10-19 实现后补充：官方新增 Go Plus 套餐，限额改为按模型分别设置；额度接口在开源仓库里已改为转发到未开源服务。没有真实订阅可联调，按竞品 2026-10 的现行实现核对：端点和返回格式未变，Go Plus 无需单独处理，现有代码不用改。见 §2.1、§2.2、§4、§8、§9。
+>
 > 注意与已落地的 `Core/Usage/OpencodeScanner.swift` 区分：后者扫描本机 `~/.local/share/opencode/opencode.db`，属于**用量统计**；本文是 OpenCode Go **订阅额度**，两者互不影响。
 
 ## 1. 背景、目标与范围
@@ -30,7 +32,7 @@
 
 - 不进入主窗口统计（Overview / 对话 / 项目 / 额度 Timeline / Cycles）。Go 端点没有历史用量，也不写额度历史和周期。
 - 不改本地用量链路：OpenCode / Pi 对话里的 `opencode-go/<model-id>` 仍按现有 `ModelProvider.opencodeGo` 归并、按本地日志计费。
-- 不读浏览器 Cookie，不调用 OpenCode Console 内部接口，不用本地消费按 $12 / $30 / $60 估算剩余比例（CodexBar 有这两条备用来源，见 §2.4）。
+- 不读浏览器 Cookie，不调用 OpenCode Console 内部接口，不用本地消费按套餐限额估算剩余比例（CodexBar 有这两条备用来源，见 §2.4）。
 - 首次启动引导页不加 OpenCode Go 行：引导页账号列表按 5 行在 520pt 高的窗口里排版，加第 6 行需要重新排版，单独评估。用户可在设置里看到检测结果并开启。
 - 不新增 logo 资源，复用现有 `opencode` 图标，缺失时显示字母 `G`。
 
@@ -38,7 +40,17 @@
 
 ### 2.1 远端接口
 
-OpenCode Go 是 OpenCode 的 $10/月订阅，按美元额度设三个窗口：5 小时 $12、每周 $30、每月 $60。
+OpenCode Go 有两档套餐（[官方文档](https://opencode.ai/docs/go/)，2026-10-19 核对）：
+
+| 套餐 | 价格 | 每个模型的月额度 |
+|---|---|---|
+| Go | $10/月 | 多数模型 $15～$60（DeepSeek V4.1 Flash 为 $80） |
+| Go Plus | $40/月 | 多数模型 $60～$240，每个模型都高于 Go |
+
+- 两档可用的模型相同。限额按模型分别设置：每个模型有自己的月额度，5 小时窗口为月额度的 20%，每周为 50%，每月为 100%。部分模型限时提高额度或免费。
+- 用完后仍可使用免费模型；开启「Use balance」后改用 Console 余额按量计费，不会被拦截。
+- 早期 Go 只有一档，全部模型共用 5 小时 $12、每周 $30、每月 $60 三个窗口，本草案初版按此编写。
+- 官方文档只写「在 Console 查看用量」，没有列出下面的额度接口。文档里订阅 Go 或 Go Plus 后都是复制 API key 使用，端点表不区分套餐。§2.2 的竞品也都不区分 Go 和 Go Plus，按同一个 key、同一个额度接口处理，cc-bar 照此实现。
 
 **端点**：`GET https://opencode.ai/zen/go/v1/usage`，`Authorization: Bearer <API key>`。
 
@@ -58,17 +70,29 @@ OpenCode Go 是 OpenCode 的 $10/月订阅，按美元额度设三个窗口：5 
 - `status == "rate-limited"` 表示该窗口已用完，按 100% 已用处理。
 - `resetsAt` 为 UTC ISO8601，可能带毫秒。
 - 401 = key 无效；403（响应含 `EntitlementError`）= key 没有 Go 订阅。
-- 端点只返回当前窗口，没有历史。官方文档写明了三档限额，但没有把该端点列为公开 API，按非公开接口容错处理。
+- 端点只返回当前窗口，没有历史。官方没有把该端点列为公开 API，按非公开接口容错处理。
+- **接口现状**：上面的响应格式来自 2026-08 的官方源码（提交「refactor(console): simplify go usage response」）。2026-10-11 起（[PR #54563](https://github.com/anomalyco/opencode/pull/54563)），开源仓库里的 `usage.ts` 只把请求转发到未开源的新推理服务（`packages/console/app/src/lib/inference-proxy.ts`，`GET /zen/go/v1/usage` → `/go/v1/usage`），当前返回格式无法再从源码确认，改以竞品的现行实现为准：oh-my-pi 在 2026-10-14 的提交「fix(ai): restored OpenCode Go account usage route」中写明，模型请求已迁到 `https://opencode.ai/inference/go/v1`，账号额度仍在 `/zen/go/v1/usage`，响应仍是 `usage.{rolling,weekly,monthly}.{status, percent, resetsAt}`。cc-bar 的端点与解析保持不变。
 
 ### 2.2 交叉验证来源
 
-三个独立来源一致：
+2026-08 编写时三个独立来源一致（官方源码一项在 2026-10-11 后已只做转发，见 §2.1「接口现状」）：
 
 | 来源 | 内容 |
 |---|---|
 | OpenCode 官方服务端源码 `packages/console/app/src/routes/zen/go/v1/usage.ts`（[PR #16513](https://github.com/anomalyco/opencode/pull/16513)） | 端点、字段、`percent` 为已用 |
 | CodexBar `Sources/CodexBarCore/Providers/OpenCodeGo/OpenCodeGoUsageFetcher.swift` | 同一端点与 Bearer；`percent` 按 0～100 解析；401 / 403 视为凭据无效 |
 | Pi 扩展 `pi-model-selector` 的 `docs/opencode-go.md` | 同一端点；凭据取 Pi 的 `opencode-go` provider key、`OPENCODE_API_KEY` 或 `auth.json` 的 `opencode-go` 项（`key` / `access` / `apiKey`）；`rate-limited` 按 100% |
+
+2026-10-19 复核竞品现行代码（均在 OpenCode 新增 Go Plus、改为按模型限额之后仍在维护）：
+
+| 竞品（最近修改） | 端点 | 解析 | 套餐 |
+|---|---|---|---|
+| oh-my-pi `packages/ai/src/usage/opencode-go.ts`（2026-10-14） | `GET /zen/go/v1/usage`，Bearer | 三个窗口 `{status, percent, resetsAt}`；`rate-limited` 视为用完；401 / 403 视为凭据无效 | 不区分，`planType` 固定写「OpenCode Go」 |
+| CodexBar `OpenCodeGoUsageFetcher.swift`（2026-10-03） | 同上 | `usage.rolling` 必需，`weekly` / `monthly` 可缺 | 不区分 |
+| Orca `src/main/rate-limits/opencode-go-status-parsing.ts`（2026-10-05） | 同上 | 三个窗口按百分比映射 | 不区分 |
+| OpenUsage `OpenCodeUsageClient.swift`（2026-08-13） | 同上 | — | 不区分 |
+
+没有竞品按模型解析额度，也没有竞品为 Go Plus 换端点或改解析。oh-my-pi 额外发送 `x-opencode-session` 请求头，提交说明写的是用于标识来源（避免请求显示为「Bun fetch」），CodexBar 不发送；cc-bar 已有专用 `User-Agent`，不加这个头。
 
 ### 2.3 本地凭据位置
 
@@ -87,7 +111,7 @@ key 长期有效，不需要刷新。
 CodexBar 另有两条来源，本版不采用：
 
 - **浏览器 Cookie + Console 内部接口**：需要读取浏览器 Cookie（涉及钥匙串授权），并依赖网页内部的 server function ID，网站改版即失效。
-- **本机 SQLite 估算**：用本机 `opencode-go` 消费按 $12 / $30 / $60 推算百分比。它只统计这台设备，CodexBar 自己也标为估算、说明不能据此判断账号余量。cc-bar 的额度只展示服务端数据。
+- **本机 SQLite 估算**：用本机 `opencode-go` 消费按早期的 $12 / $30 / $60 推算百分比（现在限额按模型和套餐区分，这种估算更不准确）。它只统计这台设备，CodexBar 自己也标为估算、说明不能据此判断账号余量。cc-bar 的额度只展示服务端数据。
 
 ## 3. 凭据方案
 
@@ -119,7 +143,9 @@ CodexBar 另有两条来源，本版不采用：
 - `usedPercent = clamp(percent, 0...100)`；`status == "rate-limited"` 时取 100。剩余比例由 `QuotaWindow.remainingPercent` 统一计算，状态色走 `statusColor` 三档。
 - `percent` 缺失或不是有限数字时，该窗口不进入快照，不伪造 0%。
 - 三个窗口都无法解析时返回 `QuotaError.decode`。
-- `planType` 不设置；Popover 副标题在没有账号信息时显示 vendor「OpenCode」。
+- `planType` 不设置；Popover 副标题在没有账号信息时显示 vendor「OpenCode」。响应里没有套餐字段，界面不区分 Go 和 Go Plus。
+- 映射只读已用比例，不涉及具体金额，因此与套餐档位无关，Go 和 Go Plus 用同一套映射，与 §2.2 的竞品一致。
+- 限额改为按模型后，服务端怎样算出三个汇总 `percent` 没有公开；竞品都直接展示这三个值，cc-bar 同样处理，不自行按模型拆分。
 - 快照沿用 `preservingFutureResetDates`。
 
 ## 5. 状态、错误与刷新
@@ -178,12 +204,15 @@ CodexBar 另有两条来源，本版不采用：
 - 单元测试：凭据读取顺序与手动模式、key 校验、响应解析（全部窗口、部分窗口、`rate-limited`、percent 越界、字段缺失、ISO8601 带 / 不带毫秒）、能力与默认值。
 - Debug 编译。
 - 没有真实 Go 订阅 key 时无法联调；真实响应的边界情况（如无订阅时的确切返回）靠用户反馈修正。
+- 2026-10-11 转发改造后的返回格式和 Go Plus 的处理，按 §2.2 竞品的现行实现确定，没有用真实 key 实测；出现无法解析或 Go Plus 报错时，靠用户反馈修正。
 
 ## 9. 风险
 
 | 风险 | 处理 |
 |---|---|
 | 端点非公开，字段可能变化 | 集中解析；无法解析时报「返回的数据无法识别」，保留已有快照 |
+| 返回格式以后改为按模型返回 | 目前竞品都按三个汇总窗口解析；改格式后会报「返回的数据无法识别」并保留已有快照，届时参照竞品的新写法调整 |
+| Go Plus 没有实测 | 竞品都不区分套餐；如果 Go Plus 用户反馈 403 或无法解析，再补充 |
 | key 存在多处、不同步 | 自动模式按固定顺序取第一个可用 key；需要指定时用手动模式 |
 | 环境变量从 Finder 启动拿不到 | 只作兜底；设置面板提示改用手动 key |
 | 服务识别 / 风控 | 专用 `User-Agent`，遵守 429 退避 |
