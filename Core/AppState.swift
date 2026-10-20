@@ -44,8 +44,8 @@ final class AppState {
             }
         }
     }
-    /// `/api/oauth/profile` 查到的套餐名，按账号 + 组织挂钩；换号或换组织后不再采用。
-    private var claudeProfilePlan: (accountKey: String, name: String)?
+    /// `/api/oauth/profile` 的结果，按账号 + 组织挂钩；换号或换组织后不再采用。
+    private var claudeProfile: (accountKey: String, profile: ClaudeQuotaClient.Profile)?
     /// 上次查 profile 用的 token 与时间。token 变化时立即重查；同一 token 成功后隔
     /// `claudeProfileRefreshInterval` 重查（Desktop token 有效期以月计，不设期限会一直
     /// 停在旧套餐），失败或认不出套餐时隔 `claudeProfileRetryInterval` 再试。仅内存，不打印。
@@ -55,10 +55,20 @@ final class AppState {
     /// 界面展示用的 Claude 套餐名：优先服务端 profile，失败时退回本地凭据记录。
     var claudePlanName: String? {
         guard let account = claudeAccount else { return nil }
-        if let plan = claudeProfilePlan, plan.accountKey == claudeProfileAccountKey(account) {
-            return plan.name
-        }
-        return account.localPlanName
+        return currentClaudeProfile(for: account)?.planName ?? account.localPlanName
+    }
+    /// 界面展示用的 Claude 邮箱：本地凭据有就用本地，只用 Desktop 时退回 profile 返回的邮箱。
+    /// 只用于显示——`claudeAccount.email` 不回填，否则历史账号键会从 uuid 派生改为
+    /// 邮箱派生，纯 Desktop 用户的额度历史会分到新键下。
+    var claudeDisplayEmail: String? {
+        guard let account = claudeAccount else { return nil }
+        if let email = account.email, !email.isEmpty { return email }
+        return currentClaudeProfile(for: account)?.email
+    }
+
+    private func currentClaudeProfile(for account: ClaudeAccount) -> ClaudeQuotaClient.Profile? {
+        guard let cached = claudeProfile, cached.accountKey == claudeProfileAccountKey(account) else { return nil }
+        return cached.profile
     }
     var antigravityAccount: AntigravityAccount? {
         didSet {
@@ -1956,7 +1966,7 @@ final class AppState {
             if primaryQuotaAlertVersion(for: .claude) == alertEntryVersion {
                 observePrimaryQuota(snapshot, settingsVersion: alertSettingsVersion)
             }
-            await refreshClaudeProfilePlanIfNeeded(account: account, accessToken: activeToken)
+            await refreshClaudeProfileIfNeeded(account: account, accessToken: activeToken)
         case .failure(let err):
             markClaudeFailure(err.userMessage, error: err)
             if reason == .userInitiated, claudeQuota == nil {
@@ -1965,26 +1975,28 @@ final class AppState {
         }
     }
 
-    /// 额度取数成功后按需查一次套餐。失败只记日志，不影响额度状态，也不参与 429 退避。
-    private func refreshClaudeProfilePlanIfNeeded(account: ClaudeAccount, accessToken: String) async {
+    /// 额度取数成功后按需查一次 profile（套餐与邮箱）。失败只记日志，不影响额度状态，也不参与 429 退避。
+    private func refreshClaudeProfileIfNeeded(account: ClaudeAccount, accessToken: String) async {
         if let attempt = claudeProfileAttempt, attempt.token == accessToken {
             let interval = attempt.succeeded ? claudeProfileRefreshInterval : claudeProfileRetryInterval
             if Date().timeIntervalSince(attempt.at) < interval { return }
         }
         claudeProfileAttempt = (accessToken, Date(), false)
         let accountKey = claudeProfileAccountKey(account)
-        let result = await ClaudeQuotaClient.fetchPlanName(accessToken: accessToken)
+        let result = await ClaudeQuotaClient.fetchProfile(accessToken: accessToken)
         // 请求期间换了号或组织就丢弃结果。
         guard let current = claudeAccount, claudeProfileAccountKey(current) == accountKey else { return }
         switch result {
-        case .success(let name?):
-            claudeProfileAttempt = (accessToken, Date(), true)
-            claudeProfilePlan = (accountKey, name)
-            if name != current.localPlanName {
-                AppLog.info(.credentials, "claude plan from profile=\(name) local=\(current.localPlanName ?? "—")")
+        case .success(let profile):
+            claudeProfile = (accountKey, profile)
+            if let name = profile.planName {
+                claudeProfileAttempt = (accessToken, Date(), true)
+                if name != current.localPlanName {
+                    AppLog.info(.credentials, "claude plan from profile=\(name) local=\(current.localPlanName ?? "—")")
+                }
+            } else {
+                AppLog.info(.credentials, "claude profile returned no recognizable plan")
             }
-        case .success(nil):
-            AppLog.info(.credentials, "claude profile returned no recognizable plan")
         case .failure(let err):
             AppLog.info(.credentials, "claude profile fetch failed: \(Redact.message(err.userMessage))")
         }

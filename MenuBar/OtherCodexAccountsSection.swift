@@ -185,14 +185,14 @@ private struct ImportedCodexRow: View {
     private var displaySubtitle: String {
         if SettingsStore.shared.privacyMode {
             // 隐私模式：subtitle 只保留 plan，不显示 email/别名
-            if let plan = account.planType, !plan.isEmpty { return plan.capitalized }
+            if let plan = CodexAccount.planName(account.planType) { return plan }
             return ""
         }
         var parts: [String] = []
         // 有别名时名称不含 email，subtitle 补上 email；无别名时名称已是 email 用户名，不再重复。
         // email 可空（PAT 导入、无 email claim），此时仍保留 plan。
         if let email = account.email, !email.isEmpty, !account.alias.isEmpty { parts.append(email) }
-        if let plan = account.planType, !plan.isEmpty { parts.append(plan.capitalized) }
+        if let plan = CodexAccount.planName(account.planType) { parts.append(plan) }
         return parts.joined(separator: " · ")
     }
 

@@ -892,12 +892,12 @@ struct SettingsRootView: View {
         case .codex:
             return (
                 email: appState.codexAccount?.email,
-                plan: appState.codexAccount?.planType?.capitalized,
+                plan: CodexAccount.planName(appState.codexAccount?.planType),
                 signedIn: appState.codexAccount != nil
             )
         case .claude:
             return (
-                email: appState.claudeAccount?.email,
+                email: appState.claudeDisplayEmail,
                 plan: appState.claudePlanName,
                 signedIn: appState.claudeAccount != nil
             )
@@ -986,9 +986,8 @@ struct SettingsRootView: View {
     private func quotaServiceEntry(_ provider: QuotaProviderDescriptor, settings: SettingsStore) -> ServiceEntry {
         let app = provider.app
         let info = accountInfo(for: app)
-        let email = info.email.map {
-            PrivacyDisplay.isEnabled ? PrivacyDisplay.account("primary:\(app.rawValue)") : $0
-        }
+        // 每个服务只有一个主账号，隐私模式直接不显示邮箱，不必换成「账号 NN」。
+        let email = PrivacyDisplay.isEnabled ? nil : info.email
         let plan = info.plan.flatMap { $0.isEmpty ? nil : $0 }
 
         var sourceLines = [quotaSourceHelp(for: app)]

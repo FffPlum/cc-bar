@@ -33,12 +33,20 @@ nonisolated enum ClaudeQuotaClient {
 
     static let profileEndpoint = URL(string: "https://api.anthropic.com/api/oauth/profile")!
 
-    /// 从服务端查当前订阅的套餐名。本地凭据里的 `subscriptionType` 只在签发 token 时
-    /// 写入，Claude Desktop 的 token 有效期接近一年，升级 Max 后仍可能显示 Pro。
-    /// 成功但认不出套餐时返回 `.success(nil)`。
-    nonisolated static func fetchPlanName(
+    /// profile 里界面用得到的两项。
+    nonisolated struct Profile: Sendable, Equatable {
+        /// 认不出套餐时为 nil。
+        var planName: String?
+        /// 只用于显示，不参与账号键与提醒身份，见 `AppState.claudeDisplayEmail`。
+        var email: String?
+    }
+
+    /// 从服务端查当前订阅的套餐名与邮箱。本地凭据里的 `subscriptionType` 只在签发 token 时
+    /// 写入，Claude Desktop 的 token 有效期接近一年，升级 Max 后仍可能显示 Pro；
+    /// 只用 Desktop 的用户本地也拿不到邮箱。
+    nonisolated static func fetchProfile(
         accessToken: String
-    ) async -> Result<String?, QuotaError> {
+    ) async -> Result<Profile, QuotaError> {
         var req = URLRequest(url: profileEndpoint)
         req.httpMethod = "GET"
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -60,16 +68,22 @@ nonisolated enum ClaudeQuotaClient {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return .failure(.decode("not json object"))
         }
-        return .success(parsePlanName(root: root))
+        return .success(parseProfile(root: root))
     }
 
-    /// `organization.organization_type`（`claude_pro` / `claude_max` / `claude_team` …）
-    /// 配合 `organization.rate_limit_tier`（`default_claude_max_20x` 等）；
+    nonisolated static func parseProfile(root: [String: Any]) -> Profile {
+        let account = root["account"] as? [String: Any]
+        return Profile(
+            planName: parsePlanName(root: root),
+            email: nonEmpty(account?["email"] as? String)
+        )
+    }
+
+    /// `organization.organization_type`（`claude_pro` / `claude_max` / `claude_team` …）；
     /// 缺类型时退回 `account.has_claude_max` / `has_claude_pro`。
     nonisolated static func parsePlanName(root: [String: Any]) -> String? {
         let organization = root["organization"] as? [String: Any]
         let account = root["account"] as? [String: Any]
-        let tier = organization?["rate_limit_tier"] as? String
         var type = nonEmpty(organization?["organization_type"] as? String)
         if type == nil {
             if account?["has_claude_max"] as? Bool == true {
@@ -78,7 +92,7 @@ nonisolated enum ClaudeQuotaClient {
                 type = "pro"
             }
         }
-        return ClaudeAccount.planName(type: type, rateLimitTier: tier)
+        return ClaudeAccount.planName(type)
     }
 
     nonisolated static func parse(root: [String: Any]) -> QuotaSnapshot {

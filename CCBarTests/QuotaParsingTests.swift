@@ -733,7 +733,7 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertEqual(snapshot.modelLimits.first?.window.remainingPercent, 100)
     }
 
-    func testClaudeProfilePlanNameDistinguishesMaxTiers() {
+    func testClaudeProfilePlanNameShowsPlanFamily() {
         func plan(_ type: String?, _ tier: String?) -> String? {
             var organization: [String: Any] = [:]
             organization["organization_type"] = type
@@ -742,15 +742,36 @@ final class QuotaParsingTests: XCTestCase {
         }
 
         XCTAssertEqual(plan("claude_pro", "default_claude_ai"), "Pro")
-        XCTAssertEqual(plan("claude_max", "default_claude_max_5x"), "Max 5x")
-        XCTAssertEqual(plan("claude_max", "default_claude_max_20x"), "Max 20x")
-        XCTAssertEqual(plan("claude_max", nil), "Max")
+        XCTAssertEqual(plan("claude_max", "default_claude_max_5x"), "Max")
+        XCTAssertEqual(plan("claude_max", "default_claude_max_20x"), "Max")
         XCTAssertEqual(plan("claude_team", nil), "Team")
         XCTAssertNil(plan(nil, nil))
         XCTAssertEqual(
             ClaudeQuotaClient.parsePlanName(root: ["account": ["has_claude_max": true]]),
             "Max"
         )
+
+        let profile = ClaudeQuotaClient.parseProfile(root: [
+            "account": ["email": "user@example.com", "has_claude_pro": true],
+        ])
+        XCTAssertEqual(profile, .init(planName: "Pro", email: "user@example.com"))
+        XCTAssertNil(ClaudeQuotaClient.parseProfile(root: ["account": ["email": ""]]).email)
+    }
+
+    func testCodexPlanNameFollowsOfficialFamilies() {
+        XCTAssertEqual(CodexAccount.planName("plus"), "Plus")
+        XCTAssertEqual(CodexAccount.planName("prolite"), "Pro")
+        XCTAssertEqual(CodexAccount.planName("pro"), "Pro")
+        XCTAssertEqual(CodexAccount.planName("promax"), "Pro")
+        XCTAssertEqual(CodexAccount.planName("team"), "Business")
+        XCTAssertEqual(CodexAccount.planName("self_serve_business_prolite"), "Business")
+        XCTAssertEqual(CodexAccount.planName("business"), "Enterprise")
+        XCTAssertEqual(CodexAccount.planName("enterprise_cbp_automation"), "Enterprise")
+        XCTAssertEqual(CodexAccount.planName("edu_pro"), "Edu")
+        XCTAssertEqual(CodexAccount.planName("sci_plus"), "Academic")
+        XCTAssertEqual(CodexAccount.planName("newplan"), "Newplan")
+        XCTAssertNil(CodexAccount.planName(""))
+        XCTAssertNil(CodexAccount.planName(nil))
     }
 
     func testMissingResetCarriesOnlyStillValidMatchingReset() {

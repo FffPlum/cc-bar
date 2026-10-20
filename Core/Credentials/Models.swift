@@ -24,6 +24,28 @@ struct CodexAccount: Sendable, Equatable {
     /// 该令牌是不透明字符串、无 exp / refresh，取数时跳过 OAuth 续期，
     /// 身份（email/plan/account_id）由 `wham/usage` 响应回填。
     var isPersonalAccessToken: Bool = false
+
+    /// `chatgpt_plan_type` / `plan_type` 的展示名。取值与官方名对照 Codex CLI 的
+    /// `codex-rs/protocol/src/auth.rs` 与 `tui/src/subscription.rs`；同系列各档只显示大类
+    /// （`prolite` / `pro` / `promax` 都是 Pro），倍数和价格会变，不细分。
+    /// OpenAI 把 Team 改名 Business 后，`team` 对应 Business、`business` 对应 Enterprise。
+    /// 认不出的值首字母大写原样显示。
+    nonisolated static func planName(_ raw: String?) -> String? {
+        let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        guard !value.isEmpty else { return nil }
+        switch value {
+        case "free": return "Free"
+        case "go": return "Go"
+        case "plus": return "Plus"
+        case "pro", "prolite", "promax": return "Pro"
+        case "team", "self_serve_business_usage_based", "self_serve_business_prolite": return "Business"
+        case "business", "enterprise", "hc", "ent26",
+             "enterprise_cbp_usage_based", "enterprise_cbp_automation": return "Enterprise"
+        case "edu", "education", "edu_plus", "edu_pro": return "Edu"
+        case "sci", "sci_plus": return "Academic"
+        default: return value.capitalized
+        }
+    }
 }
 
 struct ClaudeAccount: Sendable, Equatable {
@@ -41,25 +63,18 @@ struct ClaudeAccount: Sendable, Equatable {
     /// 仅内存使用，不打印 / 不持久化到 UserDefaults
     var accessToken: String?
     var refreshToken: String?
-    /// CLI 凭据里的 `rateLimitTier`，区分 Max 5x / 20x。
-    var rateLimitTier: String? = nil
 
     /// 本地凭据推出的套餐名，profile 查询失败时兜底。
     var localPlanName: String? {
-        Self.planName(type: subscriptionType, rateLimitTier: rateLimitTier)
+        Self.planName(subscriptionType)
     }
 
-    /// `pro` / `claude_pro` → `Pro`；Max 按 `rateLimitTier` 细分为 `Max 5x` / `Max 20x`。
-    nonisolated static func planName(type: String?, rateLimitTier: String?) -> String? {
+    /// `pro` / `claude_pro` → `Pro`，`max` / `claude_max` → `Max`。Max 5x / 20x 不细分，
+    /// 与 Codex 各档 Pro 统一显示大类的做法一致。
+    nonisolated static func planName(_ type: String?) -> String? {
         var base = type?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         if base.hasPrefix("claude_") { base.removeFirst("claude_".count) }
         guard !base.isEmpty else { return nil }
-        if base == "max" {
-            let tier = rateLimitTier?.lowercased() ?? ""
-            if tier.contains("max_20x") { return "Max 20x" }
-            if tier.contains("max_5x") { return "Max 5x" }
-            return "Max"
-        }
         return base.capitalized
     }
 }

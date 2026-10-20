@@ -203,7 +203,7 @@ struct ImportedCodexAccountsView: View {
     private func importedAccountDetail(_ account: ImportedCodexAccount) -> String {
         var parts: [String] = []
         if !PrivacyDisplay.isEnabled, let email = account.email, !email.isEmpty { parts.append(email) }
-        if let plan = account.planType, !plan.isEmpty { parts.append(plan.capitalized) }
+        if let plan = CodexAccount.planName(account.planType) { parts.append(plan) }
         return parts.joined(separator: " · ")
     }
 }
@@ -365,8 +365,8 @@ struct AddImportedCodexAccountSheet: View {
                         Text(PrivacyDisplay.isEnabled ? PrivacyDisplay.account(p.id) : email)
                             .font(.system(size: 12, weight: .semibold))
                     }
-                    if let plan = p.planType {
-                        Text(plan.capitalized)
+                    if let plan = CodexAccount.planName(p.planType) {
+                        Text(plan)
                             .font(.system(size: 10.5))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 5)
@@ -441,8 +441,8 @@ struct AddImportedCodexAccountSheet: View {
                                 .font(.system(size: 11.5))
                                 .lineLimit(1)
                         }
-                        if let plan = p.planType {
-                            Text(plan.capitalized)
+                        if let plan = CodexAccount.planName(p.planType) {
+                            Text(plan)
                                 .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 4)

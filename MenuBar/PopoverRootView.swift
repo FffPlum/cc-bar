@@ -214,10 +214,10 @@ struct PopoverRootView: View {
         switch app {
         case .codex:
             email = appState.codexAccount?.email
-            plan = appState.codexAccount?.planType?.capitalized
+            plan = CodexAccount.planName(appState.codexAccount?.planType)
             fallback = "OpenAI"
         case .claude:
-            email = appState.claudeAccount?.email
+            email = appState.claudeDisplayEmail
             plan = appState.claudePlanName
             fallback = "Anthropic"
         case .antigravity:
@@ -238,9 +238,8 @@ struct PopoverRootView: View {
             plan = nil
             fallback = "OpenCode"
         }
-        if let email, !email.isEmpty {
-            parts.append(privacy ? PrivacyDisplay.account("primary:\(app.rawValue)") : email)
-        }
+        // 每个服务只有一个主账号，隐私模式直接不显示邮箱，不必换成「账号 NN」。
+        if !privacy, let email, !email.isEmpty { parts.append(email) }
         if let plan, !plan.isEmpty { parts.append(plan) }
         if parts.isEmpty { parts.append(fallback) }
         return parts.joined(separator: " · ")

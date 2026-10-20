@@ -100,8 +100,7 @@ enum ClaudeAuth {
             expiresAt: expiresAt,
             expiredGuess: expired,
             accessToken: accessToken,
-            refreshToken: refreshToken,
-            rateLimitTier: oauth["rateLimitTier"] as? String
+            refreshToken: refreshToken
         )
     }
 }
