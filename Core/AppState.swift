@@ -44,6 +44,22 @@ final class AppState {
             }
         }
     }
+    /// `/api/oauth/profile` 查到的套餐名，按账号 + 组织挂钩；换号或换组织后不再采用。
+    private var claudeProfilePlan: (accountKey: String, name: String)?
+    /// 上次查 profile 用的 token 与时间。token 变化时立即重查；同一 token 成功后隔
+    /// `claudeProfileRefreshInterval` 重查（Desktop token 有效期以月计，不设期限会一直
+    /// 停在旧套餐），失败或认不出套餐时隔 `claudeProfileRetryInterval` 再试。仅内存，不打印。
+    @ObservationIgnored private var claudeProfileAttempt: (token: String, at: Date, succeeded: Bool)?
+    private let claudeProfileRefreshInterval: TimeInterval = 6 * 60 * 60
+    private let claudeProfileRetryInterval: TimeInterval = 60 * 60
+    /// 界面展示用的 Claude 套餐名：优先服务端 profile，失败时退回本地凭据记录。
+    var claudePlanName: String? {
+        guard let account = claudeAccount else { return nil }
+        if let plan = claudeProfilePlan, plan.accountKey == claudeProfileAccountKey(account) {
+            return plan.name
+        }
+        return account.localPlanName
+    }
     var antigravityAccount: AntigravityAccount? {
         didSet {
             if oldValue?.email != antigravityAccount?.email || oldValue?.accessToken != antigravityAccount?.accessToken
@@ -1940,12 +1956,44 @@ final class AppState {
             if primaryQuotaAlertVersion(for: .claude) == alertEntryVersion {
                 observePrimaryQuota(snapshot, settingsVersion: alertSettingsVersion)
             }
+            await refreshClaudeProfilePlanIfNeeded(account: account, accessToken: activeToken)
         case .failure(let err):
             markClaudeFailure(err.userMessage, error: err)
             if reason == .userInitiated, claudeQuota == nil {
                 await loadClaudeCLIFallback(apiError: err)
             }
         }
+    }
+
+    /// 额度取数成功后按需查一次套餐。失败只记日志，不影响额度状态，也不参与 429 退避。
+    private func refreshClaudeProfilePlanIfNeeded(account: ClaudeAccount, accessToken: String) async {
+        if let attempt = claudeProfileAttempt, attempt.token == accessToken {
+            let interval = attempt.succeeded ? claudeProfileRefreshInterval : claudeProfileRetryInterval
+            if Date().timeIntervalSince(attempt.at) < interval { return }
+        }
+        claudeProfileAttempt = (accessToken, Date(), false)
+        let accountKey = claudeProfileAccountKey(account)
+        let result = await ClaudeQuotaClient.fetchPlanName(accessToken: accessToken)
+        // 请求期间换了号或组织就丢弃结果。
+        guard let current = claudeAccount, claudeProfileAccountKey(current) == accountKey else { return }
+        switch result {
+        case .success(let name?):
+            claudeProfileAttempt = (accessToken, Date(), true)
+            claudeProfilePlan = (accountKey, name)
+            if name != current.localPlanName {
+                AppLog.info(.credentials, "claude plan from profile=\(name) local=\(current.localPlanName ?? "—")")
+            }
+        case .success(nil):
+            AppLog.info(.credentials, "claude profile returned no recognizable plan")
+        case .failure(let err):
+            AppLog.info(.credentials, "claude profile fetch failed: \(Redact.message(err.userMessage))")
+        }
+    }
+
+    /// 套餐按组织计，同一账号切到另一组织（如 Max 个人 → Team）要视为不同的键。
+    private func claudeProfileAccountKey(_ account: ClaudeAccount) -> String {
+        let accountID = account.accountUuid?.lowercased() ?? account.email?.lowercased() ?? ""
+        return "\(accountID)|\(account.organizationUuid?.lowercased() ?? "")"
     }
 
     private func loadAntigravityQuota(reason: QuotaRefreshReason) async {

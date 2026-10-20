@@ -218,7 +218,7 @@ struct PopoverRootView: View {
             fallback = "OpenAI"
         case .claude:
             email = appState.claudeAccount?.email
-            plan = appState.claudeAccount?.subscriptionType?.capitalized
+            plan = appState.claudePlanName
             fallback = "Anthropic"
         case .antigravity:
             email = appState.antigravityAccount?.email

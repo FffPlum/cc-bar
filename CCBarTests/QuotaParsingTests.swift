@@ -733,6 +733,26 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertEqual(snapshot.modelLimits.first?.window.remainingPercent, 100)
     }
 
+    func testClaudeProfilePlanNameDistinguishesMaxTiers() {
+        func plan(_ type: String?, _ tier: String?) -> String? {
+            var organization: [String: Any] = [:]
+            organization["organization_type"] = type
+            organization["rate_limit_tier"] = tier
+            return ClaudeQuotaClient.parsePlanName(root: ["organization": organization])
+        }
+
+        XCTAssertEqual(plan("claude_pro", "default_claude_ai"), "Pro")
+        XCTAssertEqual(plan("claude_max", "default_claude_max_5x"), "Max 5x")
+        XCTAssertEqual(plan("claude_max", "default_claude_max_20x"), "Max 20x")
+        XCTAssertEqual(plan("claude_max", nil), "Max")
+        XCTAssertEqual(plan("claude_team", nil), "Team")
+        XCTAssertNil(plan(nil, nil))
+        XCTAssertEqual(
+            ClaudeQuotaClient.parsePlanName(root: ["account": ["has_claude_max": true]]),
+            "Max"
+        )
+    }
+
     func testMissingResetCarriesOnlyStillValidMatchingReset() {
         let now = Date(timeIntervalSince1970: 1_000)
         let old = snapshot(

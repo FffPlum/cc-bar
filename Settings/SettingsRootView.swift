@@ -898,7 +898,7 @@ struct SettingsRootView: View {
         case .claude:
             return (
                 email: appState.claudeAccount?.email,
-                plan: appState.claudeAccount?.subscriptionType?.capitalized,
+                plan: appState.claudePlanName,
                 signedIn: appState.claudeAccount != nil
             )
         case .antigravity:

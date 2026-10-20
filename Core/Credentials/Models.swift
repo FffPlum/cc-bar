@@ -33,12 +33,35 @@ struct ClaudeAccount: Sendable, Equatable {
     /// 做账号比对——两边同属一个账号才允许借用 Desktop 的 access_token。
     var accountUuid: String?
     var organizationUuid: String?
+    /// 本地凭据里记录的套餐，只在签发 / 刷新 token 时写入，可能落后于实际订阅；
+    /// 展示优先用 `/api/oauth/profile` 的结果（`AppState.claudePlanName`）。
     var subscriptionType: String?
     var expiresAt: Date?
     var expiredGuess: Bool
     /// 仅内存使用，不打印 / 不持久化到 UserDefaults
     var accessToken: String?
     var refreshToken: String?
+    /// CLI 凭据里的 `rateLimitTier`，区分 Max 5x / 20x。
+    var rateLimitTier: String? = nil
+
+    /// 本地凭据推出的套餐名，profile 查询失败时兜底。
+    var localPlanName: String? {
+        Self.planName(type: subscriptionType, rateLimitTier: rateLimitTier)
+    }
+
+    /// `pro` / `claude_pro` → `Pro`；Max 按 `rateLimitTier` 细分为 `Max 5x` / `Max 20x`。
+    nonisolated static func planName(type: String?, rateLimitTier: String?) -> String? {
+        var base = type?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if base.hasPrefix("claude_") { base.removeFirst("claude_".count) }
+        guard !base.isEmpty else { return nil }
+        if base == "max" {
+            let tier = rateLimitTier?.lowercased() ?? ""
+            if tier.contains("max_20x") { return "Max 20x" }
+            if tier.contains("max_5x") { return "Max 5x" }
+            return "Max"
+        }
+        return base.capitalized
+    }
 }
 
 enum CredentialError: Error, CustomStringConvertible {

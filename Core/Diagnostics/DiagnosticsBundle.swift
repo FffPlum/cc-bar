@@ -216,7 +216,8 @@ enum DiagnosticsBundle {
         }
         if let c = appState.claudeAccount {
             out.row("claude", "source=\(c.source.rawValue) account=\(Redact.account(c.email))"
-                + " plan=\(c.subscriptionType ?? "—") expiresAt=\(stamp(c.expiresAt))"
+                + " plan=\(c.subscriptionType ?? "—") displayPlan=\(appState.claudePlanName ?? "—")"
+                + " expiresAt=\(stamp(c.expiresAt))"
                 + " expiredGuess=\(c.expiredGuess) hasAccess=\(c.accessToken != nil)")
         } else {
             out.row("claude", "not loaded: \(Redact.message(appState.claudeError))")

@@ -177,7 +177,7 @@ private struct DetectAccountsStep: View {
                     app: .claude,
                     title: "Claude Code",
                     subtitle: "Anthropic",
-                    plan: appState.claudeAccount?.subscriptionType,
+                    plan: appState.claudePlanName,
                     email: appState.claudeAccount?.email,
                     source: claudeSource,
                     tint: .claudeAccent,

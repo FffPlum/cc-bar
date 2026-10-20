@@ -31,6 +31,56 @@ nonisolated enum ClaudeQuotaClient {
         return .success(parse(root: root))
     }
 
+    static let profileEndpoint = URL(string: "https://api.anthropic.com/api/oauth/profile")!
+
+    /// 从服务端查当前订阅的套餐名。本地凭据里的 `subscriptionType` 只在签发 token 时
+    /// 写入，Claude Desktop 的 token 有效期接近一年，升级 Max 后仍可能显示 Pro。
+    /// 成功但认不出套餐时返回 `.success(nil)`。
+    nonisolated static func fetchPlanName(
+        accessToken: String
+    ) async -> Result<String?, QuotaError> {
+        var req = URLRequest(url: profileEndpoint)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 30
+
+        let data: Data, resp: URLResponse
+        do { (data, resp) = try await URLSession.shared.data(for: req) }
+        catch { return .failure(.from(transport: error)) }
+        guard let http = resp as? HTTPURLResponse else {
+            return .failure(.transport("non-http"))
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? ""
+            return .failure(.http(http.statusCode, msg))
+        }
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .failure(.decode("not json object"))
+        }
+        return .success(parsePlanName(root: root))
+    }
+
+    /// `organization.organization_type`（`claude_pro` / `claude_max` / `claude_team` …）
+    /// 配合 `organization.rate_limit_tier`（`default_claude_max_20x` 等）；
+    /// 缺类型时退回 `account.has_claude_max` / `has_claude_pro`。
+    nonisolated static func parsePlanName(root: [String: Any]) -> String? {
+        let organization = root["organization"] as? [String: Any]
+        let account = root["account"] as? [String: Any]
+        let tier = organization?["rate_limit_tier"] as? String
+        var type = nonEmpty(organization?["organization_type"] as? String)
+        if type == nil {
+            if account?["has_claude_max"] as? Bool == true {
+                type = "max"
+            } else if account?["has_claude_pro"] as? Bool == true {
+                type = "pro"
+            }
+        }
+        return ClaudeAccount.planName(type: type, rateLimitTier: tier)
+    }
+
     nonisolated static func parse(root: [String: Any]) -> QuotaSnapshot {
         let legacySession = parseWindow(root["five_hour"] as? [String: Any])
         let legacyWeekly = parseWindow(root["seven_day"] as? [String: Any])
