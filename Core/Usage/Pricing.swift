@@ -48,7 +48,8 @@ nonisolated enum Pricing {
     /// 价格表按各厂商官方定价页核对（最近一次 2026-10-19），起点对齐 cc-switch `seed_model_pricing` /
     /// CodexBar `CostUsagePricing`。命中不到时返回 nil。键为 `pricingKey(model:)` 归一化后的模型名（循环剥 provider 前缀
     /// `openai-codex/` / `openai/` / `anthropic/` / `deepseek/` / `opencode-go/` / `commandcode/` /
-    /// `command-code/` / `antigravity/` / `z-ai/` / `zai/` / `minimax/` 和末尾 `-YYYYMMDD` /
+    /// `command-code/` / `antigravity/` / `z-ai/` / `zai/` / `minimax/` / `deepseek-account/` /
+    /// `deepseek-official/` 和末尾 `-YYYYMMDD` /
     /// `-YYYY-MM-DD` 日期段）。
     ///
     /// Google Gemini、Cursor / xAI、Z.ai、MiniMax 的价格只能在这里维护：远端价格目录只收
@@ -648,7 +649,11 @@ nonisolated enum Pricing {
 
     /// Antigravity 与 Command Code / OpenCode 的转售标签：`antigravity/gemini-3.8-flash`、
     /// `commandcode/z-ai/glm-5.3-flash`、`commandcode/minimax/minimax-m3`。
-    private static let pricingOnlyPrefixes = ["antigravity/", "z-ai/", "zai/", "minimax/"]
+    /// DSH 的 DeepSeek 路由名：`deepseek-account/deepseek-flash`（账号登录）、`deepseek-official/deepseek-v4-flash`（API Key）。
+    private static let pricingOnlyPrefixes = [
+        "antigravity/", "z-ai/", "zai/", "minimax/",
+        "deepseek-account/", "deepseek-official/"
+    ]
 
     private static let pricingPrefixes = identityPrefixes + pricingOnlyPrefixes
 
@@ -1024,7 +1029,9 @@ nonisolated enum Pricing {
         let cacheRuleBody = "claude-cache-creation-1h:\(claudeCacheCreation1hMultiplier)"
         let fixedOverrideBody = fixedLocalOverrideKeys.sorted().joined(separator: ";")
         let fixedFastOverrideBody = fixedFastLocalOverrideKeys.sorted().joined(separator: ";")
-        return "\(baseBody)|\(tierBody)|\(timedTierBody)|\(timedFastBody)|\(fastLongBody)|\(timedFastLongBody)|\(overrideBody)|\(fixedOverrideBody)|\(fixedFastOverrideBody)|\(fastPriceBody)|\(cacheRuleBody)"
+        // 查价前缀变化会让原本未定价的用量命中价格，也要触发重建。
+        let pricingPrefixBody = pricingPrefixes.joined(separator: ";")
+        return "\(baseBody)|\(tierBody)|\(timedTierBody)|\(timedFastBody)|\(fastLongBody)|\(timedFastLongBody)|\(overrideBody)|\(fixedOverrideBody)|\(fixedFastOverrideBody)|\(fastPriceBody)|\(cacheRuleBody)|\(pricingPrefixBody)"
     }
 
     private static func fingerprintBody(_ values: [String: ModelPrice], prefix: String) -> String {

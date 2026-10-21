@@ -67,7 +67,7 @@ DSH CLI 与当前稳定版 DSH Desktop 在默认配置下共用 Harness home `~/
 | `totalTokens` | 校验字段 | 有值时校验四项之和，不参与二次求和 |
 | 一次有效结算（消息或失败尝试） | `requestCount = 1` | 同槽样本替换不增加请求数；重试另计 |
 
-模型标签按 `source.provider/source.model` 组合，外层 provider 只加一次，例如 `commandcode/deepseek/deepseek-v4.1-flash`；失败尝试没有 message source，按最近的请求路由归属。`Pricing.normalize` 再剥前缀查价。日志中的 provider 可能是转发商，不证明用户按 DeepSeek 官方 API 价付款。
+模型标签按 `source.provider/source.model` 组合，外层 provider 只加一次，例如 `commandcode/deepseek/deepseek-v4.1-flash`；失败尝试没有 message source，按最近的请求路由归属。`Pricing.pricingKey` 再剥前缀查价；DSH Desktop 直连 DeepSeek 时 provider 是 `deepseek-account`（账号登录）或 `deepseek-official`（API Key），标签形如 `deepseek-account/deepseek-flash`，这两个前缀只在查价时剥掉，统计页仍显示原标签。日志中的 provider 可能是转发商，不证明用户按 DeepSeek 官方 API 价付款。
 
 ## 3. 解码与增量扫描
 

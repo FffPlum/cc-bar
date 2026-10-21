@@ -3699,6 +3699,11 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertEqual(Pricing.normalize(model: "commandcode/z-ai/glm-5.3-flash"), "z-ai/glm-5.3-flash")
         XCTAssertEqual(Pricing.pricingKey(model: "commandcode/z-ai/glm-5.3-flash"), "glm-5.3-flash")
         XCTAssertEqual(Pricing.pricingKey(model: "antigravity/gemini-3.8-flash"), "gemini-3.8-flash")
+        XCTAssertEqual(Pricing.pricingKey(model: "deepseek-account/deepseek-flash"), "deepseek-flash")
+        XCTAssertEqual(
+            Pricing.pricingKey(model: "deepseek-official/commandcode/deepseek/deepseek-v4.1-flash"),
+            "deepseek-v4.1-flash"
+        )
     }
 
     func testGPT55StandardLongContextProAndFastRates() throws {
