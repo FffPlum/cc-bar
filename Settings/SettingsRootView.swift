@@ -50,6 +50,9 @@ struct SettingsRootView: View {
     @State private var isRecalculatingUsage = false
     @State private var pricingCatalogMessage: String?
     @State private var pricingCatalogMessageIsError = false
+    @State private var isTestingProxy = false
+    @State private var proxyTestMessage: String?
+    @State private var proxyTestMessageIsError = false
     @State private var showCodexResetCreditsSheet = false
     @State private var showCommandCodeSheet = false
     @State private var showOpenCodeGoSheet = false
@@ -497,6 +500,8 @@ struct SettingsRootView: View {
             }
         }
 
+        proxyGroup(settings: settings)
+
         PrefsGroup(
             title: "Data Maintenance",
             chinese: "数据维护"
@@ -586,6 +591,154 @@ struct SettingsRootView: View {
                     .disabled(recalculating)
                 }
             }
+        }
+    }
+
+    // MARK: - Network proxy
+
+    /// 跟随系统时只有一行；手动时展开类型、地址和连接测试。改动写入 UserDefaults，下一次请求即生效。
+    private func proxyGroup(settings: SettingsStore) -> some View {
+        PrefsGroup(title: "Network Proxy", chinese: "网络代理") {
+            PrefsRow(
+                label: "Proxy",
+                chinese: "代理",
+                desc: settings.proxyMode == .system
+                    ? nil : "If the proxy is unavailable, requests stop instead of connecting directly.",
+                chineseDesc: settings.proxyMode == .system
+                    ? nil : "代理不可用时停止取数，不改为直连"
+            ) {
+                Picker("", selection: Binding(
+                    get: { settings.proxyMode },
+                    set: { newValue in
+                        settings.proxyMode = newValue
+                        proxyTestMessage = nil
+                    }
+                )) {
+                    ForEach(ProxyMode.allCases) { mode in
+                        Text(mode.bilingualDisplayName).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+
+            switch settings.proxyMode {
+            case .system:
+                EmptyView()
+            case .manual:
+                InsetDivider()
+                PrefsRow(
+                    label: "Type",
+                    chinese: "类型",
+                    desc: settings.proxyType == .socks5
+                        ? "The claude and agy command-line quota queries are skipped." : nil,
+                    chineseDesc: settings.proxyType == .socks5
+                        ? "SOCKS5 下不调用 claude、agy 命令行查询额度" : nil
+                ) {
+                    Picker("", selection: Binding(
+                        get: { settings.proxyType },
+                        set: { newValue in
+                            settings.proxyType = newValue
+                            proxyTestMessage = nil
+                        }
+                    )) {
+                        Text("HTTP").tag(ProxyType.http)
+                        Text("SOCKS5").tag(ProxyType.socks5)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                }
+                InsetDivider()
+                PrefsRow(label: "Address", chinese: "地址") {
+                    HStack(spacing: 6) {
+                        // 占位不写具体地址：看起来像已填好，用户会以为不用填。
+                        TextField(tr("Host", "主机"), text: Binding(
+                            get: { settings.proxyHost },
+                            set: { newValue in
+                                settings.proxyHost = newValue.trimmingCharacters(in: .whitespaces)
+                                proxyTestMessage = nil
+                            }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 140)
+                        Text(":")
+                            .foregroundStyle(.secondary)
+                        // 用文本绑定逐字写入：数值格式的输入框要回车或失焦才提交，填完直接点「测试」会读到空端口。
+                        TextField(tr("Port", "端口"), text: Binding(
+                            get: { settings.proxyPort == 0 ? "" : String(settings.proxyPort) },
+                            set: { newValue in
+                                settings.proxyPort = Int(String(newValue.filter(\.isASCII).filter(\.isNumber).prefix(5))) ?? 0
+                                proxyTestMessage = nil
+                            }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .monospacedDigit()
+                        .frame(width: 64)
+                    }
+                }
+            }
+
+            if settings.proxyMode != .system {
+                InsetDivider()
+                PrefsRow(label: "Connection test", chinese: "连接测试") {
+                    HStack(spacing: 8) {
+                        if let proxyTestMessage {
+                            Text(proxyTestMessage)
+                                .font(.system(size: 11))
+                                .foregroundStyle(proxyTestMessageIsError ? Color.red : Color.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        Button {
+                            proxyTestMessage = nil
+                            isTestingProxy = true
+                            Task {
+                                let result = await NetworkProxy.testConnection()
+                                isTestingProxy = false
+                                switch result {
+                                case .success:
+                                    proxyTestMessageIsError = false
+                                    proxyTestMessage = tr("Connected", "可连接")
+                                case .failure(let error):
+                                    proxyTestMessageIsError = true
+                                    proxyTestMessage = proxyTestFailureMessage(error)
+                                }
+                            }
+                        } label: {
+                            if isTestingProxy {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Text(tr("Test", "测试"))
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(isTestingProxy)
+                    }
+                }
+            }
+        }
+    }
+
+    /// `userMessage` 是给 Popover 的，地址未填完整会带「请到「设置 → 数据与刷新」…」，
+    /// TLS 失败会说「请检查代理设置」，用户此时就在这一页，所以这里只说原因。
+    /// 连不上、超时的文案不带跳转，照常使用。
+    private func proxyTestFailureMessage(_ error: QuotaError) -> String {
+        if case .network(.tls) = error {
+            return tr(
+                "Secure connection failed — the proxy's certificate may not be trusted by the system",
+                "安全连接失败,代理的证书可能未被系统信任"
+            )
+        }
+        guard case .network(.proxyUnavailable) = error else { return error.userMessage }
+        switch NetworkProxy.resolve() {
+        case .unavailable(.manualIncomplete):
+            return tr("Enter the address and port", "请填写地址和端口")
+        case .system, .proxy:
+            return tr("Proxy unavailable", "代理不可用")
         }
     }
 
@@ -2006,6 +2159,16 @@ extension QuotaIntervalChoice {
         case .m3: return tr("3 minutes", "3 分钟")
         case .m5: return tr("5 minutes", "5 分钟")
         case .m10: return tr("10 minutes", "10 分钟")
+        }
+    }
+}
+
+extension ProxyMode {
+    @MainActor
+    var bilingualDisplayName: String {
+        switch self {
+        case .system: return tr("Follow System", "跟随系统")
+        case .manual: return tr("Manual", "手动")
         }
     }
 }

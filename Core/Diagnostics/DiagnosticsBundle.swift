@@ -184,6 +184,12 @@ enum DiagnosticsBundle {
         out.row("floating HUD", String(settings.floatingEnabled))
         out.row("reset time display", settings.resetTimeDisplay.rawValue)
         out.row("service status dots", String(settings.showServiceStatus))
+        out.row("proxy mode", settings.proxyMode.rawValue)
+        switch NetworkProxy.resolve() {
+        case .system: out.row("proxy", "system")
+        case .proxy(let endpoint): out.row("proxy", "\(endpoint.type.rawValue) \(endpoint.address)")
+        case .unavailable(let reason): out.row("proxy", "unavailable (\(reason))")
+        }
         out.row("privacy mode", String(settings.privacyMode))
         out.row("launch at login", String(settings.launchAtLogin))
         out.row("auto check updates", String(settings.autoCheckForUpdates))

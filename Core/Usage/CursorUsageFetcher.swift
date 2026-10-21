@@ -252,7 +252,7 @@ nonisolated enum CursorUsageFetcher {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await NetworkProxy.data(for: request)
         } catch {
             throw CursorUsageError.transport(String(describing: error))
         }

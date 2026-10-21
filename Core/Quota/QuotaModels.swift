@@ -475,6 +475,8 @@ nonisolated enum NetworkFailureKind: String, Sendable, Equatable, Codable {
     case timedOut
     /// TLS 握手失败。中间人代理的证书未被系统信任时会走到这里。
     case tls
+    /// 设置里开了代理，但代理配置用不了（见 `ProxyUnavailableReason`），请求没有发出。
+    case proxyUnavailable
     /// 其余 `URLError`,以及非 `URLError` 的传输失败。
     case other
 
@@ -532,6 +534,7 @@ nonisolated enum QuotaError: Error, CustomStringConvertible {
     /// 把 `URLSession` 抛出的错误收敛成 `QuotaError`。
     /// 所有取数 / 续期链路的 `catch` 都应走这里,不要再把原始 error 插值成字符串。
     nonisolated static func from(transport error: Error) -> QuotaError {
+        if error is ProxyUnavailableError { return .network(.proxyUnavailable) }
         guard let urlError = error as? URLError else { return .network(.other) }
         return .network(NetworkFailureKind(urlError.code))
     }
@@ -593,15 +596,42 @@ extension NetworkFailureKind {
         case .offline:
             return tr("No network connection", "网络未连接")
         case .cannotConnect:
+            // 设置里指定了代理时直接点名那个地址,用户不用再猜走的是哪个代理。
+            if let proxy = NetworkProxy.activeEndpoint?.address {
+                return tr(
+                    "Can't reach the service — check that proxy \(proxy) is running",
+                    "连不上服务,请检查代理 \(proxy) 是否在运行"
+                )
+            }
             return tr(
                 "Can't reach the service — check your network or proxy",
                 "连不上服务,请检查网络或代理"
             )
         case .timedOut:
+            if let proxy = NetworkProxy.activeEndpoint?.address {
+                return tr(
+                    "Connection timed out — check proxy \(proxy)",
+                    "连接超时,请检查代理 \(proxy)"
+                )
+            }
             return tr(
                 "Connection timed out — check your network or proxy",
                 "连接超时,请检查网络或代理"
             )
+        case .proxyUnavailable:
+            switch NetworkProxy.resolve() {
+            case .unavailable(.manualIncomplete):
+                return tr(
+                    "Proxy address is incomplete — fill it in Settings → Data & Refresh",
+                    "代理地址未填完整,请到「设置 → 数据与刷新」填写"
+                )
+            case .system, .proxy:
+                // 失败之后用户已经改过设置,下一次刷新会按新设置重试。
+                return tr(
+                    "Proxy unavailable — check Settings → Data & Refresh",
+                    "代理不可用,请到「设置 → 数据与刷新」检查"
+                )
+            }
         case .tls:
             // 不提 TLS / 握手 / 证书:那是协议术语。用户能做的就是检查代理,
             // 而中间人代理的证书没被系统信任正是这一档最常见的成因。

@@ -375,7 +375,7 @@ nonisolated enum AntigravityCredentials {
             let data: Data
             let resp: URLResponse
             do {
-                (data, resp) = try await URLSession.shared.data(for: req)
+                (data, resp) = try await NetworkProxy.data(for: req)
             } catch {
                 lastErr = QuotaError.from(transport: error)
                 continue

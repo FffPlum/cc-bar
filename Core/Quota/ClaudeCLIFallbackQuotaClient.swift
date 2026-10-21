@@ -8,6 +8,10 @@ enum ClaudeCLIFallbackQuotaClient {
     }
 
     nonisolated private static func run(timeout: TimeInterval) -> Result<QuotaSnapshot, QuotaError> {
+        // 代理没法交给 claude 时不启动它，免得它绕开代理直连（见 `NetworkProxy.subprocessEnvironment`）。
+        guard let environment = NetworkProxy.subprocessEnvironment(base: ProcessInfo.processInfo.environment) else {
+            return .failure(.transport("claude cli skipped: proxy unavailable to subprocess"))
+        }
         let command = claudeCommand()
         let attempts: [(String, [String])] = [
             ("/usr/bin/script", ["-q", "/dev/null"] + command),
@@ -17,7 +21,7 @@ enum ClaudeCLIFallbackQuotaClient {
         var lastError: QuotaError = .transport("claude cli not available")
         for attempt in attempts {
             guard FileManager.default.isExecutableFile(atPath: attempt.0) else { continue }
-            switch runProcess(executable: attempt.0, arguments: attempt.1, timeout: timeout) {
+            switch runProcess(executable: attempt.0, arguments: attempt.1, environment: environment, timeout: timeout) {
             case .success(let text):
                 switch parse(text: text) {
                 case .success(let snapshot):
@@ -47,11 +51,13 @@ enum ClaudeCLIFallbackQuotaClient {
     nonisolated private static func runProcess(
         executable: String,
         arguments: [String],
+        environment: [String: String],
         timeout: TimeInterval
     ) -> Result<String, QuotaError> {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: executable)
         proc.arguments = arguments
+        proc.environment = environment
 
         let stdin = Pipe()
         let stdout = Pipe()

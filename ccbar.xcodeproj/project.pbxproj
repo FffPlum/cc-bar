@@ -71,6 +71,7 @@
 		49C1BF06000000000001AABB /* QuotaPersistenceCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF06000000000001AAAA /* QuotaPersistenceCoordinator.swift */; };
 		49C1BF07000000000001AABB /* QuotaPersistenceCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF07000000000001AAAA /* QuotaPersistenceCoordinatorTests.swift */; };
 		49C1BF08000000000001AABB /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF08000000000001AAAA /* UpdateChecker.swift */; };
+		49C2AF01000000000001AABB /* NetworkProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AF01000000000001AAAA /* NetworkProxy.swift */; };
 		49C1BF09000000000001AABB /* UpdateCheckerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF09000000000001AAAA /* UpdateCheckerTests.swift */; };
 		49C1BF02000000000001AABB /* QuotaRefreshPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF02000000000001AAAA /* QuotaRefreshPlanTests.swift */; };
 		49C1CC05000000000001AABB /* CommandCodeQuotaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC05000000000001AAAA /* CommandCodeQuotaTests.swift */; };
@@ -210,6 +211,7 @@
 		49C1BF06000000000001AAAA /* QuotaPersistenceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaPersistenceCoordinator.swift; sourceTree = "<group>"; };
 		49C1BF07000000000001AAAA /* QuotaPersistenceCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaPersistenceCoordinatorTests.swift; sourceTree = "<group>"; };
 		49C1BF08000000000001AAAA /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
+		49C2AF01000000000001AAAA /* NetworkProxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProxy.swift; sourceTree = "<group>"; };
 		49C1BF09000000000001AAAA /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
 		49C1BF02000000000001AAAA /* QuotaRefreshPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaRefreshPlanTests.swift; sourceTree = "<group>"; };
 		49C1CC05000000000001AAAA /* CommandCodeQuotaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeQuotaTests.swift; sourceTree = "<group>"; };
@@ -376,6 +378,7 @@
 				49C1B131000000000001AAAA /* Scheduler.swift */,
 				49C1B132000000000001AAAA /* L10n.swift */,
 				49C1BF08000000000001AAAA /* UpdateChecker.swift */,
+				49C2AF01000000000001AAAA /* NetworkProxy.swift */,
 				49C2AC01000000000001AAAA /* AppUpdater.swift */,
 				49C1B110000000000001AAAA /* Credentials */,
 				49C1B112000000000001AAAA /* Quota */,
@@ -816,6 +819,7 @@
 				49C1BD02000000000001AABB /* Redact.swift in Sources */,
 				49C1BD03000000000001AABB /* DiagnosticsBundle.swift in Sources */,
 				49C1BF08000000000001AABB /* UpdateChecker.swift in Sources */,
+				49C2AF01000000000001AABB /* NetworkProxy.swift in Sources */,
 				49C2AC02000000000001AAAA /* AppUpdater.swift in Sources */,
 				49C2AC04000000000001AAAA /* AppUpdateWindow.swift in Sources */,
 				49C1B107000000000001AABB /* ScanCache.swift in Sources */,

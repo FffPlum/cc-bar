@@ -296,6 +296,13 @@ final class SettingsStore {
     /// 是否在 Popover 中显示 OpenAI / Anthropic 服务状态圆点
     var showServiceStatus: Bool { didSet { defaults.set(showServiceStatus, forKey: Keys.showServiceStatus) } }
 
+    // 网络代理。key 与 `NetworkProxy.Keys` 共用：取数在后台直接读 UserDefaults，改完下一次请求即生效。
+    var proxyMode: ProxyMode { didSet { defaults.set(proxyMode.rawValue, forKey: NetworkProxy.Keys.mode) } }
+    var proxyType: ProxyType { didSet { defaults.set(proxyType.rawValue, forKey: NetworkProxy.Keys.type) } }
+    var proxyHost: String { didSet { defaults.set(proxyHost, forKey: NetworkProxy.Keys.host) } }
+    /// 0 表示未填写。
+    var proxyPort: Int { didSet { defaults.set(proxyPort, forKey: NetworkProxy.Keys.port) } }
+
     // 通用
     var appLanguage: AppLanguage { didSet { defaults.set(appLanguage.rawValue, forKey: Keys.appLanguage) } }
     var launchAtLogin: Bool { didSet { defaults.set(launchAtLogin, forKey: Keys.launchAtLogin) } }
@@ -401,6 +408,10 @@ final class SettingsStore {
         cycleIncludesOtherAgents = defaults.object(forKey: Keys.cycleIncludesOtherAgents) as? Bool ?? false
         piEstimatedOutputSpeed = defaults.object(forKey: Keys.piEstimatedOutputSpeed) as? Bool ?? false
         showServiceStatus = defaults.object(forKey: Keys.showServiceStatus) as? Bool ?? true
+        proxyMode = defaults.string(forKey: NetworkProxy.Keys.mode).flatMap(ProxyMode.init(rawValue:)) ?? .system
+        proxyType = defaults.string(forKey: NetworkProxy.Keys.type).flatMap(ProxyType.init(rawValue:)) ?? .http
+        proxyHost = defaults.string(forKey: NetworkProxy.Keys.host) ?? ""
+        proxyPort = defaults.integer(forKey: NetworkProxy.Keys.port)
         // 通用：launchAtLogin 以系统当前注册状态为准
         let langRaw = defaults.string(forKey: Keys.appLanguage) ?? AppLanguage.system.rawValue
         appLanguage = AppLanguage(rawValue: langRaw) ?? .system

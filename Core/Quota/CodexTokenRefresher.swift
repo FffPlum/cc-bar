@@ -185,7 +185,7 @@ nonisolated enum CodexTokenRefresher {
 
         let data: Data, resp: URLResponse
         do {
-            (data, resp) = try await URLSession.shared.data(for: req)
+            (data, resp) = try await NetworkProxy.data(for: req)
         } catch {
             throw QuotaError.from(transport: error)
         }

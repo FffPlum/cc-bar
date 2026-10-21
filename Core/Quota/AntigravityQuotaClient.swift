@@ -36,7 +36,7 @@ nonisolated enum AntigravityQuotaClient {
         request.httpBody = Data("{}".utf8)
         request.timeoutInterval = 15
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await NetworkProxy.data(for: request)
             guard let http = response as? HTTPURLResponse else { return .failure(.transport("non-http")) }
             guard (200..<300).contains(http.statusCode) else {
                 return .failure(.http(http.statusCode, "Antigravity plan lookup failed"))
@@ -115,7 +115,7 @@ nonisolated enum AntigravityQuotaClient {
         let data: Data
         let resp: URLResponse
         do {
-            (data, resp) = try await URLSession.shared.data(for: req)
+            (data, resp) = try await NetworkProxy.data(for: req)
         } catch {
             return .failure(.from(transport: error))
         }
@@ -171,7 +171,7 @@ nonisolated enum AntigravityQuotaClient {
         req.timeoutInterval = 15
         // fetchAvailableModels 不接受 cloudaicompanionProject 字段（实测 400），保持空 body
         req.httpBody = try? JSONSerialization.data(withJSONObject: [String: Any]())
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+        guard let (data, resp) = try? await NetworkProxy.data(for: req),
               let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
@@ -197,7 +197,7 @@ nonisolated enum AntigravityQuotaClient {
         req.timeoutInterval = 15
         // retrieveUserQuotaSummary 不接受 cloudaicompanionProject 等字段，保持空 body
         req.httpBody = try? JSONSerialization.data(withJSONObject: [String: Any]())
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+        guard let (data, resp) = try? await NetworkProxy.data(for: req),
               let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
@@ -222,7 +222,7 @@ nonisolated enum AntigravityQuotaClient {
         req.timeoutInterval = 15
         // retrieveUserQuota 不接受 cloudaicompanionProject 等字段，保持空 body
         req.httpBody = try? JSONSerialization.data(withJSONObject: [String: Any]())
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+        guard let (data, resp) = try? await NetworkProxy.data(for: req),
               let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
@@ -442,7 +442,7 @@ nonisolated enum AntigravityQuotaClient {
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("gl-node/20.0.0", forHTTPHeaderField: "X-Goog-Api-Client")
         req.timeoutInterval = 15
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+        guard let (data, resp) = try? await NetworkProxy.data(for: req),
               let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
@@ -716,8 +716,12 @@ nonisolated enum AntigravityQuotaClient {
                 return .failure(lastError)
             }
             guard let executable = AntigravityQuotaClient.cliExecutable() else { return nil }
+            // 代理没法交给 agy 时按没装 CLI 处理，改走云端接口（走 cc-bar 的代理），不让 agy 绕开代理直连。
+            guard let environment = NetworkProxy.subprocessEnvironment(base: ProcessInfo.processInfo.environment) else {
+                return nil
+            }
             let result = await Task.detached(priority: .utility) { () -> Result<QuotaSnapshot, QuotaError> in
-                guard let output = AntigravityQuotaClient.runCLI(executable: executable),
+                guard let output = AntigravityQuotaClient.runCLI(executable: executable, environment: environment),
                       let root = try? JSONSerialization.jsonObject(with: output.data) as? [String: Any]
                 else { return .failure(.transport("Antigravity CLI quota unavailable")) }
                 if root["status"] as? String != "SUCCESS" {
@@ -763,11 +767,11 @@ nonisolated enum AntigravityQuotaClient {
     }
 
     /// 持续排空 stdout，避免管道写满；超时后终止进程，拒收超限或不完整输出。
-    private static func runCLI(executable: URL) -> CLIProcessOutput? {
+    private static func runCLI(executable: URL, environment: [String: String]) -> CLIProcessOutput? {
         let process = Process()
         process.executableURL = executable
         process.arguments = ["-p", "/quota", "--output-format", "json", "--log-file", "/dev/null"]
-        var environment = ProcessInfo.processInfo.environment
+        var environment = environment
         environment["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true"
         for key in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"] {
             environment.removeValue(forKey: key)

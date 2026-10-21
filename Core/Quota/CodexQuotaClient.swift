@@ -26,7 +26,7 @@ nonisolated enum CodexQuotaClient {
         }
 
         let data: Data, resp: URLResponse
-        do { (data, resp) = try await URLSession.shared.data(for: req) }
+        do { (data, resp) = try await NetworkProxy.data(for: req) }
         catch { return .failure(.from(transport: error)) }
         guard let http = resp as? HTTPURLResponse else {
             return .failure(.transport("non-http"))

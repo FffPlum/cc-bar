@@ -60,7 +60,7 @@ enum CommandCodeQuotaClient {
 
     static func fetch(
         accessToken: String,
-        session: URLSession = .shared
+        session: URLSession? = nil
     ) async -> Result<FetchResult, QuotaError> {
         // 1. 请求 whoami 识别账号与 org
         let whoamiResult = await request(
@@ -138,7 +138,7 @@ enum CommandCodeQuotaClient {
         path: String,
         queryItems: [URLQueryItem] = [],
         accessToken: String,
-        session: URLSession
+        session: URLSession?
     ) async -> Result<Data, QuotaError> {
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
         if !queryItems.isEmpty {
@@ -156,7 +156,7 @@ enum CommandCodeQuotaClient {
         request.timeoutInterval = 10
 
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await NetworkProxy.data(for: request, session: session)
             guard let http = response as? HTTPURLResponse else {
                 return .failure(.transport("non-http response"))
             }

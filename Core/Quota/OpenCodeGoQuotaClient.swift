@@ -8,7 +8,7 @@ nonisolated enum OpenCodeGoQuotaClient {
 
     static func fetch(
         apiKey: String,
-        session: URLSession = .shared
+        session: URLSession? = nil
     ) async -> Result<QuotaSnapshot, QuotaError> {
         var request = URLRequest(url: usageURL)
         request.httpMethod = "GET"
@@ -19,7 +19,7 @@ nonisolated enum OpenCodeGoQuotaClient {
 
         let data: Data
         do {
-            let (body, response) = try await session.data(for: request)
+            let (body, response) = try await NetworkProxy.data(for: request, session: session)
             guard let http = response as? HTTPURLResponse else {
                 return .failure(.transport("non-http response"))
             }
