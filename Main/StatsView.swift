@@ -1867,11 +1867,12 @@ private struct OverviewCompositionPanel: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .frame(width: 46, alignment: .trailing)
-            Text(StatsFormatter.outputSpeed(row.totals.timing.outputTokensPerSecond))
+            Text(StatsFormatter.outputSpeed(row.totals.timing))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .frame(width: Self.speedColumnWidth, alignment: .trailing)
+                .help(StatsFormatter.outputSpeedHelp(row.totals.timing))
             Text(hitRateText(row.totals.cacheHitRate))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -1919,11 +1920,12 @@ private struct OverviewCompositionPanel: View {
                 .monospacedDigit()
                 .frame(width: 86, alignment: .trailing)
                 Color.clear.frame(width: 46, height: 1)
-                Text(StatsFormatter.outputSpeed(row.totals.timing.outputTokensPerSecond))
+                Text(StatsFormatter.outputSpeed(row.totals.timing))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                     .frame(width: Self.speedColumnWidth, alignment: .trailing)
+                    .help(StatsFormatter.outputSpeedHelp(row.totals.timing))
                 Color.clear.frame(width: 64, height: 1)
                 Color.clear.frame(width: 10, height: 1)
             }
@@ -3551,6 +3553,22 @@ enum StatsFormatter {
     static func outputSpeed(_ tokensPerSecond: Double?) -> String {
         guard let tokensPerSecond, tokensPerSecond.isFinite else { return "—" }
         return "\(Int(tokensPerSecond.rounded())) t/s"
+    }
+
+    /// 统计页的输出速度：按设置决定是否计入 Pi 近似计时；含近似值时前缀「≈」。
+    static func outputSpeed(_ timing: GenerationTiming) -> String {
+        let includingEstimated = SettingsStore.shared.piEstimatedOutputSpeed
+        let text = outputSpeed(timing.outputTokensPerSecond(includingEstimated: includingEstimated))
+        return timing.usesEstimatedSpeed(includingEstimated: includingEstimated) && text != "—" ? "≈\(text)" : text
+    }
+
+    /// 速度含 Pi 近似值时的悬浮说明；不含时为空字符串（不显示提示）。
+    static func outputSpeedHelp(_ timing: GenerationTiming) -> String {
+        guard timing.usesEstimatedSpeed(includingEstimated: SettingsStore.shared.piEstimatedOutputSpeed) else { return "" }
+        return tr(
+            "Includes Pi estimates: Pi logs only record total request time, which includes queueing and context processing before the first token, so the speed reads low. The longer the context and the shorter the output, the larger the gap. Requests timed by the Pi timing plugin use actual generation time.",
+            "含 Pi 估算值：Pi 日志只记录请求总耗时，其中包含首字前的排队和上下文处理时间，算出的速度偏低；上下文越长、输出越短，偏差越大。装了 Pi 计时插件的请求按实际生成时间计算。"
+        )
     }
 
     /// 占比文案：取整百分比；大于 0 但不足 1% 时显示「<1%」，避免有用量却显示 0%。

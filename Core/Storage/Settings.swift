@@ -287,6 +287,12 @@ final class SettingsStore {
         didSet { defaults.set(cycleIncludesOtherAgents, forKey: Keys.cycleIncludesOtherAgents) }
     }
 
+    /// Pi 没有计时插件记录时，是否用请求总耗时（含首字等待）近似计算输出速度（默认关闭）。
+    /// 只影响展示：精确与近似计时在桶里分开累计，切换不需要重建；插件记录的精确计时始终计入。
+    var piEstimatedOutputSpeed: Bool {
+        didSet { defaults.set(piEstimatedOutputSpeed, forKey: Keys.piEstimatedOutputSpeed) }
+    }
+
     /// 是否在 Popover 中显示 OpenAI / Anthropic 服务状态圆点
     var showServiceStatus: Bool { didSet { defaults.set(showServiceStatus, forKey: Keys.showServiceStatus) } }
 
@@ -393,6 +399,7 @@ final class SettingsStore {
         let srmRaw = defaults.string(forKey: Keys.statsRankMetric) ?? StatsRankMetric.tokens.rawValue
         statsRankMetric = StatsRankMetric(rawValue: srmRaw) ?? .tokens
         cycleIncludesOtherAgents = defaults.object(forKey: Keys.cycleIncludesOtherAgents) as? Bool ?? false
+        piEstimatedOutputSpeed = defaults.object(forKey: Keys.piEstimatedOutputSpeed) as? Bool ?? false
         showServiceStatus = defaults.object(forKey: Keys.showServiceStatus) as? Bool ?? true
         // 通用：launchAtLogin 以系统当前注册状态为准
         let langRaw = defaults.string(forKey: Keys.appLanguage) ?? AppLanguage.system.rawValue
@@ -774,6 +781,7 @@ final class SettingsStore {
         static let resetTimeDisplay = "ccbar.settings.resetTimeDisplay"
         static let statsRankMetric = "ccbar.settings.statsRankMetric"
         static let cycleIncludesOtherAgents = "ccbar.settings.cycleIncludesOtherAgents"
+        static let piEstimatedOutputSpeed = "ccbar.settings.piEstimatedOutputSpeed"
         static let showServiceStatus = "ccbar.settings.showServiceStatus"
         static let launchAtLogin = "ccbar.settings.launchAtLogin"
         static let appLanguage = "ccbar.settings.appLanguage"

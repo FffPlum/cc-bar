@@ -350,11 +350,12 @@ nonisolated struct UsageMessageLedgerPayload: Sendable, Codable, Equatable {
 /// 用户升级后自动按新规则重建一次历史（日志已删除的对话保留原用量）。只影响新记录的改动不用加。
 /// v2（Claude / Codex / OpenCode / DSH）：新增首字延迟与输出速度，重建一次给现存日志补上计时。
 /// v2（Pi / Antigravity）：新增输出速度，重建一次给现存日志补上耗时。
+/// v3（Pi）：计时插件的精确计时与请求总耗时分开累计，重建一次把已采集的总耗时标为近似值。
 nonisolated enum UsageStatsRules {
     static let versions: [UsageApp: Int] = [
         .claude: 2,
         .codex: 2,
-        .pi: 2,
+        .pi: 3,
         .opencode: 2,
         .dsh: 2,
         .antigravity: 2,

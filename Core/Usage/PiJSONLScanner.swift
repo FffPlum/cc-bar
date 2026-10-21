@@ -264,16 +264,29 @@ enum PiJSONLScanner {
         return JSONLTimestamp.parse(fallback) ?? Date()
     }
 
-    /// Pi 没有首字时间：优先使用单调时钟测得的请求总耗时，旧日志退回请求开始到落盘时间。
+    /// 计时插件写在 assistant 消息上的字段；插件写法见设置页「计时插件说明」（`PiTimingPluginGuide`）。
+    nonisolated static let timingField = "ccbarTiming"
+
+    /// 优先读计时插件写入的 `ccbarTiming`（首个到最后一个流式片段，精确）；没有时退回 Pi 自带的请求总耗时，
+    /// 旧日志再退回请求开始到落盘时间。后两者含首字等待，标为近似值，是否计入速度由设置决定。
+    /// `ccbarTiming` 版本不认识或数值异常时视为没有计时，不退回近似值，避免同一请求混用两种口径。
     private nonisolated static func requestTiming(message: [String: Any], entryTimestamp: String) -> RequestTiming? {
         let stopReason = message["stopReason"] as? String
         guard stopReason != "error", stopReason != "aborted" else { return nil }
+        if let plugin = message[timingField] as? [String: Any] {
+            guard (plugin["v"] as? NSNumber)?.intValue == 1,
+                  let generation = (plugin["generationMs"] as? NSNumber)?.doubleValue else { return nil }
+            if let first = (plugin["firstTokenMs"] as? NSNumber)?.doubleValue {
+                return RequestTiming(measuredFirstTokenMs: first, generationMs: generation)
+            }
+            return RequestTiming(generationMs: generation)
+        }
         if let duration = (message["durationMs"] as? NSNumber)?.doubleValue {
-            return RequestTiming(generationMs: duration)
+            return RequestTiming(generationMs: duration, isEstimated: true)
         }
         guard let start = (message["timestamp"] as? NSNumber)?.doubleValue, start > 0,
               let end = JSONLTimestamp.parse(entryTimestamp) else { return nil }
-        return RequestTiming(generationMs: end.timeIntervalSince1970 * 1000 - start)
+        return RequestTiming(generationMs: end.timeIntervalSince1970 * 1000 - start, isEstimated: true)
     }
 
     /// 文件名 `2026-08-03T03-27-31-685Z_019fc5a9-....jsonl` 里的 UUID 段。

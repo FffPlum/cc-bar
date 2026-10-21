@@ -423,6 +423,22 @@ struct SettingsRootView: View {
                 .toggleStyle(.switch)
                 .tint(.green)
             }
+            InsetDivider()
+            PrefsRow(
+                label: "Estimate Pi output speed",
+                chinese: "估算 Pi 输出速度",
+                desc: "Pi logs only record total request time, including the wait before the first token, so the estimate reads low. Requests timed by the Pi timing plugin always use actual generation time.",
+                chineseDesc: "Pi 日志只记录请求总耗时，包含首字前的等待，估算值偏低。装了 Pi 计时插件的请求始终按实际生成时间计算，不受此开关影响",
+                detail: AnyView(PiTimingGuideButton())
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { settings.piEstimatedOutputSpeed },
+                    set: { settings.piEstimatedOutputSpeed = $0 }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(.green)
+            }
         }
     }
 
@@ -1460,6 +1476,120 @@ private struct PrefsRow<Trailing: View>: View {
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 16)
+    }
+}
+
+// MARK: - Pi 计时插件说明
+
+/// 「估算 Pi 输出速度」下方的文字链接：点击弹出插件说明全文和复制按钮，样式同 `ServiceInfoButton`。
+private struct PiTimingGuideButton: View {
+    @State private var isPresented = false
+    @State private var copied = false
+
+    var body: some View {
+        Button(tr("Timing plugin instructions", "计时插件说明")) {
+            isPresented.toggle()
+        }
+        .buttonStyle(.link)
+        .font(.system(size: 11))
+        .focusEffectDisabled()
+        .pointingHandCursor()
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(tr("Pi timing plugin", "Pi 计时插件"))
+                    .font(.system(size: 13, weight: .semibold))
+                Text(tr(
+                    "Give the instructions below to an AI to write a timing plugin for Pi. Once installed, Pi's first token and output speed use actual generation time.",
+                    "把下面的说明交给 AI，为 Pi 写一个计时插件。装好后，Pi 的首字和输出速度按实际生成时间计算。"
+                ))
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                ScrollView {
+                    Text(PiTimingPluginGuide.text)
+                        .font(.system(size: 11))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+                .frame(maxHeight: 260)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
+                Button(copied ? tr("Copied", "已复制") : tr("Copy", "复制")) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(PiTimingPluginGuide.text, forType: .string)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        copied = false
+                    }
+                }
+                .controlSize(.small)
+                .padding(.top, 2)
+            }
+            .padding(14)
+            .frame(width: 360, alignment: .leading)
+        }
+    }
+}
+
+/// 插件说明全文：交给 AI 为 Pi 编写插件，格式与 `PiJSONLScanner.requestTiming` 的解析一致。
+private enum PiTimingPluginGuide {
+    static var text: String {
+        let field = PiJSONLScanner.timingField
+        return tr(
+            """
+            Please write a Pi coding agent plugin (Pi calls it an extension) so that CCBar can compute first token latency and output speed from actual generation time.
+
+            Before you start:
+            - Check that the installed Pi lets a message_end handler return a replacement message (MessageEndEventResult in the extension types, or the message_end section of docs/extensions.md in the Pi package). If it does not, stop and tell me. Do not switch to appendEntry, extra files or any other way of writing the data.
+            - Check the custom provider plugins I have installed. If any of them sends the whole assistant message object to the model API (instead of picking fields such as content), stop and tell me.
+
+            Requirements:
+            1. Create a standalone plugin file. Do not modify plugin packages installed through npm, because updates overwrite them.
+            2. On turn_start, record the request send time. Built-in providers also fire before_provider_request; when it fires before the first delta of the request, overwrite the send time with it.
+            3. On message_start with role "assistant", clear the first-delta and last-delta times of the current request. Do not clear the send time from step 2.
+            4. On message_update with role "assistant", when assistantMessageEvent.type is text_delta, thinking_delta or toolcall_delta, record the arrival time of the first delta and of the latest delta.
+            5. On message_end with role "assistant": if at least one delta arrived and stopReason is neither "error" nor "aborted", return a replacement message that adds a \(field) field:
+               return { message: { ...event.message, \(field): { v: 1, firstTokenMs, generationMs } } };
+               - v: the number 1
+               - generationMs: milliseconds from the first delta to the last delta, rounded to an integer
+               - firstTokenMs: milliseconds from the send time to the first delta, rounded to an integer; omit the key if no send time was recorded
+               Keep the role and every other field unchanged (the spread also keeps fields added by other plugins). In all other cases return nothing.
+               Pi writes the replacement message to the session JSONL as is, so timing and usage end up on the same line.
+            6. Measure all times with performance.now(), not Date.now().
+            7. Do not filter by duration or token count; CCBar applies its own thresholds.
+
+            Put the file in ~/.pi/agent/extensions/ and restart Pi to load it.
+
+            To verify: have one conversation in Pi, open the newest .jsonl file under ~/.pi/agent/sessions/, and check that the assistant message lines contain "\(field)":{"v":1,...} with integer values.
+            """,
+            """
+            请为 Pi coding agent 写一个插件（Pi 文档里叫 extension），让 CCBar 能按实际生成时间统计首字延迟和输出速度。
+
+            开始前先确认两件事：
+            - 已安装的 Pi 支持 message_end 处理函数返回替换后的消息（插件类型里有 MessageEndEventResult，或 Pi 安装包 docs/extensions.md 的 message_end 说明）。不支持就停下来告诉我，不要改用 appendEntry、另写文件或其他方式记录数据。
+            - 检查我安装的自定义 provider 插件。如果有插件把 assistant 消息对象整个发给模型 API（而不是只取 content 等字段），停下来告诉我。
+
+            要求：
+            1. 新建一个独立的插件文件。不要修改通过 npm 安装的插件包，更新时会被覆盖。
+            2. 在 turn_start 记录请求发出时间。内置 provider 还会触发 before_provider_request；它在该请求第一个片段之前触发时，用它覆盖发出时间。
+            3. 在 message_start（role 为 assistant）时，清空当前请求的首个片段和最近片段的到达时间。不要清空第 2 步记录的发出时间。
+            4. 在 message_update（role 为 assistant）中，assistantMessageEvent.type 为 text_delta、thinking_delta 或 toolcall_delta 时，记录第一个片段和最近一个片段的到达时间。
+            5. 在 message_end（role 为 assistant）中：如果收到过片段，且 stopReason 不是 "error" 或 "aborted"，返回替换后的消息，附加 \(field) 字段：
+               return { message: { ...event.message, \(field): { v: 1, firstTokenMs, generationMs } } };
+               - v：数字 1
+               - generationMs：第一个片段到最后一个片段的毫秒数，取整
+               - firstTokenMs：发出时间到第一个片段的毫秒数，取整；没有记录到发出时间就不写这个键
+               role 和其他字段保持不变（展开写法也会保留其他插件加的字段）。其他情况不返回任何值。
+               Pi 会把替换后的消息原样写入会话 JSONL，计时和用量在同一行。
+            6. 所有时间用 performance.now() 测量，不用 Date.now()。
+            7. 不要按时长或 token 数筛选，CCBar 会自己设门槛。
+
+            文件放在 ~/.pi/agent/extensions/ 下，重启 Pi 生效。
+
+            验证方法：用 Pi 聊一轮，打开 ~/.pi/agent/sessions/ 下最新的 .jsonl 文件，确认 assistant 消息行里有 "\(field)":{"v":1,...}，且数值是整数。
+            """
+        )
     }
 }
 

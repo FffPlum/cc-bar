@@ -15,7 +15,8 @@ nonisolated enum UsageApp: String, Sendable, Codable, Hashable, CaseIterable {
     /// 当前本地扫描器实际支持的数据源。Cursor 虽属于 `UsageApp`，但不在此集合中。
     static let localApps: [UsageApp] = [.codex, .claude, .pi, .opencode, .dsh, .antigravity]
 
-    /// 对话详情显示首字延迟与输出速度的服务。Pi / Antigravity 只显示输出速度。
+    /// 对话详情显示首字延迟与输出速度的服务。Pi / Antigravity 只显示输出速度；
+    /// Pi 装了计时插件时日志带首字时间，对话详情按实际数据补显首字。
     var supportsGenerationTiming: Bool {
         switch self {
         case .claude, .codex, .opencode, .dsh: return true
@@ -92,25 +93,36 @@ nonisolated struct UsageEntry: Sendable, Equatable {
     var timing: RequestTiming? = nil
 }
 
-/// 单次请求的首字延迟与输出时长（毫秒）；Pi 输出时长包含首字等待。
+/// 单次请求的首字延迟与输出时长（毫秒）。
 nonisolated struct RequestTiming: Sendable, Equatable, Codable {
     var firstTokenMs: Int?
     var generationMs: Int
+    /// 输出时长是否为近似值：Pi 没有计时插件时只能用请求总耗时（含首字等待）代替，
+    /// 汇总时与精确计时分开累计，是否计入输出速度由设置决定。
+    var isEstimated = false
 
     /// 超出上限视为时间戳异常（例如重放日志改写了时间），不计入。
     static let maxFirstTokenMs: Double = 10 * 60 * 1000
     static let maxGenerationMs: Double = 60 * 60 * 1000
 
-    init(firstTokenMs: Int?, generationMs: Int) {
+    init(firstTokenMs: Int?, generationMs: Int, isEstimated: Bool = false) {
         self.firstTokenMs = firstTokenMs
         self.generationMs = generationMs
+        self.isEstimated = isEstimated
     }
 
     /// 只有输出耗时时不填首字延迟，避免把缺失值当作 0 参与平均。
-    init?(generationMs: Double) {
+    init?(generationMs: Double, isEstimated: Bool = false) {
         guard generationMs.isFinite, generationMs > 0,
               generationMs <= Self.maxGenerationMs else { return nil }
-        self.init(firstTokenMs: nil, generationMs: Int(generationMs.rounded()))
+        self.init(firstTokenMs: nil, generationMs: Int(generationMs.rounded()), isEstimated: isEstimated)
+    }
+
+    /// 两段时长都已测好（毫秒）。有首字时间时允许输出时长为 0（整段一次到达），只计首字延迟。
+    init?(measuredFirstTokenMs firstTokenMs: Double, generationMs: Double) {
+        guard firstTokenMs.isFinite, generationMs.isFinite, firstTokenMs >= 0, generationMs >= 0,
+              firstTokenMs <= Self.maxFirstTokenMs, generationMs <= Self.maxGenerationMs else { return nil }
+        self.init(firstTokenMs: Int(firstTokenMs.rounded()), generationMs: Int(generationMs.rounded()))
     }
 
     /// 三个时间点均为 Unix 毫秒；顺序颠倒或超出上限时返回 nil。
@@ -129,16 +141,19 @@ nonisolated struct GenerationTiming: Sendable, Equatable, Codable {
     /// 计入首字延迟的请求数与延迟总和（毫秒）。
     var firstTokenCount = 0
     var firstTokenMs = 0
-    /// 计入输出速度的输出 tokens 与输出时长（毫秒）；Pi 使用请求总耗时。
+    /// 计入输出速度的输出 tokens 与输出时长（毫秒），只含精确计时。
     var timedOutputTokens = 0
     var generationMs = 0
+    /// 近似计时（Pi 请求总耗时）单独累计，由 `outputTokensPerSecond(includingEstimated:)` 决定是否计入。
+    var estimatedOutputTokens = 0
+    var estimatedGenerationMs = 0
 
     static let zero = GenerationTiming()
     /// 输出太短或生成太快时计时精度不够：只计首字延迟，不计输出速度。
     static let minimumSpeedOutputTokens = 100
     static let minimumSpeedGenerationMs = 500
 
-    var isEmpty: Bool { firstTokenCount == 0 && timedOutputTokens == 0 }
+    var isEmpty: Bool { firstTokenCount == 0 && timedOutputTokens == 0 && estimatedOutputTokens == 0 }
 
     mutating func add(_ timing: RequestTiming?, outputTokens: Int) {
         guard let timing else { return }
@@ -147,8 +162,13 @@ nonisolated struct GenerationTiming: Sendable, Equatable, Codable {
             firstTokenMs += firstToken
         }
         if outputTokens >= Self.minimumSpeedOutputTokens, timing.generationMs >= Self.minimumSpeedGenerationMs {
-            timedOutputTokens += outputTokens
-            generationMs += timing.generationMs
+            if timing.isEstimated {
+                estimatedOutputTokens += outputTokens
+                estimatedGenerationMs += timing.generationMs
+            } else {
+                timedOutputTokens += outputTokens
+                generationMs += timing.generationMs
+            }
         }
     }
 
@@ -157,6 +177,8 @@ nonisolated struct GenerationTiming: Sendable, Equatable, Codable {
         firstTokenMs += other.firstTokenMs
         timedOutputTokens += other.timedOutputTokens
         generationMs += other.generationMs
+        estimatedOutputTokens += other.estimatedOutputTokens
+        estimatedGenerationMs += other.estimatedGenerationMs
     }
 
     /// 平均首字延迟（秒）；没有可计请求时为 nil。
@@ -165,10 +187,53 @@ nonisolated struct GenerationTiming: Sendable, Equatable, Codable {
         return Double(firstTokenMs) / Double(firstTokenCount) / 1000
     }
 
-    /// 平均输出速度（tokens/s）；没有可计请求时为 nil。
+    /// 平均输出速度（tokens/s），只含精确计时；没有可计请求时为 nil。
     var outputTokensPerSecond: Double? {
-        guard generationMs > 0, timedOutputTokens > 0 else { return nil }
-        return Double(timedOutputTokens) * 1000 / Double(generationMs)
+        outputTokensPerSecond(includingEstimated: false)
+    }
+
+    /// 平均输出速度（tokens/s）；`includingEstimated` 为 true 时把近似计时一起按总量相除。
+    func outputTokensPerSecond(includingEstimated: Bool) -> Double? {
+        let tokens = timedOutputTokens + (includingEstimated ? estimatedOutputTokens : 0)
+        let ms = generationMs + (includingEstimated ? estimatedGenerationMs : 0)
+        guard ms > 0, tokens > 0 else { return nil }
+        return Double(tokens) * 1000 / Double(ms)
+    }
+
+    /// 计入近似计时后，速度里是否含近似值（界面据此加「≈」和误差说明）。
+    func usesEstimatedSpeed(includingEstimated: Bool) -> Bool {
+        includingEstimated && estimatedOutputTokens > 0
+    }
+}
+
+/// 新增字段缺失的旧缓存按 0 / false 解码，不需要因此重建。
+extension RequestTiming {
+    nonisolated enum CodingKeys: String, CodingKey {
+        case firstTokenMs, generationMs, isEstimated
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        firstTokenMs = try c.decodeIfPresent(Int.self, forKey: .firstTokenMs)
+        generationMs = try c.decode(Int.self, forKey: .generationMs)
+        isEstimated = try c.decodeIfPresent(Bool.self, forKey: .isEstimated) ?? false
+    }
+}
+
+extension GenerationTiming {
+    nonisolated enum CodingKeys: String, CodingKey {
+        case firstTokenCount, firstTokenMs, timedOutputTokens, generationMs
+        case estimatedOutputTokens, estimatedGenerationMs
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        firstTokenCount = try c.decodeIfPresent(Int.self, forKey: .firstTokenCount) ?? 0
+        firstTokenMs = try c.decodeIfPresent(Int.self, forKey: .firstTokenMs) ?? 0
+        timedOutputTokens = try c.decodeIfPresent(Int.self, forKey: .timedOutputTokens) ?? 0
+        generationMs = try c.decodeIfPresent(Int.self, forKey: .generationMs) ?? 0
+        estimatedOutputTokens = try c.decodeIfPresent(Int.self, forKey: .estimatedOutputTokens) ?? 0
+        estimatedGenerationMs = try c.decodeIfPresent(Int.self, forKey: .estimatedGenerationMs) ?? 0
     }
 }
 

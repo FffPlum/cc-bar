@@ -697,16 +697,19 @@ private struct ConversationDetailView: View {
                             .font(.system(size: 10.5, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        if detail.info.app.supportsGenerationTiming {
-                            Text("\(tr("First token", "首字")) \(StatsFormatter.firstTokenLatency(item.totals.timing.averageFirstTokenSeconds))  ·  \(tr("Output speed", "输出速度")) \(StatsFormatter.outputSpeed(item.totals.timing.outputTokensPerSecond))")
+                        // Pi 有计时插件记录时也带首字时间，按实际数据显示首字。
+                        if detail.info.app.supportsGenerationTiming || item.totals.timing.averageFirstTokenSeconds != nil {
+                            Text("\(tr("First token", "首字")) \(StatsFormatter.firstTokenLatency(item.totals.timing.averageFirstTokenSeconds))  ·  \(tr("Output speed", "输出速度")) \(StatsFormatter.outputSpeed(item.totals.timing))")
                                 .font(.system(size: 10.5, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .help(StatsFormatter.outputSpeedHelp(item.totals.timing))
                         } else if detail.info.app.supportsOutputSpeed {
-                            Text("\(tr("Output speed", "输出速度")) \(StatsFormatter.outputSpeed(item.totals.timing.outputTokensPerSecond))")
+                            Text("\(tr("Output speed", "输出速度")) \(StatsFormatter.outputSpeed(item.totals.timing))")
                                 .font(.system(size: 10.5, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .help(StatsFormatter.outputSpeedHelp(item.totals.timing))
                         }
                         if item.speed.fast.requestCount > 0 {
                             Text("Fast \(StatsFormatter.compactToken(item.speed.fast.totalTokens))  ·  \(tr("billing equivalent", "计费等效")) \(StatsFormatter.billingEquivalentTokens(item.speed))  ·  \(StatsFormatter.fastMultiplier(item.speed))  ·  \(StatsFormatter.tierCost(item.speed.fast.costUSD, hasUnpricedUsage: item.speed.fastHasUnpricedCost))")
