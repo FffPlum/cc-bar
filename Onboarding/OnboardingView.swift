@@ -82,7 +82,7 @@ private struct WelcomeStep: View {
 
             Text(tr(
                 "Check your AI subscription quota and local usage from the menu bar.",
-                "在菜单栏查看 AI 订阅额度和本地用量。"
+                "在菜单栏查看 AI 订阅额度和本机用量。"
             ))
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)

@@ -36,7 +36,7 @@ enum ServiceStatusIndicator: String, Sendable, Codable {
     @MainActor
     var label: String {
         switch self {
-        case .none: return tr("All systems normal", "服务正常")
+        case .none: return tr("All systems normal", "运行正常")
         case .minor: return tr("Minor issue", "轻微故障")
         case .major: return tr("Major issue", "重大故障")
         case .critical: return tr("Critical outage", "严重故障")

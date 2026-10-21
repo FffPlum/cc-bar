@@ -668,7 +668,7 @@ extension QuotaError {
         case 401, 403:
             return tr("Sign-in is no longer valid — sign in again", "登录已失效,请重新登录")
         case 500...599:
-            return tr("Service is temporarily unavailable", "服务暂时不可用,请稍后再试")
+            return tr("The official API is temporarily unavailable", "官方接口暂时不可用,请稍后再试")
         default:
             return tr("Request failed (HTTP \(code))", "获取失败(HTTP \(code))")
         }

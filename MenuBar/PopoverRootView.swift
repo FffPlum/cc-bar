@@ -546,8 +546,8 @@ private struct ServiceBlockView: View {
         let age = PopoverRootView.relativeAge(from: status.fetchedAt)
         if status.indicator == .unknown {
             return tr(
-                "Couldn't check service status · last updated \(age) ago",
-                "服务状态获取失败 · \(age) 前的数据"
+                "Couldn't check official status · last updated \(age) ago",
+                "官方状态获取失败 · \(age) 前的数据"
             )
         }
         let trimmed = status.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

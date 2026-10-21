@@ -873,7 +873,7 @@ struct StatsView: View {
             }
             .buttonStyle(.borderless)
             .frame(width: 26, height: 22)
-            .help(tr("Refresh local usage", "刷新本地用量"))
+            .help(tr("Refresh local usage", "刷新本机用量"))
         }
     }
 
@@ -1235,7 +1235,7 @@ private struct StatsUsageErrorBanner: View {
         if notice?.isUnavailable == true {
             return tr(
                 "Local usage history could not be loaded, so new usage is paused. Files are untouched; restore a backup and restart CCBar.",
-                "无法读取本地用量历史，已暂停统计新用量。原文件未改动，恢复备份后重启 CCBar。"
+                "无法读取本机用量历史，已暂停统计新用量。原文件未改动，恢复备份后重启 CCBar。"
             )
         }
         if notice?.isReadOnly == true {

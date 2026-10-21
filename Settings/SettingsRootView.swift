@@ -365,8 +365,8 @@ struct SettingsRootView: View {
             }
             InsetDivider()
             PrefsRow(
-                label: "Service status dot",
-                chinese: "服务状态圆点"
+                label: "Official status dot",
+                chinese: "官方状态圆点"
             ) {
                 Toggle("", isOn: Binding(get: { settings.showServiceStatus }, set: { settings.showServiceStatus = $0 }))
                     .labelsHidden()
@@ -410,8 +410,8 @@ struct SettingsRootView: View {
             }
             InsetDivider()
             PrefsRow(
-                label: "Include Codex subscription usage in other agents",
-                chinese: "包含其他 Agent 中的 Codex 订阅用量",
+                label: "Include Codex subscription usage in Pi, OpenCode and DSH",
+                chinese: "包含 Pi、OpenCode、DSH 中的 Codex 订阅用量",
                 desc: "When on, the Codex cards in the full-quota estimate and the Codex spend in the popover add Codex subscription usage in Pi, OpenCode and DSH on top of Codex's own usage, all toward the Codex primary account.",
                 chineseDesc: "打开后，额度用满预估的 Codex 卡和弹出面板的 Codex 花费，除了 Codex 本身的用量，还会加上在 Pi、OpenCode、DSH 中使用 Codex 订阅产生的用量，一律算到 Codex 主账号"
             ) {
@@ -1142,9 +1142,9 @@ struct SettingsRootView: View {
         default:
             (
                 "dsh", "D", "DSH",
-                tr("Usage: reads session records in ~/.dsh/sessions and calculates tokens and cost on this Mac. Only the default location is checked. DSH has no subscription quota.",
-                   "用量：读取 ~/.dsh/sessions 中的会话记录，在本机计算 Token 和费用。只查找这个默认位置。DSH 没有订阅额度。"),
-                tr("Start a session in DSH to detect it (only ~/.dsh is checked)", "用 DSH 产生会话后自动识别，只查找 ~/.dsh")
+                tr("Usage: reads conversation records in ~/.dsh/sessions and calculates tokens and cost on this Mac. Only the default location is checked. DSH has no subscription quota.",
+                   "用量：读取 ~/.dsh/sessions 中的对话记录，在本机计算 Token 和费用。只查找这个默认位置。DSH 没有订阅额度。"),
+                tr("Start a conversation in DSH to detect it (only ~/.dsh is checked)", "用 DSH 产生对话后自动识别，只查找 ~/.dsh")
             )
         }
 
@@ -1152,7 +1152,7 @@ struct SettingsRootView: View {
         case .found:
             tr("Usage only · local records found", "仅用量 · 已找到本机记录")
         case .installedOnly where app == .dsh:
-            tr("Usage only · no sessions in the default location", "仅用量 · 默认位置没有会话记录")
+            tr("Usage only · no conversations in the default location", "仅用量 · 默认位置没有对话记录")
         case .installedOnly:
             tr("Usage only · no local records yet", "仅用量 · 暂无本机记录")
         case .missing:
