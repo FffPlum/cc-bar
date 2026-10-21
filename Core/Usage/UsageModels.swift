@@ -15,14 +15,15 @@ nonisolated enum UsageApp: String, Sendable, Codable, Hashable, CaseIterable {
     /// 当前本地扫描器实际支持的数据源。Cursor 虽属于 `UsageApp`，但不在此集合中。
     static let localApps: [UsageApp] = [.codex, .claude, .pi, .opencode, .dsh, .antigravity]
 
-    /// 原生日志能定位到第一个 token 的服务。Pi 日志只有请求开始与结束时间，Cursor 只有远端计量，
-    /// Antigravity 的耗时字段含义未核实，三者不显示首字延迟和输出速度。
+    /// 对话详情显示首字延迟与输出速度的服务。Pi / Antigravity 只显示输出速度。
     var supportsGenerationTiming: Bool {
         switch self {
         case .claude, .codex, .opencode, .dsh: return true
         case .pi, .cursor, .antigravity: return false
         }
     }
+
+    var supportsOutputSpeed: Bool { supportsGenerationTiming || self == .pi || self == .antigravity }
 
     /// 按 `preferred` 顺序排列 `present` 中的服务；未覆盖的按 `allCases` 默认序追加。
     static func displayOrdered(
@@ -87,22 +88,29 @@ nonisolated struct UsageEntry: Sendable, Equatable {
     /// 有价时必须与 `costBreakdown?.total` 使用同一个最终费用。
     var costUSD: Decimal?
     var costBreakdown: CostBreakdown?
-    /// 原生日志能定位到第一个 token 时才有；`nil` 的请求不计入首字延迟和输出速度。
+    /// 日志有可用耗时时填入；首字时间缺失时只计输出速度。
     var timing: RequestTiming? = nil
 }
 
-/// 单次请求的首字延迟与首字之后的生成时长（毫秒）。
+/// 单次请求的首字延迟与输出时长（毫秒）；Pi 输出时长包含首字等待。
 nonisolated struct RequestTiming: Sendable, Equatable, Codable {
-    var firstTokenMs: Int
+    var firstTokenMs: Int?
     var generationMs: Int
 
     /// 超出上限视为时间戳异常（例如重放日志改写了时间），不计入。
     static let maxFirstTokenMs: Double = 10 * 60 * 1000
     static let maxGenerationMs: Double = 60 * 60 * 1000
 
-    init(firstTokenMs: Int, generationMs: Int) {
+    init(firstTokenMs: Int?, generationMs: Int) {
         self.firstTokenMs = firstTokenMs
         self.generationMs = generationMs
+    }
+
+    /// 只有输出耗时时不填首字延迟，避免把缺失值当作 0 参与平均。
+    init?(generationMs: Double) {
+        guard generationMs.isFinite, generationMs > 0,
+              generationMs <= Self.maxGenerationMs else { return nil }
+        self.init(firstTokenMs: nil, generationMs: Int(generationMs.rounded()))
     }
 
     /// 三个时间点均为 Unix 毫秒；顺序颠倒或超出上限时返回 nil。
@@ -116,12 +124,12 @@ nonisolated struct RequestTiming: Sendable, Equatable, Codable {
     }
 }
 
-/// 首字延迟与输出速度的累计量。只累计能拿到首字时间的请求，两项都按总量相除得到加权平均。
+/// 首字延迟与输出速度的累计量。分别累计有对应耗时的请求，再按总量相除。
 nonisolated struct GenerationTiming: Sendable, Equatable, Codable {
     /// 计入首字延迟的请求数与延迟总和（毫秒）。
     var firstTokenCount = 0
     var firstTokenMs = 0
-    /// 计入输出速度的输出 tokens 与首字之后的生成时长（毫秒）。
+    /// 计入输出速度的输出 tokens 与输出时长（毫秒）；Pi 使用请求总耗时。
     var timedOutputTokens = 0
     var generationMs = 0
 
@@ -134,8 +142,10 @@ nonisolated struct GenerationTiming: Sendable, Equatable, Codable {
 
     mutating func add(_ timing: RequestTiming?, outputTokens: Int) {
         guard let timing else { return }
-        firstTokenCount += 1
-        firstTokenMs += timing.firstTokenMs
+        if let firstToken = timing.firstTokenMs {
+            firstTokenCount += 1
+            firstTokenMs += firstToken
+        }
         if outputTokens >= Self.minimumSpeedOutputTokens, timing.generationMs >= Self.minimumSpeedGenerationMs {
             timedOutputTokens += outputTokens
             generationMs += timing.generationMs

@@ -183,6 +183,7 @@ nonisolated enum AntigravityScanner {
         var output: Int
         var cacheRead: Int
         var cacheCreation: Int
+        var timing: RequestTiming? = nil
     }
 
     private nonisolated struct ConversationRead {
@@ -294,7 +295,8 @@ nonisolated enum AntigravityScanner {
                     if let usageFields, let usage = usageCounts(usageFields) {
                         read.records.append(record(
                             identity: identity(usageFields) ?? "row:\(idx)",
-                            model: currentModel, timestamp: time, usage: usage
+                            model: currentModel, timestamp: time, usage: usage,
+                            timing: generationTiming(chat)
                         ))
                     }
                     // 重试记录没有 ID 时无法和主用量区分，不计入。
@@ -319,9 +321,22 @@ nonisolated enum AntigravityScanner {
         return read
     }
 
-    private static func record(identity: String, model: String?, timestamp: Date?, usage: UsageCounts) -> UsageRecord {
+    private static func record(
+        identity: String, model: String?, timestamp: Date?, usage: UsageCounts, timing: RequestTiming? = nil
+    ) -> UsageRecord {
         UsageRecord(identity: identity, model: model, timestamp: timestamp, input: usage.input,
-                    output: usage.output, cacheRead: usage.cacheRead, cacheCreation: usage.cacheCreation)
+                    output: usage.output, cacheRead: usage.cacheRead, cacheCreation: usage.cacheCreation,
+                    timing: timing)
+    }
+
+    /// ChatModelMetadata 字段 12 为 streaming_duration（google.protobuf.Duration）。
+    /// 只用于本条主请求；重试的独立用量没有自己的耗时时不套用。
+    private static func generationTiming(_ chat: [Proto.Field]) -> RequestTiming? {
+        guard let duration = chat.message(12) else { return nil }
+        let seconds = duration.varint(1) ?? 0
+        let nanos = duration.varint(2) ?? 0
+        guard nanos < 1_000_000_000 else { return nil }
+        return RequestTiming(generationMs: Double(seconds) * 1000 + Double(nanos) / 1_000_000)
     }
 
     private static func stepInfo(_ fields: [Proto.Field]) -> StepInfo {
@@ -420,7 +435,8 @@ nonisolated enum AntigravityScanner {
             cacheCreationTokens: record.cacheCreation,
             requestCount: 1,
             costUSD: breakdown?.total,
-            costBreakdown: breakdown
+            costBreakdown: breakdown,
+            timing: record.timing
         )
     }
 

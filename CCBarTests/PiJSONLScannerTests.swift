@@ -64,6 +64,43 @@ final class PiJSONLScannerTests: XCTestCase {
         #"{"type":"message","id":"\#(id)","parentId":null,"timestamp":"2026-08-03T03:58:26.500Z","message":{"role":"user","content":"\#(text)"}}"#
     }
 
+    func testOutputSpeedUsesTotalDurationWithoutFirstTokenLatency() throws {
+        let end = "2026-08-03T03:58:30.000Z"
+        let start = try XCTUnwrap(JSONLTimestamp.parse(end)).timeIntervalSince1970 * 1000 - 4000
+        func line(_ id: String, duration: Double?, stopReason: String = "stop", hasStart: Bool = true) throws -> String {
+            var root = try XCTUnwrap(JSONSerialization.jsonObject(
+                with: Data(assistantLine(id: id, timestamp: end, output: 300).utf8)
+            ) as? [String: Any])
+            var message = try XCTUnwrap(root["message"] as? [String: Any])
+            message["timestamp"] = hasStart ? start : nil
+            message["durationMs"] = duration
+            message["stopReason"] = stopReason
+            root["message"] = message
+            return String(decoding: try JSONSerialization.data(withJSONObject: root), as: UTF8.self)
+        }
+        try write("timing.jsonl", try [
+            header,
+            line("timed", duration: 2000),
+            line("legacy", duration: nil),
+            line("invalid", duration: -1),
+            line("failed", duration: 2000, stopReason: "error"),
+            line("missing", duration: nil, hasStart: false),
+        ].joined(separator: "\n"))
+
+        let result = PiJSONLScanner.scan(previous: [:], seenEntryIds: [], root: tempDir)
+        XCTAssertEqual(result.entries.count, 5, "缺失或异常耗时不影响用量入账")
+        XCTAssertEqual(result.entries[0].timing, RequestTiming(firstTokenMs: nil, generationMs: 2000))
+        XCTAssertEqual(result.entries[1].timing, RequestTiming(firstTokenMs: nil, generationMs: 4000))
+        XCTAssertTrue(result.entries.dropFirst(2).allSatisfy { $0.timing == nil })
+        var timing = GenerationTiming.zero
+        for entry in result.entries { timing.add(entry.timing, outputTokens: entry.outputTokens) }
+        XCTAssertEqual(timing.outputTokensPerSecond, 100)
+        XCTAssertNil(timing.averageFirstTokenSeconds)
+        XCTAssertTrue(PiJSONLScanner.scan(
+            previous: result.newState, seenEntryIds: result.newSeenIds, root: tempDir
+        ).entries.isEmpty, "续扫不重复计入耗时")
+    }
+
     // MARK: - 全量扫描
 
     func testDirectoryEnumeratorReturnsMetadataAndAppliesMinimumMtime() throws {

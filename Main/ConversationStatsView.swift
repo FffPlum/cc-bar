@@ -702,6 +702,11 @@ private struct ConversationDetailView: View {
                                 .font(.system(size: 10.5, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
+                        } else if detail.info.app.supportsOutputSpeed {
+                            Text("\(tr("Output speed", "输出速度")) \(StatsFormatter.outputSpeed(item.totals.timing.outputTokensPerSecond))")
+                                .font(.system(size: 10.5, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         if item.speed.fast.requestCount > 0 {
                             Text("Fast \(StatsFormatter.compactToken(item.speed.fast.totalTokens))  ·  \(tr("billing equivalent", "计费等效")) \(StatsFormatter.billingEquivalentTokens(item.speed))  ·  \(StatsFormatter.fastMultiplier(item.speed))  ·  \(StatsFormatter.tierCost(item.speed.fast.costUSD, hasUnpricedUsage: item.speed.fastHasUnpricedCost))")

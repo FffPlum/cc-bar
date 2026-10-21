@@ -157,7 +157,8 @@ enum PiJSONLScanner {
                             model: currentModel ?? "unknown/unknown",
                             speed: .standard,
                             timestamp: ts,
-                            usage: parsed
+                            usage: parsed,
+                            timing: requestTiming(message: message, entryTimestamp: entryTimestamp)
                         ))
                         fileLedger.append(("pi:\(resolvedID)", SeenIDSet.digest(dedupeKey)))
                     } else {
@@ -263,6 +264,18 @@ enum PiJSONLScanner {
         return JSONLTimestamp.parse(fallback) ?? Date()
     }
 
+    /// Pi 没有首字时间：优先使用单调时钟测得的请求总耗时，旧日志退回请求开始到落盘时间。
+    private nonisolated static func requestTiming(message: [String: Any], entryTimestamp: String) -> RequestTiming? {
+        let stopReason = message["stopReason"] as? String
+        guard stopReason != "error", stopReason != "aborted" else { return nil }
+        if let duration = (message["durationMs"] as? NSNumber)?.doubleValue {
+            return RequestTiming(generationMs: duration)
+        }
+        guard let start = (message["timestamp"] as? NSNumber)?.doubleValue, start > 0,
+              let end = JSONLTimestamp.parse(entryTimestamp) else { return nil }
+        return RequestTiming(generationMs: end.timeIntervalSince1970 * 1000 - start)
+    }
+
     /// 文件名 `2026-08-03T03-27-31-685Z_019fc5a9-....jsonl` 里的 UUID 段。
     private nonisolated static func fileNameUUID(from url: URL) -> String? {
         let name = url.deletingPathExtension().lastPathComponent
@@ -326,7 +339,8 @@ enum PiJSONLScanner {
         model: String,
         speed: UsageSpeed,
         timestamp: Date,
-        usage: ParsedUsage
+        usage: ParsedUsage,
+        timing: RequestTiming? = nil
     ) -> UsageEntry {
         let reportedBreakdown = usage.cost.map {
             CostBreakdown(
@@ -361,7 +375,8 @@ enum PiJSONLScanner {
             cacheReadTokens: usage.cacheRead,
             cacheCreationTokens: usage.cacheWrite,
             costUSD: breakdown?.total,
-            costBreakdown: breakdown
+            costBreakdown: breakdown,
+            timing: timing
         )
     }
 

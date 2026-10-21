@@ -105,11 +105,13 @@ final class AntigravityScannerTests: XCTestCase {
     /// 生成行：根字段 1 为调用消息，4 用量、9.4 时间、17 重试、19 模型名、20 键值属性。
     private func insertGeneration(
         _ db: OpaquePointer, idx: Int64, model: String? = nil, usage: [UInt8],
-        time: UInt64? = nil, retries: [[UInt8]] = [], attributes: [String: String] = [:]
+        time: UInt64? = nil, retries: [[UInt8]] = [], attributes: [String: String] = [:],
+        streamingDuration: [UInt8]? = nil
     ) {
         var chat: [UInt8] = []
         if let model { chat += PB.text(19, model) }
         chat += PB.bytes(4, usage)
+        if let streamingDuration { chat += PB.bytes(12, streamingDuration) }
         if let time { chat += PB.bytes(9, PB.timestamp(4, time)) }
         for retry in retries { chat += PB.bytes(17, PB.bytes(2, retry)) }
         for (key, value) in attributes.sorted(by: { $0.key < $1.key }) {
@@ -142,6 +144,42 @@ final class AntigravityScannerTests: XCTestCase {
 
     private func sum(_ entries: [UsageEntry], _ keyPath: KeyPath<UsageEntry, Int>) -> Int {
         entries.reduce(0) { $0 + $1[keyPath: keyPath] }
+    }
+
+    func testOutputSpeedUsesStreamingDurationOnlyForMatchingRequest() throws {
+        let app = root("antigravity")
+        let db = try createDatabase(root: app, id: "timed-conversation")
+        let main = PB.usage(input: 100, output: 300, responseID: "main")
+        insertGeneration(
+            db, idx: 0, model: "gemini-3.8-flash", usage: main, time: baseTime,
+            retries: [main, PB.usage(input: 100, output: 1000, responseID: "retry")],
+            streamingDuration: PB.int(1, 2) + PB.int(2, 500_000_000)
+        )
+        insertGeneration(
+            db, idx: 1, usage: PB.usage(input: 100, output: 300, responseID: "zero"),
+            streamingDuration: []
+        )
+        insertGeneration(
+            db, idx: 2, usage: PB.usage(input: 100, output: 300, responseID: "invalid-nanos"),
+            streamingDuration: PB.int(1, 2) + PB.int(2, 1_000_000_000)
+        )
+        insertGeneration(
+            db, idx: 3, usage: PB.usage(input: 100, output: 300, responseID: "too-long"),
+            streamingDuration: PB.int(1, 3601)
+        )
+        sqlite3_close(db)
+
+        let result = AntigravityScanner.scan(previous: nil, roots: [app])
+        XCTAssertTrue(result.isComplete)
+        XCTAssertEqual(result.entries.count, 5, "同响应去重，独立重试与异常耗时记录仍保留用量")
+        XCTAssertEqual(result.entries.filter { $0.timing != nil }.count, 1)
+        let timed = try XCTUnwrap(result.entries.first { $0.timing != nil })
+        XCTAssertEqual(timed.outputTokens, 300)
+        XCTAssertEqual(timed.timing, RequestTiming(firstTokenMs: nil, generationMs: 2500))
+        var timing = GenerationTiming.zero
+        for entry in result.entries { timing.add(entry.timing, outputTokens: entry.outputTokens) }
+        XCTAssertEqual(timing.outputTokensPerSecond, 120)
+        XCTAssertNil(timing.averageFirstTokenSeconds)
     }
 
     // MARK: - 生成行、重试与 step 去重

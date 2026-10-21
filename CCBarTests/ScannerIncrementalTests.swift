@@ -761,6 +761,39 @@ final class ScannerIncrementalTests: XCTestCase {
         bucket.timing.add(RequestTiming(firstTokenMs: 1500, generationMs: 3000), outputTokens: 300)
         let timed = try JSONDecoder().decode(UsageBucket.self, from: JSONEncoder().encode(bucket))
         XCTAssertEqual(timed.timing, bucket.timing)
+
+        bucket.app = .pi
+        bucket.timing = .zero
+        bucket.timing.add(RequestTiming(generationMs: 3000.0), outputTokens: 600)
+        let speedOnly = try JSONDecoder().decode(UsageBucket.self, from: JSONEncoder().encode(bucket))
+        XCTAssertEqual(speedOnly.timing.outputTokensPerSecond, 200)
+        XCTAssertNil(speedOnly.timing.averageFirstTokenSeconds)
+    }
+
+    func testSpeedOnlyTimingDoesNotChangeFirstTokenAverage() throws {
+        let speedOnly = try XCTUnwrap(RequestTiming(generationMs: 3000.0))
+        var timing = GenerationTiming.zero
+        timing.add(speedOnly, outputTokens: 600)
+        XCTAssertEqual(timing.outputTokensPerSecond, 200)
+        XCTAssertEqual(timing.firstTokenCount, 0)
+        XCTAssertNil(timing.averageFirstTokenSeconds)
+        XCTAssertFalse(timing.isEmpty)
+
+        var existing = GenerationTiming.zero
+        existing.add(RequestTiming(firstTokenMs: 1500, generationMs: 2000), outputTokens: 400)
+        existing.merge(timing)
+        XCTAssertEqual(existing.averageFirstTokenSeconds, 1.5)
+        XCTAssertEqual(existing.outputTokensPerSecond, 200)
+        XCTAssertEqual(try JSONDecoder().decode(GenerationTiming.self, from: JSONEncoder().encode(timing)), timing)
+        XCTAssertEqual(try JSONDecoder().decode(RequestTiming.self, from: JSONEncoder().encode(speedOnly)), speedOnly)
+        let legacy = Data(#"{"firstTokenMs":1500,"generationMs":2000}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(RequestTiming.self, from: legacy).firstTokenMs, 1500)
+
+        XCTAssertNil(RequestTiming(generationMs: 0.0))
+        XCTAssertNil(RequestTiming(generationMs: -1.0))
+        XCTAssertNil(RequestTiming(generationMs: Double.infinity))
+        XCTAssertNil(RequestTiming(generationMs: Double.nan))
+        XCTAssertNil(RequestTiming(generationMs: RequestTiming.maxGenerationMs + 1))
     }
 
     func testUsageLogPathMatcherIgnoresUnrelatedWrites() {
