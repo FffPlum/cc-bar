@@ -1757,7 +1757,7 @@ private struct OverviewCompositionPanel: View {
     /// 列表区固定高度（约 5.8 行双行行高，露出半行提示可滚动），四个维度与提供商展开都在区内滚动，
     /// 面板高度不随维度、行数变化；面板总高约 376pt，低于下排 390pt 下限，切换维度不挤压上方柱状图。
     private static let listHeight: CGFloat = 240
-    /// 输出速度列只在「模型」维度出现。
+    /// 四个维度共用输出速度列宽，提供商展开的模型子行也与此对齐。
     private static let speedColumnWidth: CGFloat = 70
 
     private func rowList(_ rows: [CompositionRow]) -> some View {
@@ -1778,9 +1778,7 @@ private struct OverviewCompositionPanel: View {
             Text("Tokens").frame(width: 86, alignment: .trailing)
             Text(tr("Cost", "费用")).frame(width: 86, alignment: .trailing)
             Text(tr("Share", "占比")).frame(width: 46, alignment: .trailing)
-            if dimension == .model {
-                Text(tr("Output speed", "输出速度")).frame(width: Self.speedColumnWidth, alignment: .trailing)
-            }
+            Text(tr("Output speed", "输出速度")).frame(width: Self.speedColumnWidth, alignment: .trailing)
             Text(tr("Cache hit", "缓存命中率")).frame(width: 64, alignment: .trailing)
             Color.clear.frame(width: 10, height: 1)
         }
@@ -1869,13 +1867,11 @@ private struct OverviewCompositionPanel: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .frame(width: 46, alignment: .trailing)
-            if dimension == .model {
-                Text(StatsFormatter.outputSpeed(row.totals.timing.outputTokensPerSecond))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .frame(width: Self.speedColumnWidth, alignment: .trailing)
-            }
+            Text(StatsFormatter.outputSpeed(row.totals.timing.outputTokensPerSecond))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(width: Self.speedColumnWidth, alignment: .trailing)
             Text(hitRateText(row.totals.cacheHitRate))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -1907,7 +1903,7 @@ private struct OverviewCompositionPanel: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 8)
-            // 数值列与父行的 Tokens / 费用列对齐（同样 8pt 间距），占比、命中率、箭头位留空。
+            // 数值列与父行的 Tokens / 费用 / 输出速度列对齐（同样 8pt 间距），占比、命中率、箭头位留空。
             HStack(spacing: 8) {
                 Text(StatsFormatter.compactToken(row.totals.totalTokens))
                     .font(.system(size: 10.5))
@@ -1923,6 +1919,11 @@ private struct OverviewCompositionPanel: View {
                 .monospacedDigit()
                 .frame(width: 86, alignment: .trailing)
                 Color.clear.frame(width: 46, height: 1)
+                Text(StatsFormatter.outputSpeed(row.totals.timing.outputTokensPerSecond))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .frame(width: Self.speedColumnWidth, alignment: .trailing)
                 Color.clear.frame(width: 64, height: 1)
                 Color.clear.frame(width: 10, height: 1)
             }
