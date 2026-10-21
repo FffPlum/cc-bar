@@ -36,8 +36,12 @@ nonisolated struct ProxyEndpoint: Sendable, Equatable {
 }
 
 nonisolated enum ProxyUnavailableReason: Sendable, Equatable {
-    /// 手动模式下地址或端口没填好。
+    /// 手动模式下地址或端口没填。
     case manualIncomplete
+    /// 端口不在 1～65535。
+    case invalidPort
+    /// 地址带 `/`、空白，或带了端口（含冒号但不是 IPv6 地址）。
+    case invalidHost
 }
 
 nonisolated enum ProxyResolution: Sendable, Equatable {
@@ -121,12 +125,18 @@ nonisolated enum NetworkProxy {
         let type = defaults.string(forKey: Keys.type).flatMap(ProxyType.init(rawValue:)) ?? .http
         let host = (defaults.string(forKey: Keys.host) ?? "").trimmingCharacters(in: .whitespaces)
         let port = defaults.integer(forKey: Keys.port)
-        guard !host.isEmpty,
-              !host.contains("/"),
+        guard !host.isEmpty, port != 0 else { return .unavailable(.manualIncomplete) }
+        guard !host.contains("/"),
               !host.contains(where: \.isWhitespace),
-              (1...65535).contains(port)
-        else { return .unavailable(.manualIncomplete) }
+              !host.contains(":") || isIPv6Literal(host)
+        else { return .unavailable(.invalidHost) }
+        guard (1...65535).contains(port) else { return .unavailable(.invalidPort) }
         return .proxy(ProxyEndpoint(type: type, host: host, port: port))
+    }
+
+    private static func isIPv6Literal(_ host: String) -> Bool {
+        var address = in6_addr()
+        return host.withCString { inet_pton(AF_INET6, $0, &address) } == 1
     }
 
     // MARK: 会话

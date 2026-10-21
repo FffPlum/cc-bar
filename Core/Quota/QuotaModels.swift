@@ -531,10 +531,21 @@ nonisolated enum QuotaError: Error, CustomStringConvertible {
         }
     }
 
+    /// CFNetwork 的代理连接错误码(`CFNetworkErrors`):SOCKS 100～129,
+    /// HTTP 代理连接失败 306、代理凭据错误 307、HTTPS 代理连接失败 310、CONNECT 响应异常 311。
+    nonisolated private static let cfNetworkProxyFailureCodes: Set<Int> = Set(100..<130).union([306, 307, 310, 311])
+
     /// 把 `URLSession` 抛出的错误收敛成 `QuotaError`。
     /// 所有取数 / 续期链路的 `catch` 都应走这里,不要再把原始 error 插值成字符串。
     nonisolated static func from(transport error: Error) -> QuotaError {
         if error is ProxyUnavailableError { return .network(.proxyUnavailable) }
+        // 手动代理连不上时,URLSession 抛的是 CFNetwork 的代理错误而不是 URLError
+        // (实测 HTTP 代理端口不通为 310),不归类就只能显示「网络连接失败」。
+        let nsError = error as NSError
+        if nsError.domain == kCFErrorDomainCFNetwork as String,
+           cfNetworkProxyFailureCodes.contains(nsError.code) {
+            return .network(.cannotConnect)
+        }
         guard let urlError = error as? URLError else { return .network(.other) }
         return .network(NetworkFailureKind(urlError.code))
     }
@@ -622,8 +633,18 @@ extension NetworkFailureKind {
             switch NetworkProxy.resolve() {
             case .unavailable(.manualIncomplete):
                 return tr(
-                    "Proxy address is incomplete — fill it in Settings → Data & Refresh",
-                    "代理地址未填完整,请到「设置 → 数据与刷新」填写"
+                    "Proxy address or port is missing — fill it in Settings → Data & Refresh",
+                    "代理地址或端口未填写,请到「设置 → 数据与刷新」填写"
+                )
+            case .unavailable(.invalidPort):
+                return tr(
+                    "Proxy port is invalid — fix it in Settings → Data & Refresh",
+                    "代理端口无效,请到「设置 → 数据与刷新」修改"
+                )
+            case .unavailable(.invalidHost):
+                return tr(
+                    "Proxy address is malformed — fix it in Settings → Data & Refresh",
+                    "代理地址格式不对,请到「设置 → 数据与刷新」修改"
                 )
             case .system, .proxy:
                 // 失败之后用户已经改过设置,下一次刷新会按新设置重试。

@@ -723,7 +723,7 @@ struct SettingsRootView: View {
         }
     }
 
-    /// `userMessage` 是给 Popover 的，地址未填完整会带「请到「设置 → 数据与刷新」…」，
+    /// `userMessage` 是给 Popover 的，地址或端口未填、填错会带「请到「设置 → 数据与刷新」…」，
     /// TLS 失败会说「请检查代理设置」，用户此时就在这一页，所以这里只说原因。
     /// 连不上、超时的文案不带跳转，照常使用。
     private func proxyTestFailureMessage(_ error: QuotaError) -> String {
@@ -737,6 +737,13 @@ struct SettingsRootView: View {
         switch NetworkProxy.resolve() {
         case .unavailable(.manualIncomplete):
             return tr("Enter the address and port", "请填写地址和端口")
+        case .unavailable(.invalidPort):
+            return tr("Port must be between 1 and 65535", "端口需在 1–65535 之间")
+        case .unavailable(.invalidHost):
+            return tr(
+                "Enter only a hostname or IP, without http:// or a port",
+                "地址只填主机名或 IP,不带 http:// 和端口"
+            )
         case .system, .proxy:
             return tr("Proxy unavailable", "代理不可用")
         }
