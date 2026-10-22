@@ -183,6 +183,117 @@ nonisolated enum AntigravityCredentials {
         homeDirectory.appendingPathComponent(".gemini/jetski-standalone-oauth-token")
     }
 
+    /// agy CLI 自己的登录凭据，结构与 jetski 相同。cc-bar 只读不写。
+    nonisolated static func cliTokenURL(homeDirectory: URL) -> URL {
+        homeDirectory.appendingPathComponent(".gemini/antigravity-cli/antigravity-oauth-token")
+    }
+
+    /// agy 的 access_token 是否还在有效期内（留 5 分钟余量）。文件缺失或解析失败视为无效。
+    nonisolated static func hasValidCLIToken(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> Bool {
+        guard let token = loadCLITokenDict(homeDirectory: homeDirectory),
+              nonEmpty(token["access_token"] as? String) != nil
+        else { return false }
+        let expiry = (token["expiry"] as? String).flatMap { parseISO8601($0) } ?? parseExpiryDate(token["expiry_date"])
+        return !isExpired(expiryDate: expiry)
+    }
+
+    /// agy 凭据文件的修改时间与大小，用来判断用户是否重新登录过；文件不存在时为 nil。
+    nonisolated static func cliTokenSignature(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> String? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: cliTokenURL(homeDirectory: homeDirectory).path)
+        else { return nil }
+        let modified = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+        return "\(modified)-\(size)"
+    }
+
+    nonisolated private static func loadCLITokenDict(homeDirectory: URL) -> [String: Any]? {
+        guard let data = try? Data(contentsOf: cliTokenURL(homeDirectory: homeDirectory)),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return root["token"] as? [String: Any] ?? root
+    }
+
+    nonisolated enum CLISignInProbe: Sendable {
+        /// refresh_token 可用，agy 能自己续期。
+        case valid
+        /// Google 明确拒绝了 refresh_token（`invalid_grant`）或没有 refresh_token，agy 需要重新登录。
+        case signedOut
+        /// 网络、服务端或 client secret 原因无法判断。
+        case unknown(QuotaError)
+    }
+
+    /// 从 agy 二进制里提取 OAuth client secret（`[client_id 或 unmatched-位置: secret]`）。
+    /// 二进制很大，调用方按文件签名缓存结果。
+    nonisolated static func clientSecrets(inBinary url: URL) -> [String: String] {
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else { return [:] }
+        var result: [String: String] = [:]
+        extractSecrets(fromData: data, into: &result)
+        return result
+    }
+
+    /// 用 agy 的 refresh_token 向 Google 试着续期一次，只用来判断 agy 的登录是否还有效。
+    /// 拿到的新 token 直接丢弃，不写回任何文件；agy 随后会自己续期并写回。
+    /// 只试 Antigravity client（agy 登录页里的 client_id），secret 来自 agy 二进制。
+    nonisolated static func probeCLISignIn(
+        secrets: [String: String],
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) async -> CLISignInProbe {
+        guard let token = loadCLITokenDict(homeDirectory: homeDirectory) else {
+            return .unknown(.decode("agy token file unreadable"))
+        }
+        guard let refreshToken = nonEmpty(token["refresh_token"] as? String) else { return .signedOut }
+
+        // 精确配对的 secret 优先，其余 secret 逐个试，最后试不带 secret。
+        var candidates: [String?] = []
+        for secret in [secrets[antigravityClientID]].compactMap({ $0 }) + Array(secrets.values)
+        where !candidates.contains(secret) {
+            candidates.append(secret)
+        }
+        candidates.append(nil)
+
+        var lastErr = QuotaError.tokenRefreshFailed("agy refresh probe: no usable OAuth client")
+        for secret in candidates {
+            var req = URLRequest(url: tokenEndpoint)
+            req.httpMethod = "POST"
+            req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            req.timeoutInterval = 30
+            var body = "client_id=\(percent(antigravityClientID))"
+            if let secret, !secret.isEmpty {
+                body += "&client_secret=\(percent(secret))"
+            }
+            body += "&refresh_token=\(percent(refreshToken))&grant_type=refresh_token"
+            req.httpBody = body.data(using: .utf8)
+
+            let data: Data
+            let resp: URLResponse
+            do {
+                (data, resp) = try await NetworkProxy.data(for: req)
+            } catch {
+                return .unknown(QuotaError.from(transport: error))
+            }
+            guard let http = resp as? HTTPURLResponse else {
+                return .unknown(.tokenRefreshFailed("agy refresh probe: non-http response"))
+            }
+            if (200..<300).contains(http.statusCode) { return .valid }
+            let msg = String(data: data, encoding: .utf8) ?? ""
+            let asHTTP = QuotaError.http(http.statusCode, msg)
+            if asHTTP.looksLikeInterceptedResponse || http.statusCode >= 500 {
+                return .unknown(asHTTP)
+            }
+            // client 校验在 grant 校验之前：secret 不对时是 invalid_client，换下一个；
+            // 只有 client 通过后 Google 才会就 refresh_token 本身回 invalid_grant。
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            if root?["error"] as? String == "invalid_grant" { return .signedOut }
+            lastErr = .tokenRefreshFailed("agy refresh probe: http \(http.statusCode): \(msg)")
+        }
+        return .unknown(lastErr)
+    }
+
     private static func loadOAuthCreds(homeDirectory: URL) throws -> AntigravityAccount? {
         let url = oauthCredsURL(homeDirectory: homeDirectory)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }

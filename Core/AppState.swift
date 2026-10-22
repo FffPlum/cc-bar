@@ -2047,12 +2047,22 @@ final class AppState {
             // CLI JSON 不含可核实账号身份；与 Claude CLI 一样只展示，不生成系统提醒。
             return
         }
-        if case .failure(let error)? = cliResult,
-           error.isRateLimited || antigravityQuotaSource == .antigravityCLI
-                || quotaCache.antigravity?.source == .antigravityCLI
-                || antigravityQuota?.primaryLimit?.id == "gemini-argon-wtu-weekly" {
+        let hasCLISnapshot = antigravityQuotaSource == .antigravityCLI
+            || quotaCache.antigravity?.source == .antigravityCLI
+            || antigravityQuota?.primaryLimit?.id == "gemini-argon-wtu-weekly"
+        switch cliResult {
+        case .failure(let error)? where error.isRateLimited || hasCLISnapshot:
             markAntigravityFailure(error.userMessage, error: error)
             return
+        case .signedOut? where hasCLISnapshot:
+            // 已有 agy 额度时不改用云端的另一额度池；保留快照，请用户自己去 agy 重新登录，cc-bar 不打开登录页。
+            markAntigravityFailure(tr(
+                "Sign-in is no longer valid — run agy in Terminal to sign in again",
+                "登录已失效,请在终端运行 agy 重新登录"
+            ))
+            return
+        default:
+            break
         }
         guard account.accessToken != nil else {
             markAntigravityFailure(QuotaError.missingToken.userMessage)
