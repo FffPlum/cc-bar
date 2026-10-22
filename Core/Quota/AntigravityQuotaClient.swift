@@ -720,7 +720,7 @@ nonisolated enum AntigravityQuotaClient {
         private var lastError: QuotaError = .transport("Antigravity CLI quota unavailable")
 
         private static let signedOutDefaultsKey = "antigravityCLISignedOutTokenSignatureV1"
-        /// 确认 agy 登录失效时其凭据文件的签名。文件变了（用户重新登录过）才再调用 agy；持久化，重启后不再试。
+        /// 确认 agy 登录失效时其凭据（文件或钥匙串）的签名。凭据变了（用户重新登录过）才再调用 agy；持久化，重启后不再试。
         private var signedOutSignature = UserDefaults.standard.string(forKey: CLIQuery.signedOutDefaultsKey)
         private var secretCache: (key: String, secrets: [String: String])?
 
@@ -734,16 +734,25 @@ nonisolated enum AntigravityQuotaClient {
                 return nil
             }
             // agy 续期失败会自己打开浏览器登录页，所以登录失效时不调用它，只提示用户去终端重新登录。
-            guard let signature = AntigravityCredentials.cliTokenSignature() else { return .signedOut }
-            if signature == signedOutSignature { return .signedOut }
-            let tokenWasValid = AntigravityCredentials.hasValidCLIToken()
+            let token: AntigravityCredentials.CLIToken
+            switch await Self.loadCLIToken() {
+            case .found(let found):
+                token = found
+            case .missing:
+                return .signedOut
+            case .unreadable(let error):
+                recordFailure(error, sessionKey: sessionKey)
+                return .failure(error)
+            }
+            if token.signature == signedOutSignature { return .signedOut }
+            let tokenWasValid = token.isValid
             if !tokenWasValid {
                 let secrets = await clientSecrets(for: executable)
-                switch await AntigravityCredentials.probeCLISignIn(secrets: secrets) {
+                switch await AntigravityCredentials.probeCLISignIn(token: token, secrets: secrets) {
                 case .valid:
                     break
                 case .signedOut:
-                    markSignedOut(signature)
+                    markSignedOut(token.signature)
                     return .signedOut
                 case .unknown(let error):
                     recordFailure(error, sessionKey: sessionKey)
@@ -768,9 +777,8 @@ nonisolated enum AntigravityQuotaClient {
             switch result {
             case .failure(let error):
                 // 续期判断为可用，agy 却没能续期（凭据仍过期）：同样按登录失效处理，不再调用它。
-                if !tokenWasValid, !AntigravityCredentials.hasValidCLIToken(),
-                   let current = AntigravityCredentials.cliTokenSignature() {
-                    markSignedOut(current)
+                if !tokenWasValid, case .found(let current) = await Self.loadCLIToken(), !current.isValid {
+                    markSignedOut(current.signature)
                     return .signedOut
                 }
                 recordFailure(error, sessionKey: sessionKey)
@@ -791,7 +799,12 @@ nonisolated enum AntigravityQuotaClient {
         private func markSignedOut(_ signature: String) {
             signedOutSignature = signature
             UserDefaults.standard.set(signature, forKey: Self.signedOutDefaultsKey)
-            AppLog.info(.credentials, "antigravity CLI signed out; agy skipped until its token file changes")
+            AppLog.info(.credentials, "antigravity CLI signed out; agy skipped until its token changes")
+        }
+
+        /// 读钥匙串要起 `security` 子进程，万一弹授权框还要等用户选择，不占用 actor。
+        private static func loadCLIToken() async -> AntigravityCredentials.CLITokenLoad {
+            await Task.detached(priority: .utility) { AntigravityCredentials.loadCLIToken() }.value
         }
 
         /// agy 二进制近 200 MB，按路径、修改时间和大小缓存提取结果。

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Antigravity（Google Antigravity / Gemini Code Assist）凭据管理。
@@ -183,38 +184,96 @@ nonisolated enum AntigravityCredentials {
         homeDirectory.appendingPathComponent(".gemini/jetski-standalone-oauth-token")
     }
 
-    /// agy CLI 自己的登录凭据，结构与 jetski 相同。cc-bar 只读不写。
+    /// 旧版 agy CLI 的登录凭据文件，结构与 jetski 相同。cc-bar 只读不写。
     nonisolated static func cliTokenURL(homeDirectory: URL) -> URL {
         homeDirectory.appendingPathComponent(".gemini/antigravity-cli/antigravity-oauth-token")
     }
 
-    /// agy 的 access_token 是否还在有效期内（留 5 分钟余量）。文件缺失或解析失败视为无效。
-    nonisolated static func hasValidCLIToken(
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
-    ) -> Bool {
-        guard let token = loadCLITokenDict(homeDirectory: homeDirectory),
-              nonEmpty(token["access_token"] as? String) != nil
-        else { return false }
-        let expiry = (token["expiry"] as? String).flatMap { parseISO8601($0) } ?? parseExpiryDate(token["expiry_date"])
-        return !isExpired(expiryDate: expiry)
+    /// 新版 agy CLI 把登录凭据存进钥匙串（go-keyring），内容为 `go-keyring-base64:` 加 base64 编码的 JSON，结构与文件相同。
+    static let cliKeychainService = "gemini"
+    static let cliKeychainAccount = "antigravity"
+
+    /// agy 的一份登录凭据。
+    nonisolated struct CLIToken: Sendable {
+        var accessToken: String?
+        var refreshToken: String?
+        var expiryDate: Date?
+        /// 凭据的指纹，用来判断用户是否重新登录过（agy 自己续期后也会变）。
+        var signature: String
+
+        /// access_token 是否还在有效期内（留 5 分钟余量）。
+        var isValid: Bool { accessToken != nil && !AntigravityCredentials.isExpired(expiryDate: expiryDate) }
     }
 
-    /// agy 凭据文件的修改时间与大小，用来判断用户是否重新登录过；文件不存在时为 nil。
-    nonisolated static func cliTokenSignature(
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
-    ) -> String? {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: cliTokenURL(homeDirectory: homeDirectory).path)
-        else { return nil }
-        let modified = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
-        return "\(modified)-\(size)"
+    nonisolated enum CLITokenLoad: Sendable {
+        case found(CLIToken)
+        /// 文件和钥匙串里都没有 agy 凭据，agy 未登录。
+        case missing
+        /// 凭据存在但读不出来（文件损坏、钥匙串授权被拒等），无法判断登录状态。
+        case unreadable(QuotaError)
     }
 
-    nonisolated private static func loadCLITokenDict(homeDirectory: URL) -> [String: Any]? {
-        guard let data = try? Data(contentsOf: cliTokenURL(homeDirectory: homeDirectory)),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return root["token"] as? [String: Any] ?? root
+    /// 读取 agy 的登录凭据：凭据文件优先，文件不存在时读钥匙串。
+    /// 钥匙串与 Claude 凭据一样经 `/usr/bin/security` 读取。agy 也是经 `security` 写入的，条目只信任 `security`，
+    /// 所以读取不弹授权框，cc-bar 升级也不受影响；agy 改变写入方式时才可能询问。会阻塞，调用方放到后台执行。
+    nonisolated static func loadCLIToken(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> CLITokenLoad {
+        let url = cliTokenURL(homeDirectory: homeDirectory)
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) {
+            guard let data = try? Data(contentsOf: url),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return .unreadable(.decode("agy token file unreadable")) }
+            let modified = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+            return .found(cliToken(root: root, signature: "\(modified)-\(size)"))
+        }
+        return loadCLITokenFromKeychain()
+    }
+
+    nonisolated private static func loadCLITokenFromKeychain() -> CLITokenLoad {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        proc.arguments = ["find-generic-password", "-s", cliKeychainService, "-a", cliKeychainAccount, "-w"]
+        let pipe = Pipe()
+        let err = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = err
+        do {
+            try proc.run()
+        } catch {
+            return .unreadable(.transport("agy keychain read failed: \(error)"))
+        }
+        proc.waitUntilExit()
+        let out = pipe.fileHandleForReading.readDataToEndOfFile()
+        // 44 = errSecItemNotFound
+        if proc.terminationStatus == 44 { return .missing }
+        guard proc.terminationStatus == 0, !out.isEmpty else {
+            let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return .unreadable(.transport("agy keychain read failed: exit \(proc.terminationStatus) \(msg)"))
+        }
+        var text = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let prefix = "go-keyring-base64:"
+        if text.hasPrefix(prefix) {
+            text = Data(base64Encoded: String(text.dropFirst(prefix.count)))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        }
+        guard let root = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else {
+            return .unreadable(.decode("agy keychain token unreadable"))
+        }
+        let digest = SHA256.hash(data: Data(text.utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
+        return .found(cliToken(root: root, signature: "keychain-\(digest)"))
+    }
+
+    nonisolated private static func cliToken(root: [String: Any], signature: String) -> CLIToken {
+        let token = root["token"] as? [String: Any] ?? root
+        return CLIToken(
+            accessToken: nonEmpty(token["access_token"] as? String),
+            refreshToken: nonEmpty(token["refresh_token"] as? String),
+            expiryDate: (token["expiry"] as? String).flatMap { parseISO8601($0) } ?? parseExpiryDate(token["expiry_date"]),
+            signature: signature
+        )
     }
 
     nonisolated enum CLISignInProbe: Sendable {
@@ -239,13 +298,10 @@ nonisolated enum AntigravityCredentials {
     /// 拿到的新 token 直接丢弃，不写回任何文件；agy 随后会自己续期并写回。
     /// 只试 Antigravity client（agy 登录页里的 client_id），secret 来自 agy 二进制。
     nonisolated static func probeCLISignIn(
-        secrets: [String: String],
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+        token: CLIToken,
+        secrets: [String: String]
     ) async -> CLISignInProbe {
-        guard let token = loadCLITokenDict(homeDirectory: homeDirectory) else {
-            return .unknown(.decode("agy token file unreadable"))
-        }
-        guard let refreshToken = nonEmpty(token["refresh_token"] as? String) else { return .signedOut }
+        guard let refreshToken = token.refreshToken else { return .signedOut }
 
         // 精确配对的 secret 优先，其余 secret 逐个试，最后试不带 secret。
         var candidates: [String?] = []
