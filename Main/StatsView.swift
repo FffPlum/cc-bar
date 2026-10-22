@@ -3091,6 +3091,15 @@ private struct QuotaTimelineChart: View {
         return first.addingTimeInterval(-padding)...last.addingTimeInterval(padding)
     }
 
+    /// 两个标签都在各自竖线左侧；重置线离「现在」不到 X 轴跨度 6% 时，
+    /// 「现在」标签会盖住重置线，此时只留「现在」，虚线照画。
+    private var showsResetLabel: Bool {
+        guard let resetAt else { return false }
+        let span = xDomain.upperBound.timeIntervalSince(xDomain.lowerBound)
+        guard span > 0 else { return false }
+        return abs(now.timeIntervalSince(resetAt)) / span >= 0.06
+    }
+
     var body: some View {
         Chart {
             ForEach(entries) { entry in
@@ -3116,8 +3125,15 @@ private struct QuotaTimelineChart: View {
                 RuleMark(x: .value("Time", resetAt))
                     .foregroundStyle(Color.secondary.opacity(0.45))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                    .annotation(position: .top, alignment: .leading, spacing: 2) {
-                        referenceLabel(tr("Window reset", "窗口重置"))
+                    .annotation(
+                        position: .top,
+                        alignment: .trailing,
+                        spacing: 2,
+                        overflowResolution: .init(x: .fit(to: .chart))
+                    ) {
+                        if showsResetLabel {
+                            referenceLabel(tr("Window reset", "窗口重置"))
+                        }
                     }
             }
             RuleMark(x: .value("Time", now))
