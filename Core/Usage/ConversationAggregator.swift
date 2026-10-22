@@ -633,9 +633,12 @@ final class ConversationAggregator {
             let original = info
             if let title = seed.title, !title.isEmpty { info.title = title }
             let sameProject = info.projectKey == seed.project.key
-            let shouldReplaceProject = info.projectStatus == .unassigned
-                || seed.project.source.priority > info.projectSource.priority
-            if sameProject || (seed.project.status != .unassigned && shouldReplaceProject) {
+            // 只在项目不同时才判断要不要替换；`projectMoved` 可能访问文件系统，放在最后。
+            let shouldReplaceProject = !sameProject && seed.project.status != .unassigned
+                && (info.projectStatus == .unassigned
+                    || seed.project.source.priority > info.projectSource.priority
+                    || Self.projectMoved(from: info, to: seed.project))
+            if sameProject || shouldReplaceProject {
                 info.projectKey = seed.project.key
                 info.projectName = seed.project.name
                 info.projectPath = seed.project.path
@@ -644,6 +647,7 @@ final class ConversationAggregator {
             }
             if info.gitBranch == nil { info.gitBranch = seed.gitBranch }
             if let parentKey = seed.parentKey { info.parentKey = parentKey }
+            if let continuationKey = seed.continuationKey { info.continuationKey = continuationKey }
             if !info.sourcePaths.contains(seed.sourcePath) { info.sourcePaths.append(seed.sourcePath) }
             info.includesSubtasks = info.includesSubtasks || seed.includesSubtasks
             info.cacheCreationAvailable = info.cacheCreationAvailable || seed.cacheCreationAvailable
@@ -668,26 +672,47 @@ final class ConversationAggregator {
                 lastAt: .distantPast,
                 includesSubtasks: seed.includesSubtasks,
                 cacheCreationAvailable: seed.cacheCreationAvailable,
-                parentKey: seed.parentKey
+                parentKey: seed.parentKey,
+                continuationKey: seed.continuationKey
             )
             return true
         }
     }
 
-    /// 沿 `parentKey` 找到最上层仍有档案的对话。父档案缺失（父对话没有用量）时子对话保持独立；
-    /// 链上出现环时停在环内，不会死循环。结果随数据版本缓存。
+    /// 项目目录被移动或改名后，对话改记到现在能解析到的项目：原路径已不存在而新路径可用，
+    /// 或原路径跟随软链接正好指向新路径。来源优先级不再拦着，否则会一直挂在旧路径并显示「已不存在」。
+    private static func projectMoved(from info: ConversationInfo, to project: ConversationProject) -> Bool {
+        guard project.status == .available, info.projectStatus.isPathBased else { return false }
+        if info.projectStatus == .unavailable { return true }
+        return ConversationProjectResolver.canonicalPath(of: info.projectPath) == project.path
+    }
+
+    /// 沿 `parentKey`（子任务）或 `continuationKey`（续接的上一段）找到最上层仍有档案的对话。
+    /// 上一级档案缺失（没有用量）时保持独立；链上出现环时停在环内，不会死循环。结果随数据版本缓存。
+    /// 只有经过 `parentKey` 并入的根对话标记含子任务；续接链用最近一段的标题，与桌面端显示一致。
     private func subtaskGrouping() -> SubtaskGrouping {
         if let cachedSubtaskGrouping { return cachedSubtaskGrouping }
         var grouping = SubtaskGrouping()
-        for (key, info) in infos where info.parentKey != nil {
+        var titleAt: [String: Date] = [:]
+        for (key, info) in infos where info.parentKey != nil || info.continuationKey != nil {
             var current = key
             var visited: Set<String> = [key]
-            while let parent = infos[current]?.parentKey, infos[parent] != nil, visited.insert(parent).inserted {
-                current = parent
+            var viaSubtask = false
+            while let currentInfo = infos[current],
+                  let next = currentInfo.parentKey ?? currentInfo.continuationKey,
+                  infos[next] != nil, visited.insert(next).inserted {
+                if currentInfo.parentKey != nil { viaSubtask = true }
+                current = next
             }
             guard current != key, var root = grouping.rootInfos[current] ?? infos[current] else { continue }
             grouping.rootKeys[key] = current
-            root.includesSubtasks = true
+            if viaSubtask {
+                root.includesSubtasks = true
+            } else if let title = info.title, !title.isEmpty,
+                      info.lastAt > (titleAt[current] ?? infos[current]?.lastAt ?? .distantPast) {
+                root.title = title
+                titleAt[current] = info.lastAt
+            }
             root.firstAt = min(root.firstAt, info.firstAt)
             root.lastAt = max(root.lastAt, info.lastAt)
             grouping.rootInfos[current] = root

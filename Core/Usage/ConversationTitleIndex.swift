@@ -18,6 +18,26 @@ nonisolated enum ConversationTitleIndex {
 
     private static let codexCache = OSAllocatedUnfairLock<CachedIndex<[String: String]>?>(initialState: nil)
     private static let claudeCache = OSAllocatedUnfairLock<CachedIndex<ClaudeIndex>?>(initialState: nil)
+    private static let customTitleCache = OSAllocatedUnfairLock<[String: CachedIndex<String?>]>(initialState: [:])
+
+    /// Claude 桌面端为会话起的标题：`<项目目录>/<sessionId>/custom-title.json` 的 `customTitle`，
+    /// 与桌面端侧栏显示一致。按 (mtime, size) 缓存，文件不存在或没有标题时返回 nil。
+    static func claudeCustomTitle(sessionDirectory: URL) -> String? {
+        let url = sessionDirectory.appendingPathComponent("custom-title.json")
+        guard let stamp = fileStamp(at: url) else {
+            customTitleCache.withLock { $0[url.path] = nil }
+            return nil
+        }
+        if let cached = customTitleCache.withLock({ $0[url.path] }),
+           cached.mtime == stamp.mtime, cached.size == stamp.size {
+            return cached.value
+        }
+        let title = (try? Data(contentsOf: url))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            .flatMap { clean($0["customTitle"] as? String) }
+        customTitleCache.withLock { $0[url.path] = CachedIndex(mtime: stamp.mtime, size: stamp.size, value: title) }
+        return title
+    }
 
     static func codexTitles() -> [String: String] {
         let url = FileManager.default.homeDirectoryForCurrentUser
@@ -112,12 +132,30 @@ nonisolated enum ConversationTitleIndex {
 
     static func clean(_ raw: String?) -> String? {
         guard let raw else { return nil }
-        let collapsed = raw
+        let collapsed = removingInjectedBlocks(raw)
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !collapsed.isEmpty, !collapsed.hasPrefix("<") else { return nil }
         return String(collapsed.prefix(80))
+    }
+
+    /// 客户端追加在用户文本后面的标签块（如桌面端的 `<system-reminder>`）不是用户输入。
+    /// 整块删除；没有闭合标签时从开标签处截断。用户自己粘贴的 HTML 等其他标签不动。
+    private static let injectedTags = ["system-reminder"]
+
+    private static func removingInjectedBlocks(_ text: String) -> String {
+        var result = text
+        for tag in injectedTags {
+            while let open = result.range(of: "<\(tag)") {
+                if let close = result.range(of: "</\(tag)>", range: open.upperBound..<result.endIndex) {
+                    result.replaceSubrange(open.lowerBound..<close.upperBound, with: " ")
+                } else {
+                    result = String(result[..<open.lowerBound])
+                }
+            }
+        }
+        return result
     }
 }

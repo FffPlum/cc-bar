@@ -92,6 +92,26 @@ final class ConversationProjectResolverTests: XCTestCase {
         XCTAssertEqual(project.status, .unavailable)
     }
 
+    /// 项目目录被移动后旧路径留了软链接：规范路径指向新位置；不存在或受保护的路径不检查。
+    func testCanonicalPathFollowsSymlink() throws {
+        let homeURL = FileManager.default.homeDirectoryForCurrentUser
+        let base = homeURL
+            .appendingPathComponent("Library/Caches/CCBarResolverTests-\(UUID().uuidString)", isDirectory: true)
+        let target = base.appendingPathComponent("hachibu", isDirectory: true)
+        let link = base.appendingPathComponent("tansu")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let home = homeURL.standardizedFileURL.path
+        XCTAssertEqual(
+            ConversationProjectResolver.canonicalPath(of: link.path, home: home),
+            target.resolvingSymlinksInPath().path
+        )
+        XCTAssertNil(ConversationProjectResolver.canonicalPath(of: base.appendingPathComponent("missing").path, home: home))
+        XCTAssertNil(ConversationProjectResolver.canonicalPath(of: "/Users/tester/Documents/project", home: self.home))
+    }
+
     func testResolveHomeItselfStaysUnassigned() {
         var resolver = ConversationProjectResolver(home: home)
         XCTAssertEqual(resolver.resolve(rawPath: home, source: .cwd), .unassigned)

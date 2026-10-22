@@ -13,6 +13,8 @@ enum ClaudeJSONLScanner {
         var failedFileCount: Int
         /// 本轮计入的消息 ID 摘要，按对话 key 分组（见 `UsageMessageLedger`）。
         var ledger: [String: [UInt64]] = [:]
+        /// 有文件末尾的消息还没写完、留到下一轮再读。文件之后可能不再写入，调用方据此安排下一轮扫描。
+        var hasDeferredMessages = false
     }
 
     nonisolated static func defaultRoot() -> URL {
@@ -36,12 +38,14 @@ enum ClaudeJSONLScanner {
 
     /// 可注入日志根目录与标题索引，供脱敏 JSONL fixture 测试真实 byte-offset 扫描链路。
     /// - Parameter knownIDs: 消息账本里已计入的 message.id 摘要，与 `seenMessageIds` 一起去重。
+    /// - Parameter knownOwner: 按摘要查之前扫描中计入它的对话 key，用于识别桌面端续接的对话。
     /// - Parameter minimumMtime: 非 nil 时只扫修改时间不早于该时刻的文件（周期受限重建用）。
     /// - Parameter onProgress: 非 nil 时按约每 50 个文件回报一次扫描进度。
     nonisolated static func scan(
         previous: [String: ScanFileState],
         seenMessageIds: [String],
         knownIDs: Set<UInt64> = [],
+        knownOwner: (UInt64) -> String? = { _ in nil },
         root: URL,
         conversationIndex: ConversationTitleIndex.ClaudeIndex,
         minimumMtime: Date? = nil,
@@ -64,6 +68,9 @@ enum ClaudeJSONLScanner {
         // 跨文件全局去重：同一 message.id 在 sidechain / subagent 文件中会反复出现。
         var seen = SeenIDSet(seenMessageIds, known: knownIDs)
         var ledger: [String: [UInt64]] = [:]
+        // 本次扫描入账的摘要 → 对话 key；查不到再问 `knownOwner`。
+        var owners: [UInt64: String] = [:]
+        var hasDeferredMessages = false
 
         let totalFiles = files.count
         for (index, file) in files.enumerated() {
@@ -78,6 +85,7 @@ enum ClaudeJSONLScanner {
             let url = file.url
             let path = file.path
             let projectContainer = projectContainerName(root: root, file: url)
+            let fileSessionKey = "claude:\(url.deletingPathExtension().lastPathComponent)"
             let mtime = file.modificationTime
             let size = file.size
 
@@ -117,6 +125,7 @@ enum ClaudeJSONLScanner {
                         seeds[key] = discoveredSeed
                     }
                 }
+                applyContinuation(state.claudeContinuationOf, to: fileSessionKey, seeds: &seeds)
                 continue
             }
             // 文件被截断：offset 回到 0 重扫（此时仍由全局 seen 兜底防重复计费）
@@ -136,12 +145,25 @@ enum ClaudeJSONLScanner {
                 fallbackTitles[fileConversationID] = fileFallbackTitle
             }
             var timingTracker = TimingTracker(lastInputMs: state.claudeLastInputMs)
+            // 每条 assistant 消息第一行的起始字节位置，用于把读取位置退回到末尾未结束的消息。
+            // 按交付的行累加：读取器会跳过空行，累加值只会偏早，偏早只是多重读几行（已入账的消息会被去重跳过）。
+            var lineEnd = state.offset
+            var messageStartOffsets: [String: UInt64] = [:]
+            // 文件开头复制过来的、已计入别的对话的最后一条消息（只认带本文件 sessionId 的行）。
+            var lastCopiedDigest: UInt64?
             // 按批流式解析：单文件不再把整份内容和全部行同时读进内存。
             let outcome = JSONLLineReader.streamLines(url: url, fromOffset: state.offset) { batch in
                 for line in batch {
+                    let lineStart = lineEnd
+                    lineEnd += UInt64(line.utf8.count) + 1
                     linesParsed += 1
                     guard let root = parseRoot(line) else { continue }
                     timingTracker.observe(root)
+                    if (root["type"] as? String) == "assistant",
+                       let id = (root["message"] as? [String: Any])?["id"] as? String,
+                       messageStartOffsets[id] == nil {
+                        messageStartOffsets[id] = lineStart
+                    }
                     if let title = parseUserTitle(root) {
                         fallbackTitles[title.sessionID] = fallbackTitles[title.sessionID] ?? title.title
                         if fileFallbackTitle == nil { fileFallbackTitle = title.title }
@@ -183,12 +205,15 @@ enum ClaudeJSONLScanner {
                     } else {
                         seeds[conversationKey] = discoveredSeed
                     }
-                    if seen.contains(parsed.messageId) { continue }
+                    if seen.contains(parsed.messageId) {
+                        if conversationKey == fileSessionKey { lastCopiedDigest = SeenIDSet.digest(parsed.messageId) }
+                        continue
+                    }
                     mergeCandidate(parsed, into: &candidates)
                 }
             }
             // 打开 / 读取失败时丢弃本文件本轮解析出的候选，watermark 保持原值，下轮重来。
-            let newOffset: UInt64
+            var newOffset: UInt64
             switch outcome {
             case let .success(offset):
                 newOffset = offset
@@ -204,8 +229,18 @@ enum ClaudeJSONLScanner {
             }
             // 文件已有一段时间没再写入，末尾的消息不会再追加：一轮对话的最终回答后面常常
             // 没有别的行，不在这里结束它就永远拿不到计时（入账后 message.id 已进 seen）。
-            if Date().timeIntervalSince1970 - mtime >= TimingTracker.idleCloseSeconds {
+            if Date().timeIntervalSince1970 - mtime >= TimingTracker.idleCloseSeconds
+                || timingTracker.openMessageLooksComplete {
                 timingTracker.close()
+            } else if let openID = timingTracker.openMessage, candidates[openID] != nil,
+                      let start = messageStartOffsets[openID] {
+                // 文件还在写，末尾的消息明显还有内容块没写完。Claude 每个内容块的行都带最终用量和
+                // stop_reason，现在入账的话计时还没结束，之后又会因 message.id 已进 seen 永远补不上。
+                // 本轮先不入账，读取位置退回这条消息的第一行，下一轮连同后续内容块整条重读。
+                _ = timingTracker.rewindOpenMessage()
+                candidates.removeValue(forKey: openID)
+                newOffset = start
+                hasDeferredMessages = true
             }
 
             for (id, p) in candidates {
@@ -213,7 +248,9 @@ enum ClaudeJSONLScanner {
                 // message.id 放进全局 seen；等待后续完整行追加后再由下一次增量扫描接收。
                 guard isComplete(p) else { continue }
                 seen.insert(id)
-                ledger["claude:\(p.sessionID)", default: []].append(SeenIDSet.digest(id))
+                let digest = SeenIDSet.digest(id)
+                ledger["claude:\(p.sessionID)", default: []].append(digest)
+                owners[digest] = "claude:\(p.sessionID)"
                 let day = UsageDay.startOfDay(for: p.timestamp)
                 let cost = Pricing.costBreakdown(
                     app: .claude,
@@ -299,6 +336,13 @@ enum ClaudeJSONLScanner {
             state.conversationIsSidechain = fileIsSidechain
             state.fallbackTitle = fileFallbackTitle
             state.claudeLastInputMs = timingTracker.lastInputMs
+            // 桌面端续接对话会把上一段的历史复制进新文件，且改写成新文件的 sessionId（分叉保留原
+            // sessionId，不会走到这里）。复制来的消息已经计在上一段名下，据此记下续接关系。
+            if let digest = lastCopiedDigest, let owner = owners[digest] ?? knownOwner(digest),
+               owner != fileSessionKey {
+                state.claudeContinuationOf = owner
+            }
+            applyContinuation(state.claudeContinuationOf, to: fileSessionKey, seeds: &seeds)
             newState[path] = state
         }
 
@@ -321,6 +365,20 @@ enum ClaudeJSONLScanner {
                 historyPath: conversationIndex.projects[seed.id],
                 candidates: candidates
             )
+            // 标题优先用桌面端起的标题，其次 history.jsonl，最后是首条用户消息摘要。
+            // 会话目录跟日志在同一个项目目录下；对话日志可能分布在多个项目目录（移动过文件夹），逐个找。
+            var containers = [projectContainerName(root: root, file: URL(fileURLWithPath: seed.sourcePath))]
+            for candidate in candidates where !containers.contains(candidate.container) {
+                containers.append(candidate.container)
+            }
+            for container in containers where !container.isEmpty {
+                let directory = root.appendingPathComponent(container, isDirectory: true)
+                    .appendingPathComponent(seed.id, isDirectory: true)
+                if let title = ConversationTitleIndex.claudeCustomTitle(sessionDirectory: directory) {
+                    seed.title = title
+                    break
+                }
+            }
             seeds[key] = seed
         }
 
@@ -332,7 +390,8 @@ enum ClaudeJSONLScanner {
             filesScanned: files.count,
             linesParsed: linesParsed,
             failedFileCount: failedFileCount,
-            ledger: ledger
+            ledger: ledger,
+            hasDeferredMessages: hasDeferredMessages
         )
     }
 
@@ -376,7 +435,8 @@ enum ClaudeJSONLScanner {
     /// - 首字：thinking 块的写入时间减去 `thinkingDurationMs`，不以 thinking 开头的消息没有首字时间；
     /// - 结束：该消息最后一个内容块的写入时间。
     /// 消息之后出现了别的 assistant 消息、新的提示词或 system 行才算结束；读到末尾的消息在文件
-    /// 已闲置 `idleCloseSeconds` 时也算结束，否则可能还在追加，不给计时，避免拿半截消息算出偏高的速度。
+    /// 已闲置 `idleCloseSeconds`、或最后一块与 stop_reason 对得上时也算结束。明显没写完的
+    /// （例如收在 thinking 块）由扫描器退回读取位置、下一轮整条重读，避免拿半截消息算出偏高的速度。
     nonisolated struct TimingTracker {
         /// 同一条消息相邻内容块的写入间隔本机实测 p90 约 8.5 秒、最长约 24 秒，留足余量。
         static let idleCloseSeconds: TimeInterval = 60
@@ -390,10 +450,25 @@ enum ClaudeJSONLScanner {
             var firstTokenMs: Double?
             var endMs: Double
             var closed = false
+            /// 最近一行的 stop_reason 与内容块类型（每行一块），用来判断读到末尾时消息是否已写完。
+            var stopReason: String?
+            var lastBlockType: String?
         }
 
         init(lastInputMs: Double?) {
             self.lastInputMs = lastInputMs
+        }
+
+        /// 正在拼、还没结束的消息。
+        var openMessage: String? { openMessageID }
+
+        /// 末尾的消息看起来已经写完：最后一块与 stop_reason 对得上（`tool_use` 收在工具调用，
+        /// 其他收在文本），或者行里没有内容块无从判断。以 thinking 等结尾的还会有后续块。
+        var openMessageLooksComplete: Bool {
+            guard let id = openMessageID, let draft = drafts[id] else { return true }
+            guard let stopReason = draft.stopReason else { return false }
+            guard let block = draft.lastBlockType else { return true }
+            return stopReason == "tool_use" ? block == "tool_use" : block == "text"
         }
 
         mutating func observe(_ root: [String: Any]) {
@@ -421,6 +496,8 @@ enum ClaudeJSONLScanner {
                 }
                 var draft = drafts[id] ?? Draft(requestStartMs: lastInputMs, endMs: ms)
                 draft.endMs = max(draft.endMs, ms)
+                draft.stopReason = message["stop_reason"] as? String
+                draft.lastBlockType = ((message["content"] as? [[String: Any]])?.last?["type"] as? String)
                 if let thinkingMs = (root["thinkingDurationMs"] as? NSNumber)?.doubleValue,
                    let content = message["content"] as? [[String: Any]],
                    (content.first?["type"] as? String) == "thinking" {
@@ -441,6 +518,15 @@ enum ClaudeJSONLScanner {
         mutating func close() {
             if let id = openMessageID { drafts[id]?.closed = true }
             openMessageID = nil
+        }
+
+        /// 读到末尾仍未结束的消息：丢掉它的草稿，把请求发出时间退回这条消息开始前的值，
+        /// 返回它的 message.id。扫描器据此把读取位置退回这条消息的第一行，下一轮整条重读。
+        mutating func rewindOpenMessage() -> String? {
+            guard let id = openMessageID, let draft = drafts.removeValue(forKey: id) else { return nil }
+            openMessageID = nil
+            lastInputMs = draft.requestStartMs
+            return id
         }
 
         private static func isToolResult(_ root: [String: Any]) -> Bool {
@@ -570,6 +656,16 @@ enum ClaudeJSONLScanner {
         } else {
             candidates[parsed.messageId] = parsed
         }
+    }
+
+    /// 给本文件对话的 seed 记上续接的上一段；本轮没有该对话的 seed（文件里还没有 assistant 行）时跳过。
+    private nonisolated static func applyContinuation(
+        _ previousKey: String?,
+        to key: String,
+        seeds: inout [String: ConversationSeed]
+    ) {
+        guard let previousKey, previousKey != key, seeds[key] != nil else { return }
+        seeds[key]?.continuationKey = previousKey
     }
 
     /// Claude 只有带 stop_reason 的最终 assistant 行才代表一次完成的模型调用。

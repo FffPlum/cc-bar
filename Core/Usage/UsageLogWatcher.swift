@@ -152,6 +152,11 @@ final class UsageLogWatcher {
         return true
     }
 
+    /// 扫描留下了还没读完的内容（例如末尾仍在写的消息）：下一轮周期扫描不受门控跳过。
+    func requestRescan() {
+        changeFlag.raise()
+    }
+
     func suspendForTermination() {
         suspendedForTermination = true
         stopStream()

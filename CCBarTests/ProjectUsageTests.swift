@@ -400,6 +400,63 @@ final class ProjectUsageTests: XCTestCase {
         XCTAssertEqual(project.totals.totalTokens, 100)
     }
 
+    /// 续接的各段合成一行，不标记含子任务；标题跟随最近一段。
+    func testContinuationSegmentsMergeWithoutSubtaskFlag() throws {
+        let aggregator = ConversationAggregator(worktreeResolver: ProjectWorktreeResolver(home: tempRoot.path))
+        let first = info("a", app: .claude, project: "/x/alpha")
+        var second = info("b", app: .claude, project: "/x/alpha")
+        second.continuationKey = "a"
+        second.title = "最近一段的标题"
+        second.lastAt = day(2026, 3, 9)
+        aggregator.load(
+            infos: [first, second],
+            buckets: [
+                bucket("a", .claude, day(2026, 3, 1), tokens: 10, cost: 1),
+                bucket("b", .claude, day(2026, 3, 2), tokens: 20, cost: 2)
+            ]
+        )
+
+        let query = aggregator.query(ConversationQueryRequest(
+            revision: 0, app: nil, projectKey: nil,
+            from: day(2026, 3, 1), to: day(2026, 3, 3), search: "", sort: .cost
+        ))
+        XCTAssertEqual(query.rows.map(\.id), ["a"])
+        let row = try XCTUnwrap(query.rows.first)
+        XCTAssertEqual(row.totals.totalTokens, 30)
+        XCTAssertFalse(row.info.includesSubtasks, "续接不是子任务")
+        XCTAssertEqual(row.info.title, "最近一段的标题")
+        XCTAssertEqual(row.info.lastAt, day(2026, 3, 9))
+    }
+
+    /// 原路径已不存在而新解析到的路径可用：改记到新项目，来源优先级更低也替换。
+    /// 原路径仍在时按原规则，优先级更低的来源不替换。
+    func testMovedProjectFollowsAvailablePath() throws {
+        let aggregator = ConversationAggregator(worktreeResolver: ProjectWorktreeResolver(home: tempRoot.path))
+        var moved = info("m", app: .claude, project: "/x/old")
+        moved.projectStatus = .unavailable
+        moved.projectSource = .claudeHistory
+        let kept = info("k", app: .claude, project: "/x/keep")
+        aggregator.load(
+            infos: [moved, kept],
+            buckets: [
+                bucket("m", .claude, day(2026, 3, 1), tokens: 10, cost: 1),
+                bucket("k", .claude, day(2026, 3, 1), tokens: 10, cost: 1)
+            ]
+        )
+        let project = ConversationProject(key: "path:/x/new", name: "new", path: "/x/new", status: .available, source: .cwd)
+        aggregator.ingest(entries: [], seeds: ["m", "k"].map {
+            ConversationSeed(
+                key: $0, id: $0, app: .claude, title: nil, project: project, gitBranch: nil,
+                sourcePath: "/logs/\($0).jsonl", includesSubtasks: false, cacheCreationAvailable: true
+            )
+        })
+
+        let infos = Dictionary(uniqueKeysWithValues: aggregator.snapshot().infos.map { ($0.key, $0) })
+        XCTAssertEqual(infos["m"]?.projectKey, "path:/x/new")
+        XCTAssertEqual(infos["m"]?.projectStatus, .available)
+        XCTAssertEqual(infos["k"]?.projectKey, "path:/x/keep")
+    }
+
     // MARK: - Helpers
 
     private func day(_ y: Int, _ m: Int, _ d: Int) -> Date {

@@ -64,6 +64,8 @@ nonisolated struct ConversationSeed: Sendable, Equatable {
     var cacheCreationAvailable: Bool
     /// 父对话 key。Codex 子代理 / Guardian 审查写成独立日志，统计页按它并入父对话展示。
     var parentKey: String? = nil
+    /// 续接的上一段对话 key。Claude 桌面端续接会换新 sessionId，统计页按它把同一对话的各段合成一行。
+    var continuationKey: String? = nil
 }
 
 /// 持久化的对话档案。不保存消息正文，只保存最多 80 字的标题摘要。
@@ -86,6 +88,8 @@ nonisolated struct ConversationInfo: Sendable, Codable, Equatable, Identifiable 
     /// 父对话 key；非 nil 且父档案存在时，统计页把本对话的用量并入父对话一行展示。
     /// 存储层仍按本对话 key 记账，不改写历史桶。
     var parentKey: String? = nil
+    /// 续接的上一段对话 key；与 `parentKey` 一样合成一行展示，但不算子任务。
+    var continuationKey: String? = nil
 
     var id: String { key }
 }
@@ -450,6 +454,17 @@ nonisolated struct ConversationProjectResolver {
             .split(separator: "/", maxSplits: 1, omittingEmptySubsequences: true).first
         guard let top else { return false }
         return !protectedHomeFolders.contains(String(top))
+    }
+
+    /// 已存在路径跟随软链接后的真实路径；不允许做文件系统检查或路径不存在时返回 nil。
+    static func canonicalPath(
+        of path: String,
+        home: String = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+    ) -> String? {
+        let url = URL(fileURLWithPath: NSString(string: path).expandingTildeInPath).standardizedFileURL
+        guard allowsFileSystemCheck(standardizedPath: url.path, home: home),
+              FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url.resolvingSymlinksInPath().path
     }
 
     mutating func resolve(rawPath: String, source: ConversationProjectSource) -> ConversationProject {

@@ -586,15 +586,18 @@ enum CodexJSONLScanner {
     }
 
     /// GPT-5.6 的 API usage 可将该字段放在顶层或 input / prompt token details。
-    /// 当前 Codex 本地日志未提供时返回 0，不对未记录的缓存写入做推测。
+    /// Codex 本地日志写作 `cache_write_input_tokens`，API 写作 `cache_write_tokens`，两种都认。
+    /// 都没有时返回 0，不对未记录的缓存写入做推测。
+    private nonisolated static let cacheWriteKeys = ["cache_write_tokens", "cache_write_input_tokens"]
+
     private nonisolated static func cacheWriteTokens(in usage: [String: Any]) -> Int {
-        if let value = usage["cache_write_tokens"] as? Int {
-            return value
+        for field in cacheWriteKeys {
+            if let value = usage[field] as? Int { return value }
         }
         for key in ["input_tokens_details", "prompt_tokens_details", "token_details"] {
-            if let details = usage[key] as? [String: Any],
-               let value = details["cache_write_tokens"] as? Int {
-                return value
+            guard let details = usage[key] as? [String: Any] else { continue }
+            for field in cacheWriteKeys {
+                if let value = details[field] as? Int { return value }
             }
         }
         return 0
@@ -676,8 +679,20 @@ enum CodexJSONLScanner {
     /// - `token_usage_record`：模型输出结束（含工具调用参数），结算出等待 token_count 的计时。
     /// - `turn_aborted` / `task_started`：中断的请求等不到 `token_usage_record`，丢弃它留下的时间点，
     ///   否则会串到下一回合的第一次请求上，把中间的空闲时间算进生成时长。
+    /// - `inter_agent_communication_metadata`：其他代理（子代理 / 父对话）的消息送达。已经出字的调用会被结束，
+    ///   Codex 带着这条消息重新发起调用；被放弃的那次没有 `token_usage_record`，也没有中断记录。
+    ///   这时丢掉首字时间，以消息送达时间作为重新发起的时间，否则两次调用之间的等待会被算进生成时长。
     /// fork 重放段会改写外层 timestamp 但保留条目里的原始毫秒，两者相差超过 2 秒的条目不参与计时。
     nonisolated static func updateTiming(_ timing: inout CodexTimingState, root: [String: Any], type: String?) -> Bool {
+        if type == "inter_agent_communication_metadata" {
+            if timing.firstTokenMs != nil {
+                timing.firstTokenMs = nil
+                timing.requestStartMs = (root["timestamp"] as? String)
+                    .flatMap({ JSONLTimestamp.parse($0) })
+                    .map { $0.timeIntervalSince1970 * 1000 }
+            }
+            return true
+        }
         if type == "event_msg",
            let kind = (root["payload"] as? [String: Any])?["type"] as? String,
            kind == "turn_aborted" || kind == "task_started" {

@@ -1455,6 +1455,7 @@ final class UsageService {
             }
             : nil
         let claude = await claudeTask?.value
+        if claude?.hasDeferredMessages == true { UsageLogWatcher.shared.requestRescan() }
         var codex = await codexTask?.value
         if usesLegacyCodexModels { codex = codex.map(Self.legacyCodexResult) }
         let pi = await piTask?.value
@@ -1805,12 +1806,14 @@ final class UsageService {
         let claudeKnown = messageLedger.ids(for: ledgerBackedKeys[.claude] ?? [], app: .claude)
         let codexKnown = messageLedger.ids(for: ledgerBackedKeys[.codex] ?? [], app: .codex)
         let piKnown = messageLedger.ids(for: ledgerBackedKeys[.pi] ?? [], app: .pi)
+        let ledgerSnapshot = messageLedger
 
         async let claudeTask = Task.detached(priority: .utility) {
             ClaudeJSONLScanner.scan(
                 previous: [:],
                 seenMessageIds: [],
                 knownIDs: claudeKnown,
+                knownOwner: { ledgerSnapshot.conversationKey(containing: $0, app: .claude) },
                 root: claudeRoot,
                 conversationIndex: claudeIndex,
                 onProgress: progress
@@ -1852,6 +1855,7 @@ final class UsageService {
         }.value
 
         let claude = await claudeTask
+        if claude.hasDeferredMessages { UsageLogWatcher.shared.requestRescan() }
         var codex = await codexTask
         if useLegacyCodexModels { codex = Self.legacyCodexResult(codex) }
         let pi = await piTask
@@ -2093,12 +2097,14 @@ final class UsageService {
         let claudeKnown = messageLedger.knownIDs(for: .claude)
         let codexKnown = messageLedger.knownIDs(for: .codex)
         let piKnown = messageLedger.knownIDs(for: .pi)
+        let ledgerSnapshot = messageLedger
 
         async let claudeTask = Task.detached(priority: .utility) {
             ClaudeJSONLScanner.scan(
                 previous: prev.claude,
                 seenMessageIds: prevSeen,
                 knownIDs: claudeKnown,
+                knownOwner: { ledgerSnapshot.conversationKey(containing: $0, app: .claude) },
                 root: claudeRoot,
                 conversationIndex: claudeIndex,
                 onProgress: progress
@@ -2146,6 +2152,7 @@ final class UsageService {
         }.value
 
         let claude = await claudeTask
+        if claude.hasDeferredMessages { UsageLogWatcher.shared.requestRescan() }
         var codex = await codexTask
         if usesLegacyCodexModels { codex = Self.legacyCodexResult(codex) }
         let pi = await piTask

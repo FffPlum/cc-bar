@@ -43,6 +43,9 @@ nonisolated struct ScanFileState: Sendable, Equatable, Codable {
     var dshRequestStartMs: Double?
     /// Claude 用：最近一条 user 行（提示词或工具结果）的时间（Unix 毫秒），作为下一次请求的发出时间。
     var claudeLastInputMs: Double?
+    /// Claude 用：本文件续接的上一段对话 key。桌面端续接会换新 sessionId，把原对话的消息以新 sessionId
+    /// 复制到新文件开头；复制行只在首次扫描时读到，所以记下来供之后的轮次生成对话种子。
+    var claudeContinuationOf: String?
     /// Codex 用：首字延迟与生成时长的跨批次计时状态（见 `CodexTimingState`）。
     var codexTiming: CodexTimingState?
 }

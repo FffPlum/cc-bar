@@ -590,7 +590,7 @@ final class ScannerIncrementalTests: XCTestCase {
     }
 
     /// 首字 = thinking 块写入时间 − thinkingDurationMs；工具结果穿插在同一消息的块之间不算结束；
-    /// 读到末尾仍可能追加的消息、不以 thinking 开头的消息都不给计时。
+    /// 不以 thinking 开头的消息不给计时；读到末尾明显没写完的消息留到下一轮整条重读。
     func testClaudeTimingFromThinkingDuration() throws {
         let projects = tempDir.appendingPathComponent("projects", isDirectory: true)
         let container = projects.appendingPathComponent("timing", isDirectory: true)
@@ -612,8 +612,17 @@ final class ScannerIncrementalTests: XCTestCase {
         let byOutput = Dictionary(uniqueKeysWithValues: result.entries.map { ($0.outputTokens, $0) })
         XCTAssertEqual(byOutput[400]?.timing, RequestTiming(firstTokenMs: 2000, generationMs: 4000))
         XCTAssertNil(byOutput[150]?.timing, "以文本开头的消息没有首字时间")
-        XCTAssertNil(byOutput[200]?.timing, "文件末尾的消息可能还在追加，不给计时")
+        XCTAssertNil(byOutput[200], "收在 thinking 块的末尾消息还没写完，本轮不入账")
+        XCTAssertTrue(result.hasDeferredMessages)
         XCTAssertEqual(result.newState[file.path]?.claudeLastInputMs, 1_792_022_410_000)
+
+        try appendLines([claudeAssistant("15.000", id: "m3", block: "tool_use", output: 200)], to: file)
+        let second = ClaudeJSONLScanner.scan(
+            previous: result.newState, seenMessageIds: result.newSeenIds, root: projects, conversationIndex: index
+        )
+        XCTAssertEqual(second.entries.map(\.outputTokens), [200], "退回的消息下一轮只入账一次")
+        XCTAssertEqual(second.entries.first?.timing, RequestTiming(firstTokenMs: 2500, generationMs: 2500))
+        XCTAssertFalse(second.hasDeferredMessages, "收在工具调用、与 stop_reason 对得上的末尾消息当场结束")
     }
 
     /// 请求发出时间跨增量扫描续接：上一轮只读到提示词，这一轮才读到回复。
@@ -654,6 +663,112 @@ final class ScannerIncrementalTests: XCTestCase {
 
         let result = ClaudeJSONLScanner.scan(previous: [:], seenMessageIds: [], root: projects, conversationIndex: index)
         XCTAssertEqual(result.entries.first?.timing, RequestTiming(firstTokenMs: 2000, generationMs: 4000))
+    }
+
+    // MARK: - Claude 续接 / 分叉 / 标题
+
+    private func claudeMessage(session: String, id: String, minute: Int, output: Int) -> String {
+        #"{"type":"assistant","sessionId":"\#(session)","cwd":"/tmp/ccbar-fixture","timestamp":"2026-10-15T00:\#(String(format: "%02d", minute)):00Z","message":{"id":"\#(id)","model":"claude-opus-5-5","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":\#(output)}}}"#
+    }
+
+    private func claudeContainer() throws -> (projects: URL, container: URL) {
+        let projects = tempDir.appendingPathComponent("projects", isDirectory: true)
+        let container = projects.appendingPathComponent("continuation", isDirectory: true)
+        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+        return (projects, container)
+    }
+
+    /// 续接把上一段历史复制进新文件并改写成新 sessionId：记下续接关系，复制的消息不重复计。
+    /// 分叉保留原 sessionId：不算续接，仍是独立对话。
+    func testClaudeContinuationIsLinkedAndForkStaysIndependent() throws {
+        let (projects, container) = try claudeContainer()
+        try writeLines([
+            claudeMessage(session: "aaaa", id: "a1", minute: 0, output: 10),
+            claudeMessage(session: "aaaa", id: "a2", minute: 1, output: 20),
+        ], to: container.appendingPathComponent("aaaa.jsonl"))
+        try writeLines([
+            claudeMessage(session: "bbbb", id: "a1", minute: 0, output: 10),
+            claudeMessage(session: "bbbb", id: "a2", minute: 1, output: 20),
+            claudeMessage(session: "bbbb", id: "b1", minute: 2, output: 30),
+        ], to: container.appendingPathComponent("bbbb.jsonl"))
+        try writeLines([
+            claudeMessage(session: "aaaa", id: "a1", minute: 0, output: 10),
+            claudeMessage(session: "ffff", id: "f1", minute: 3, output: 40),
+        ], to: container.appendingPathComponent("ffff.jsonl"))
+        let index = ConversationTitleIndex.ClaudeIndex(titles: [:], projects: [:])
+
+        let result = ClaudeJSONLScanner.scan(previous: [:], seenMessageIds: [], root: projects, conversationIndex: index)
+        XCTAssertEqual(result.entries.map(\.outputTokens).sorted(), [10, 20, 30, 40])
+        let seeds = Dictionary(uniqueKeysWithValues: result.conversationSeeds.map { ($0.key, $0) })
+        XCTAssertEqual(seeds["claude:bbbb"]?.continuationKey, "claude:aaaa")
+        XCTAssertNil(seeds["claude:ffff"]?.continuationKey, "分叉是独立对话")
+        XCTAssertNil(seeds["claude:aaaa"]?.continuationKey)
+
+        // 文件没变时从保存的状态带出续接关系。
+        let unchanged = ClaudeJSONLScanner.scan(
+            previous: result.newState, seenMessageIds: result.newSeenIds, root: projects, conversationIndex: index
+        )
+        XCTAssertTrue(unchanged.entries.isEmpty)
+        XCTAssertEqual(
+            unchanged.conversationSeeds.first { $0.key == "claude:bbbb" }?.continuationKey, "claude:aaaa"
+        )
+    }
+
+    /// 增量扫描时上一段早已入账：靠账本查到复制消息原来计在哪个对话。
+    func testClaudeContinuationFoundThroughLedgerAcrossScans() throws {
+        let (projects, container) = try claudeContainer()
+        try writeLines([
+            claudeMessage(session: "aaaa", id: "a1", minute: 0, output: 10),
+        ], to: container.appendingPathComponent("aaaa.jsonl"))
+        let index = ConversationTitleIndex.ClaudeIndex(titles: [:], projects: [:])
+        let first = ClaudeJSONLScanner.scan(previous: [:], seenMessageIds: [], root: projects, conversationIndex: index)
+
+        try writeLines([
+            claudeMessage(session: "bbbb", id: "a1", minute: 0, output: 10),
+            claudeMessage(session: "bbbb", id: "b1", minute: 2, output: 30),
+        ], to: container.appendingPathComponent("bbbb.jsonl"))
+        let ledger = first.ledger
+        let second = ClaudeJSONLScanner.scan(
+            previous: first.newState,
+            seenMessageIds: first.newSeenIds,
+            knownOwner: { digest in ledger.first { $0.value.contains(digest) }?.key },
+            root: projects,
+            conversationIndex: index
+        )
+        XCTAssertEqual(second.entries.map(\.outputTokens), [30])
+        XCTAssertEqual(second.conversationSeeds.first { $0.key == "claude:bbbb" }?.continuationKey, "claude:aaaa")
+    }
+
+    /// 标题优先用桌面端的 custom-title.json，其次 history.jsonl，最后首条用户消息；注入的标签块不进标题。
+    func testClaudeTitlePrefersDesktopCustomTitle() throws {
+        let (projects, container) = try claudeContainer()
+        try writeLines([
+            #"{"type":"user","sessionId":"cccc","timestamp":"2026-10-15T00:00:00Z","message":{"role":"user","content":"首条消息<system-reminder>注入内容</system-reminder>"}}"#,
+            claudeMessage(session: "cccc", id: "c1", minute: 1, output: 10),
+        ], to: container.appendingPathComponent("cccc.jsonl"))
+        let fallback = ClaudeJSONLScanner.scan(
+            previous: [:], seenMessageIds: [], root: projects,
+            conversationIndex: ConversationTitleIndex.ClaudeIndex(titles: [:], projects: [:])
+        )
+        XCTAssertEqual(fallback.conversationSeeds.first?.title, "首条消息")
+
+        let withHistory = ConversationTitleIndex.ClaudeIndex(titles: ["cccc": "history 标题"], projects: [:])
+        let sessionDirectory = container.appendingPathComponent("cccc", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessionDirectory, withIntermediateDirectories: true)
+        try Data(#"{"customTitle":"桌面端标题"}"#.utf8).write(to: sessionDirectory.appendingPathComponent("custom-title.json"))
+        let desktop = ClaudeJSONLScanner.scan(previous: [:], seenMessageIds: [], root: projects, conversationIndex: withHistory)
+        XCTAssertEqual(desktop.conversationSeeds.first?.title, "桌面端标题")
+
+        try FileManager.default.removeItem(at: sessionDirectory.appendingPathComponent("custom-title.json"))
+        let history = ClaudeJSONLScanner.scan(previous: [:], seenMessageIds: [], root: projects, conversationIndex: withHistory)
+        XCTAssertEqual(history.conversationSeeds.first?.title, "history 标题")
+    }
+
+    func testTitleCleanRemovesInjectedBlocks() {
+        XCTAssertEqual(ConversationTitleIndex.clean("修复登录 <system-reminder>a\nb</system-reminder> 问题"), "修复登录 问题")
+        XCTAssertEqual(ConversationTitleIndex.clean("看看这个<system-reminder>没有闭合"), "看看这个")
+        XCTAssertNil(ConversationTitleIndex.clean("<system-reminder>只有注入</system-reminder>"))
+        XCTAssertEqual(ConversationTitleIndex.clean("保留 <b>用户</b> 标签"), "保留 <b>用户</b> 标签")
     }
 
     private func codexItem(_ ms: Int, type: String, started: Int, loggedMs: Int? = nil) -> String {
@@ -728,6 +843,48 @@ final class ScannerIncrementalTests: XCTestCase {
         let byOutput = Dictionary(uniqueKeysWithValues: result.entries.map { ($0.outputTokens, $0) })
         XCTAssertNil(byOutput[50]?.timing, "中断的请求没有 token_usage_record，不计时")
         XCTAssertEqual(byOutput[300]?.timing, RequestTiming(firstTokenMs: 2000, generationMs: 4000))
+    }
+
+    /// 请求已开始出字时收到子智能体消息，Codex 会放弃这次调用、带着消息重新发起：
+    /// 首字时间作废，以消息送达时间作为新的请求发出时间。
+    func testCodexTimingRestartsAfterInterAgentMessage() async throws {
+        let sessions = tempDir.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        let id = "55555555-5555-4555-8555-555555555555"
+        let t0 = 1_792_022_400_000
+        let stamp = { (ms: Int) in ISO8601DateFormatter.ccbarTestFormatter.string(from: Date(timeIntervalSince1970: Double(ms) / 1000)) }
+        let file = sessions.appendingPathComponent("rollout-2026-10-15T00-00-00-\(id).jsonl")
+        try writeLines([
+            #"{"timestamp":"2026-10-15T00:00:00Z","type":"session_meta","payload":{"id":"\#(id)","cwd":"/tmp/ccbar-fixture"}}"#,
+            #"{"timestamp":"2026-10-15T00:00:00Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}"#,
+            codexItem(t0, type: "UserMessage", started: t0),
+            codexItem(t0 + 3_000, type: "Reasoning", started: t0 + 1_000),
+            #"{"timestamp":"\#(stamp(t0 + 10_000))","type":"inter_agent_communication_metadata","payload":{"trigger_turn":true}}"#,
+            codexItem(t0 + 14_000, type: "Reasoning", started: t0 + 12_000),
+            codexUsageRecord(t0 + 16_000, output: 300),
+            codexTokenCount(t0 + 16_001, output: 300, total: 1_000),
+        ], to: file)
+
+        let result = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+        XCTAssertEqual(result.entries.first?.timing, RequestTiming(firstTokenMs: 2000, generationMs: 4000))
+    }
+
+    /// 缓存写入字段两种写法都认：`cache_write_tokens` 与 `cache_write_input_tokens`。
+    func testCodexReadsCacheWriteInputTokens() async throws {
+        let sessions = tempDir.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        let id = "66666666-6666-4666-8666-666666666666"
+        let file = sessions.appendingPathComponent("rollout-2026-10-15T00-00-00-\(id).jsonl")
+        try writeLines([
+            #"{"timestamp":"2026-10-15T00:00:00Z","type":"session_meta","payload":{"id":"\#(id)","cwd":"/tmp/ccbar-fixture"}}"#,
+            #"{"timestamp":"2026-10-15T00:00:00Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}"#,
+            #"{"timestamp":"2026-10-15T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"cache_write_input_tokens":300,"output_tokens":10,"total_tokens":1010},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"cache_write_input_tokens":300,"output_tokens":10,"total_tokens":1010}}}}"#,
+        ], to: file)
+
+        let result = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+        let entry = try XCTUnwrap(result.entries.first)
+        XCTAssertEqual(entry.cacheCreationTokens, 300)
+        XCTAssertEqual(entry.inputTokens, 500)
     }
 
     func testGenerationTimingThresholdsAndAverages() {

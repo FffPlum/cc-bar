@@ -299,6 +299,12 @@ nonisolated struct UsageMessageLedger: Sendable {
         conversations[app]?[conversationKey] != nil
     }
 
+    /// 计入该摘要的对话 key。线性查找，只在扫描发现续接对话时调用。
+    func conversationKey(containing digest: UInt64, app: UsageApp) -> String? {
+        guard known[app]?.contains(digest) == true else { return nil }
+        return conversations[app]?.first { $0.value.contains(digest) }?.key
+    }
+
     /// 指定对话的全部摘要。
     func ids(for conversationKeys: Set<String>, app: UsageApp) -> Set<UInt64> {
         var result = Set<UInt64>()
@@ -351,10 +357,12 @@ nonisolated struct UsageMessageLedgerPayload: Sendable, Codable, Equatable {
 /// v2（Claude / Codex / OpenCode / DSH）：新增首字延迟与输出速度，重建一次给现存日志补上计时。
 /// v2（Pi / Antigravity）：新增输出速度，重建一次给现存日志补上耗时。
 /// v3（Pi）：计时插件的精确计时与请求总耗时分开累计，重建一次把已采集的总耗时标为近似值。
+/// v3（Claude）：跨轮扫描的消息补上计时，识别桌面端续接对话；重建一次补齐现存日志。
+/// v3（Codex）：子智能体消息打断的请求重新计时，读取 `cache_write_input_tokens`；重建一次修正现存日志。
 nonisolated enum UsageStatsRules {
     static let versions: [UsageApp: Int] = [
-        .claude: 2,
-        .codex: 2,
+        .claude: 3,
+        .codex: 3,
         .pi: 3,
         .opencode: 2,
         .dsh: 2,
