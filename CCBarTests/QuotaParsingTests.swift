@@ -193,6 +193,85 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertNil(AntigravityQuotaClient.parseCLI(root: root))
     }
 
+    // MARK: - Antigravity CLI 进程结果判定
+
+    private func antigravityCLIData(_ root: [String: Any]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: root)
+    }
+
+    func testAntigravityCLIAcceptsCompleteJSONWhenProcessTimesOut() throws {
+        let run = AntigravityQuotaClient.CLIRun(
+            data: try antigravityCLIData(antigravityCLIRoot(groups: antigravityGroupsWithArgon())),
+            exitStatus: 143,
+            timedOut: true,
+            drained: true
+        )
+        guard case .success(let snapshot) = AntigravityQuotaClient.evaluateCLIRun(run) else {
+            return XCTFail("超时前已经拿到的完整 JSON 应按成功处理")
+        }
+        XCTAssertEqual(snapshot.weeklyLimit?.id, "gemini-argon-wtu-weekly")
+    }
+
+    func testAntigravityCLIAcceptsCompleteJSONWithNonZeroExit() throws {
+        let run = AntigravityQuotaClient.CLIRun(
+            data: try antigravityCLIData(antigravityCLIRoot(groups: antigravityGroupsWithArgon())),
+            exitStatus: 1,
+            timedOut: false,
+            drained: true
+        )
+        guard case .success = AntigravityQuotaClient.evaluateCLIRun(run) else {
+            return XCTFail("非 0 退出但 JSON 完整时仍应接受")
+        }
+    }
+
+    func testAntigravityCLIRejectsTruncatedJSONAfterTimeout() throws {
+        let full = try antigravityCLIData(antigravityCLIRoot(groups: antigravityGroupsWithArgon()))
+        let run = AntigravityQuotaClient.CLIRun(
+            data: full.prefix(full.count / 2),
+            exitStatus: 143,
+            timedOut: true,
+            drained: false
+        )
+        guard case .failure(.transport) = AntigravityQuotaClient.evaluateCLIRun(run) else {
+            return XCTFail("半截 JSON 不能当成成功")
+        }
+    }
+
+    func testAntigravityCLIReportsRateLimitWithNonZeroExit() throws {
+        var root = antigravityCLIRoot(groups: [])
+        root["status"] = "ERROR"
+        root["response"] = "RESOURCE_EXHAUSTED: quota rate limit"
+        let run = AntigravityQuotaClient.CLIRun(
+            data: try antigravityCLIData(root),
+            exitStatus: 1,
+            timedOut: false,
+            drained: true
+        )
+        guard case .failure(.http(let code, _)) = AntigravityQuotaClient.evaluateCLIRun(run) else {
+            return XCTFail("应识别为 429")
+        }
+        XCTAssertEqual(code, 429)
+    }
+
+    func testAntigravityCLICompleteSuccessWithoutGroupsIsDecodeFailure() throws {
+        let run = AntigravityQuotaClient.CLIRun(
+            data: try antigravityCLIData(antigravityCLIRoot(groups: [])),
+            exitStatus: 0,
+            timedOut: false,
+            drained: true
+        )
+        guard case .failure(.decode) = AntigravityQuotaClient.evaluateCLIRun(run) else {
+            return XCTFail("没有额度分组时应判为数据无法识别")
+        }
+    }
+
+    func testAntigravityCLILaunchFailureIsTransport() {
+        let run = AntigravityQuotaClient.CLIRun(data: nil, exitStatus: nil, timedOut: false, drained: false)
+        guard case .failure(.transport) = AntigravityQuotaClient.evaluateCLIRun(run) else {
+            return XCTFail("进程没起来时应为传输失败")
+        }
+    }
+
     func testAntigravityDisabledOrInvalidArgonDoesNotReplaceSharedWeeklyQuota() throws {
         for groups in [
             antigravityGroupsWithArgon(disabled: true),

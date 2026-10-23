@@ -741,7 +741,7 @@ nonisolated enum AntigravityQuotaClient {
             case .missing:
                 return .signedOut
             case .unreadable(let error):
-                recordFailure(error, sessionKey: sessionKey)
+                recordFailure(error, sessionKey: sessionKey, detail: "keychain read failed")
                 return .failure(error)
             }
             if token.signature == signedOutSignature { return .signedOut }
@@ -755,25 +755,14 @@ nonisolated enum AntigravityQuotaClient {
                     markSignedOut(token.signature)
                     return .signedOut
                 case .unknown(let error):
-                    recordFailure(error, sessionKey: sessionKey)
+                    recordFailure(error, sessionKey: sessionKey, detail: "sign-in probe failed")
                     return .failure(error)
                 }
             }
-            let result = await Task.detached(priority: .utility) { () -> Result<QuotaSnapshot, QuotaError> in
-                guard let output = AntigravityQuotaClient.runCLI(executable: executable, environment: environment),
-                      let root = try? JSONSerialization.jsonObject(with: output.data) as? [String: Any]
-                else { return .failure(.transport("Antigravity CLI quota unavailable")) }
-                if root["status"] as? String != "SUCCESS" {
-                    let message = (root["response"] as? String ?? "").lowercased()
-                    if ["429", "rate limit", "rate_limit", "resource_exhausted"].contains(where: message.contains) {
-                        return .failure(.http(429, "Antigravity CLI quota is rate limited"))
-                    }
-                }
-                guard output.succeeded, let snapshot = AntigravityQuotaClient.parseCLI(root: root) else {
-                    return .failure(.decode("Antigravity CLI quota unavailable"))
-                }
-                return .success(snapshot)
+            let run = await Task.detached(priority: .utility) {
+                AntigravityQuotaClient.runCLI(executable: executable, environment: environment)
             }.value
+            let result = AntigravityQuotaClient.evaluateCLIRun(run)
             switch result {
             case .failure(let error):
                 // 续期判断为可用，agy 却没能续期（凭据仍过期）：同样按登录失效处理，不再调用它。
@@ -781,7 +770,7 @@ nonisolated enum AntigravityQuotaClient {
                     markSignedOut(current.signature)
                     return .signedOut
                 }
-                recordFailure(error, sessionKey: sessionKey)
+                recordFailure(error, sessionKey: sessionKey, detail: AntigravityQuotaClient.describe(run))
                 return .failure(error)
             case .success(let snapshot):
                 failedSession = nil
@@ -790,10 +779,13 @@ nonisolated enum AntigravityQuotaClient {
             }
         }
 
-        private func recordFailure(_ error: QuotaError, sessionKey: String) {
+        private func recordFailure(_ error: QuotaError, sessionKey: String, detail: String? = nil) {
             failedSession = sessionKey
             failedAt = Date()
             lastError = error
+            var message = "antigravity CLI fetch failed: \(Redact.message(error.description))"
+            if let detail, !detail.isEmpty { message += " (\(detail))" }
+            AppLog.warn(.quota, message)
         }
 
         private func markSignedOut(_ signature: String) {
@@ -836,13 +828,48 @@ nonisolated enum AntigravityQuotaClient {
         }.first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 
-    private struct CLIProcessOutput: Sendable {
-        var data: Data
-        var succeeded: Bool
+    /// 一次 agy 调用的进程结果。超时或非 0 退出时也带回已读到的 stdout：
+    /// 只要 JSON 完整，额度数据仍然可用，不因进程没及时退出而丢弃。
+    struct CLIRun: Sendable {
+        /// nil 表示进程没启动，或 stdout 读不出来（超过 1 MiB / 读取失败）。
+        var data: Data?
+        /// nil 表示没能确认进程已经退出。
+        var exitStatus: Int32?
+        var timedOut: Bool
+        /// 读取线程是否在超时内排空；false 时 `data` 可能不完整。
+        var drained: Bool
     }
 
-    /// 持续排空 stdout，避免管道写满；超时后终止进程，拒收超限或不完整输出。
-    private static func runCLI(executable: URL, environment: [String: String]) -> CLIProcessOutput? {
+    /// 按 stdout 判定成败，不要求进程正常退出：agy 可能已经输出完整 JSON，
+    /// 却因为收尾、争锁迟迟不退。JSON 不完整时解析不出来，不会把半截数据当成功。
+    static func evaluateCLIRun(_ run: CLIRun) -> Result<QuotaSnapshot, QuotaError> {
+        guard let data = run.data,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return .failure(.transport("Antigravity CLI quota unavailable")) }
+        if root["status"] as? String != "SUCCESS" {
+            let message = (root["response"] as? String ?? "").lowercased()
+            if ["429", "rate limit", "rate_limit", "resource_exhausted"].contains(where: message.contains) {
+                return .failure(.http(429, "Antigravity CLI quota is rate limited"))
+            }
+        }
+        guard let snapshot = parseCLI(root: root) else {
+            return .failure(.decode("Antigravity CLI quota unavailable"))
+        }
+        return .success(snapshot)
+    }
+
+    /// 失败日志用：只描述进程层面发生了什么，不打印 stdout（可能含账号相关内容）。
+    private static func describe(_ run: CLIRun) -> String {
+        guard let exitStatus = run.exitStatus else { return "did not start or exit" }
+        var parts = ["exit \(exitStatus)"]
+        if run.timedOut { parts.append("timed out") }
+        if !run.drained { parts.append("stdout not drained") }
+        if run.data == nil { parts.append("no readable stdout") }
+        return parts.joined(separator: ", ")
+    }
+
+    /// 持续排空 stdout，避免管道写满；超时后终止进程，但保留已经读到的输出。
+    private static func runCLI(executable: URL, environment: [String: String]) -> CLIRun {
         let process = Process()
         process.executableURL = executable
         process.arguments = ["-p", "/quota", "--output-format", "json", "--log-file", "/dev/null"]
@@ -861,7 +888,7 @@ nonisolated enum AntigravityQuotaClient {
         do {
             try process.run()
         } catch {
-            return nil
+            return CLIRun(data: nil, exitStatus: nil, timedOut: false, drained: false)
         }
         output.fileHandleForWriting.closeFile()
         let buffer = CLIOutput()
@@ -880,7 +907,7 @@ nonisolated enum AntigravityQuotaClient {
                 buffer.invalidate()
             }
         }
-        let timedOut = completed.wait(timeout: .now() + 20) == .timedOut
+        let timedOut = completed.wait(timeout: .now() + 30) == .timedOut
         if timedOut {
             process.terminate()
             if completed.wait(timeout: .now() + 0.5) == .timedOut {
@@ -890,8 +917,8 @@ nonisolated enum AntigravityQuotaClient {
         }
         let drained = reader.wait(timeout: .now() + 1) == .success
         output.fileHandleForReading.closeFile()
-        guard !timedOut, drained, !process.isRunning, let data = buffer.result() else { return nil }
-        return CLIProcessOutput(data: data, succeeded: process.terminationStatus == 0)
+        let exitStatus: Int32? = process.isRunning ? nil : process.terminationStatus
+        return CLIRun(data: buffer.result(), exitStatus: exitStatus, timedOut: timedOut, drained: drained)
     }
 
     nonisolated private final class CLIOutput: @unchecked Sendable {
