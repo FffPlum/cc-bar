@@ -462,6 +462,49 @@ final class UsageHistoryRecoveryTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: env.store.currentFileURL.path))
     }
 
+    /// 升级前的版本遇到旧版本、损坏或缺失的主日缓存会丢弃并全量重扫；迁移沿用该行为，不能停止采集。
+    func testStaleLegacyDayRollupFallsBackToFullRescan() async throws {
+        let source = environment!
+        _ = try await seedAndScan(source)
+        let original = try committedSnapshot(source)
+        for mode in ["oldVersion", "corrupt", "missing"] {
+            let target = try UsageTestEnvironment(name: "stale-legacy-\(mode)")
+            try target.copySources(from: source)
+            try writeLegacy(target, from: original)
+            let url = target.legacyPath("usage-rollup.json")
+            switch mode {
+            case "oldVersion":
+                var stale = original.usageRollup
+                stale.version = UsageRollupPayload.currentVersion - 1
+                try UsageRollupCache.save(stale, in: target.supportDirectory)
+            case "corrupt":
+                try Data("broken".utf8).write(to: url)
+            default:
+                try FileManager.default.removeItem(at: url)
+            }
+            let legacyBytes = target.fileBytes(url)
+            let scanStateBytes = target.fileBytes(target.cachePath("scan-state.json"))
+
+            let service = target.makeService()
+            await target.bootstrap(service)
+            await service.scanNow()
+            XCTAssertEqual(service.historyRecoveryState, .complete, mode)
+            XCTAssertNil(service.historyRecoveryNotice, mode)
+            XCTAssertNil(service.lastError, mode)
+            XCTAssertEqual(target.dayVector(service.aggregator.snapshotLocal()), target.dayVector(original.usageRollup.buckets), mode)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: target.store.currentFileURL.path), mode)
+            XCTAssertEqual(target.fileBytes(url), legacyBytes, mode)
+            XCTAssertEqual(target.fileBytes(target.cachePath("scan-state.json")), scanStateBytes, mode)
+
+            // 重启读新快照，不再回读旧文件，也不重复累计。
+            let restarted = target.makeService()
+            await target.bootstrap(restarted)
+            await restarted.scanNow()
+            XCTAssertEqual(restarted.historyRecoveryState, .complete, mode)
+            XCTAssertEqual(target.dayVector(restarted.aggregator.snapshotLocal()), target.dayVector(original.usageRollup.buckets), mode)
+        }
+    }
+
     func testInvalidConversationMigrationPausesUntilVerifiedAndSurvivesRestart() async throws {
         let source = environment!
         _ = try await seedAndScan(source)

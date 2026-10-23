@@ -475,6 +475,13 @@ final class UsageService {
                 degradeReasons: snapshot.degradeReasons,
                 diagnostic: diagnostic
             )
+        case .discarded(let detail):
+            // 旧文件不动；首次提交写入 established 后不再回读它们。
+            return UsageHistoryLoad(
+                snapshot: nil,
+                source: .firstInstall,
+                diagnostic: diagnostic.map { "\($0); legacy \(detail), full rescan" } ?? "legacy \(detail), full rescan"
+            )
         case .unusable(let reason, let detail):
             return UsageHistoryLoad(
                 snapshot: nil,

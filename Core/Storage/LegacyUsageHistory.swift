@@ -2,8 +2,8 @@ import Foundation
 
 /// 旧缓存文件（本计划基线的分散格式）的读取结论。
 ///
-/// 必须把「文件不存在」「版本不受支持」「文件损坏」分开：只有第一种是首装，
-/// 后两种被当成空数据会把历史静默替换掉。
+/// 必须把「文件不存在」「版本不受支持」「文件损坏」分开：迁移时按各自规则处理，
+/// 不能一律当成空数据。主日缓存的处理见 `LegacyUsageHistoryOutcome`。
 nonisolated enum LegacyUsageHistoryFileProbe<Value: Sendable>: Sendable {
     case missing
     case valid(Value)
@@ -92,7 +92,10 @@ nonisolated enum LegacyUsageHistoryOutcome: Sendable {
     case firstInstall
     /// 导入成功。可能带受限标记（历史可用但进度 / 周期 / DSH 之一不可信）。
     case imported(UsageSnapshot)
-    /// 存在旧文件但无法作为历史导入（版本不支持或损坏）。原文件保持不动。
+    /// 主日缓存是低于当前的旧版本、已损坏、为空或缺失（只剩其他旧文件）。升级前的版本遇到
+    /// 这些情况同样丢弃缓存、从本机日志全量重扫，这里沿用该行为：按首装采集，原文件保持不动。
+    case discarded(detail: String)
+    /// 主日缓存版本高于当前版本，无法解释。原文件保持不动。
     case unusable(reason: UsageSnapshotDegradeReason, detail: String)
 
     var snapshot: UsageSnapshot? {
@@ -143,20 +146,22 @@ nonisolated enum LegacyUsageHistoryImport {
         case .valid:
             // 空 generation 的 payload 等价于「没有这份历史」，不是可导入数据。
             day = nil
+        case .unsupportedVersion(let version) where version < UsageRollupPayload.currentVersion:
+            return .discarded(detail: "usage-rollup version \(version)")
         case .unsupportedVersion(let version):
             return .unusable(reason: .legacyDayUnsupportedVersion, detail: "usage-rollup version \(version)")
         case .corrupt:
-            return .unusable(reason: .legacyDayUnusable, detail: "usage-rollup unreadable")
+            return .discarded(detail: "usage-rollup unreadable")
         case .missing:
             day = nil
         }
 
         guard let day else {
-            // 主日历史不可用：不能凭周期或 DSH 拼一份「完整历史」出来。
+            // 主日历史不可用：不能凭周期或 DSH 拼一份「完整历史」出来，只能全量重扫。
             if LegacyUsageHistoryReader.fileExists(at: locations.usageRollupURL) {
-                return .unusable(reason: .legacyDayUnusable, detail: "usage-rollup unusable")
+                return .discarded(detail: "usage-rollup empty")
             }
-            return .unusable(reason: .legacyDayUnusable, detail: "usage-rollup missing")
+            return .discarded(detail: "usage-rollup missing")
         }
 
         var reasons: [UsageSnapshotDegradeReason] = []
