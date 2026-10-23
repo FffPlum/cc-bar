@@ -1231,7 +1231,11 @@ private struct StatsOverviewScope: Hashable {
 private struct StatsUsageErrorBanner: View {
     @Environment(AppState.self) private var appState
 
-    private func historyMessage(notice: UsageHistoryRecoveryNotice?, hasError: Bool) -> String {
+    private func historyMessage(
+        notice: UsageHistoryRecoveryNotice?,
+        hasError: Bool,
+        logReadIssue: UsageLogReadIssue?
+    ) -> String {
         if notice?.isUnavailable == true {
             return tr(
                 "Local usage history could not be loaded, so new usage is paused. Files are untouched; restore a backup and restart CCBar.",
@@ -1255,6 +1259,16 @@ private struct StatsUsageErrorBanner: View {
             return tr("DSH session details are unavailable, so DSH usage is paused. Existing data kept; other services are not affected.",
                       "DSH 会话明细不可用，已暂停统计 DSH。现有数据保留，其他服务不受影响。")
         }
+        // 已知是哪些日志读不出来时说清来源、数量和修复方式；其他错误仍用通用说明。
+        if hasError, let issue = logReadIssue {
+            let cause = issue.localizedCause
+            if let fix = issue.localizedFix {
+                return tr("Usage statistics are incomplete: \(cause). Existing data kept; \(fix), then recalculate in Settings.",
+                          "用量统计不完整：\(cause)。现有数据保留，\(fix)后到设置中重新计算。")
+            }
+            return tr("Usage statistics are incomplete: \(cause). Existing data kept; retry later or recalculate in Settings.",
+                      "用量统计不完整：\(cause)。现有数据保留，可稍后重试或到设置中重新计算。")
+        }
         return hasError
             ? tr("Usage statistics may be incomplete. Existing data kept; retry later or recalculate in Settings.",
                  "用量统计可能不完整。现有数据保留，可稍后重试或到设置中重新计算。")
@@ -1270,7 +1284,11 @@ private struct StatsUsageErrorBanner: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(historyMessage(notice: notice, hasError: error != nil))
+                    Text(historyMessage(
+                        notice: notice,
+                        hasError: error != nil,
+                        logReadIssue: appState.usageService.logReadIssue
+                    ))
                     .font(.system(size: 11.5))
                     .fixedSize(horizontal: false, vertical: true)
                     if let notice, let restoredAt = notice.restoredFromPreviousAt {

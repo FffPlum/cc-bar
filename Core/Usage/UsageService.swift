@@ -79,6 +79,59 @@ nonisolated struct UsageHistoryLoad: Sendable {
     var diagnostic: String?
 }
 
+/// Claude / Codex 存在却读不出来的日志，供统计页横幅与设置页重算提示说明原因和下一步。
+nonisolated struct UsageLogReadIssue: Sendable, Equatable {
+    /// 受影响的服务，按 Claude Code、Codex 排列。
+    var apps: [UsageApp]
+    var count: Int
+    /// 所有失败原因相同时给出；原因混合时为 nil。
+    var reason: LogReadFailure.Reason?
+
+    init?(claude: [LogReadFailure], codex: [LogReadFailure]) {
+        let failures = claude + codex
+        guard !failures.isEmpty else { return nil }
+        apps = (claude.isEmpty ? [] : [.claude]) + (codex.isEmpty ? [] : [.codex])
+        count = failures.count
+        let reasons = Set(failures.map(\.reason))
+        reason = reasons.count == 1 ? reasons.first : nil
+    }
+}
+
+extension UsageLogReadIssue {
+    /// 结果短句，例如「Claude Code 有 3 个日志没有读取权限」，不含句号。
+    @MainActor var localizedCause: String {
+        let zhNames = apps.map(Self.name).joined(separator: "、")
+        let enNames = apps.map(Self.name).joined(separator: " and ")
+        let files = count == 1 ? "log file" : "log files"
+        switch reason {
+        case .permissionDenied:
+            return tr("\(count) \(enNames) \(files) \(count == 1 ? "lacks" : "lack") read permission",
+                      "\(zhNames) 有 \(count) 个日志没有读取权限")
+        case .decompressFailed:
+            return tr("\(count) compressed \(enNames) \(files) can't be decompressed",
+                      "\(zhNames) 有 \(count) 个压缩日志无法解压")
+        case .directoryUnavailable:
+            return tr("the \(enNames) log folder can't be opened", "\(zhNames) 的日志目录无法打开")
+        case .readFailed, nil:
+            return tr("\(count) \(enNames) \(files) couldn't be read", "\(zhNames) 有 \(count) 个日志读取失败")
+        }
+    }
+
+    /// 用户能自己做的修复动作；原因不明（磁盘 I/O、原因混合）时为 nil，只能稍后重试。
+    @MainActor var localizedFix: String? {
+        switch reason {
+        case .permissionDenied: return tr("fix the file permissions", "修复文件权限")
+        case .decompressFailed: return tr("move the damaged files away", "移走损坏的文件")
+        case .directoryUnavailable: return tr("check the log folder", "检查日志目录")
+        case .readFailed, nil: return nil
+        }
+    }
+
+    private static func name(_ app: UsageApp) -> String {
+        app == .claude ? "Claude Code" : "Codex"
+    }
+}
+
 /// 一次候选重算的完整结果。
 private struct RebuildCandidate {
     var dayBuckets: [UsageBucket]
@@ -114,6 +167,10 @@ final class UsageService {
     private(set) var isRefreshingPricingCatalog = false
     private(set) var lastScanAt: Date?
     private(set) var lastError: String?
+    /// Claude / Codex 读不出来的日志汇总，随每轮增量扫描和重算更新；没有失败时为 nil。
+    private(set) var logReadIssue: UsageLogReadIssue?
+    /// 上一次写进诊断日志的读取失败。与本轮相同时不再记录，避免每轮扫描重复写同样的内容。
+    private var loggedLogReadFailures: [LogReadFailure] = []
     /// 进行中的全量重算 / 周期重建进度；空闲时为 nil。设置页"重新计算"期间展示。
     private(set) var scanProgress: ScanProgress?
 
@@ -1870,6 +1927,7 @@ final class UsageService {
         let dsh = await dshTask
         let antigravity = await antigravityTask
 
+        recordLogReadFailures(claude: claude.readFailures, codex: codex.readFailures)
         var incomplete: [String] = []
         if claude.failedFileCount > 0 { incomplete.append("Claude Code") }
         if codex.failedFileCount > 0 { incomplete.append("Codex") }
@@ -2170,6 +2228,7 @@ final class UsageService {
         let failedFileCount = claude.failedFileCount + codex.failedFileCount
             + dsh.failedFileCount + dsh.failedDirectoryCount + dsh.duplicateSessionCount
             + antigravity.failedDatabaseCount
+        recordLogReadFailures(claude: claude.readFailures, codex: codex.readFailures)
 
         aggregator.ingestLocal(claude.entries)
         aggregator.ingestLocal(codex.entries)
@@ -2626,6 +2685,25 @@ final class UsageService {
             return old
         }
         return legacy
+    }
+
+    /// 更新读取失败汇总，并把失败文件写进诊断日志：路径经 `Redact.path` 脱敏（项目名折哈希、
+    /// 文件名只留后缀），附失败原因。与上次记录相同时跳过，失败消失时记一行恢复。
+    private func recordLogReadFailures(claude: [LogReadFailure], codex: [LogReadFailure]) {
+        logReadIssue = UsageLogReadIssue(claude: claude, codex: codex)
+        let failures = claude + codex
+        guard failures != loggedLogReadFailures else { return }
+        loggedLogReadFailures = failures
+        guard !failures.isEmpty else {
+            AppLog.info(.usage, "usage log read failures cleared")
+            return
+        }
+        let limit = 20
+        let listed = failures.prefix(limit)
+            .map { "\($0.reason.rawValue) \(Redact.path($0.path))" }
+            .joined(separator: "; ")
+        let more = failures.count > limit ? "; +\(failures.count - limit) more" : ""
+        AppLog.warn(.usage, "usage log read failures claude=\(claude.count) codex=\(codex.count): \(listed)\(more)")
     }
 
     /// 回滚到上一份成功提交的完整快照。没有提交过（首装）时清空内存。

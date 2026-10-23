@@ -1405,6 +1405,15 @@ struct SettingsRootView: View {
                 "未生效：重算结果与已有数据不一致，原数据未改动"
             )
         case .rejectedIncompleteSources:
+            // 重算扫描会刷新 Claude / Codex 的读取失败汇总；有汇总时说清来源、原因和修复方式。
+            if let issue = appState.usageService.logReadIssue {
+                let cause = issue.localizedCause
+                if let fix = issue.localizedFix {
+                    return tr("Not applied: \(cause). Existing data kept; \(fix), then try again.",
+                              "未生效：\(cause)。原数据未改动，\(fix)后再试")
+                }
+                return tr("Not applied: \(cause). Existing data kept.", "未生效：\(cause)，原数据未改动")
+            }
             return tr(
                 "Not applied: some logs could not be read. Existing data kept.",
                 "未生效：部分日志读取失败，原数据未改动"

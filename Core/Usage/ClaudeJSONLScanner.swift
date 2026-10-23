@@ -11,6 +11,8 @@ enum ClaudeJSONLScanner {
         var filesScanned: Int
         var linesParsed: Int
         var failedFileCount: Int
+        /// 计入 `failedFileCount` 的文件与原因，供诊断日志和界面提示。
+        var readFailures: [LogReadFailure] = []
         /// 本轮计入的消息 ID 摘要，按对话 key 分组（见 `UsageMessageLedger`）。
         var ledger: [String: [UInt64]] = [:]
         /// 有文件末尾的消息还没写完、留到下一轮再读。文件之后可能不再写入，调用方据此安排下一轮扫描。
@@ -63,6 +65,9 @@ enum ClaudeJSONLScanner {
         var entries: [UsageEntry] = []
         var linesParsed = 0
         var failedFileCount = enumeration.accessFailed ? 1 : 0
+        var readFailures: [LogReadFailure] = enumeration.accessFailed
+            ? [LogReadFailure(path: root.path, reason: .directoryUnavailable)]
+            : []
         var seeds: [String: ConversationSeed] = [:]
         var projectCandidates: [String: [ProjectCandidate]] = [:]
         // 跨文件全局去重：同一 message.id 在 sidechain / subagent 文件中会反复出现。
@@ -225,6 +230,7 @@ enum ClaudeJSONLScanner {
             case .failed:
                 newState[path] = state
                 failedFileCount += 1
+                readFailures.append(.classify(url))
                 continue
             }
             // 文件已有一段时间没再写入，末尾的消息不会再追加：一轮对话的最终回答后面常常
@@ -390,6 +396,7 @@ enum ClaudeJSONLScanner {
             filesScanned: files.count,
             linesParsed: linesParsed,
             failedFileCount: failedFileCount,
+            readFailures: readFailures,
             ledger: ledger,
             hasDeferredMessages: hasDeferredMessages
         )

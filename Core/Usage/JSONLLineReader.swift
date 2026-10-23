@@ -451,6 +451,36 @@ struct JSONLFileDescriptor: Sendable {
     var path: String { url.path }
 }
 
+/// 存在却读不出来的日志文件（或日志根目录）。只在读取已经失败后构造，供诊断日志与界面提示说明原因。
+nonisolated struct LogReadFailure: Sendable, Equatable {
+    enum Reason: String, Sendable {
+        /// 当前用户没有读取权限，例如用 sudo 运行过留下的 root 文件。
+        case permissionDenied
+        /// `.jsonl.zst` 有读取权限但解压失败：压缩日志损坏或不完整。
+        case decompressFailed
+        /// 根目录存在但不是目录，或枚举器无法打开。
+        case directoryUnavailable
+        /// 其他读取错误，例如磁盘 I/O 错误。
+        case readFailed
+    }
+
+    var path: String
+    var reason: Reason
+
+    /// 按失败后的文件状态归因：只在失败路径上多做一次访问检查。
+    static func classify(_ url: URL) -> LogReadFailure {
+        let reason: Reason
+        if !FileManager.default.isReadableFile(atPath: url.path) {
+            reason = .permissionDenied
+        } else if JSONLDirectoryEnumerator.isZstd(url) {
+            reason = .decompressFailed
+        } else {
+            reason = .readFailed
+        }
+        return LogReadFailure(path: url.path, reason: reason)
+    }
+}
+
 /// 递归列出某目录下后缀为 .jsonl 的文件，并同时取得增量扫描所需元数据。
 enum JSONLDirectoryEnumerator {
     struct Result: Sendable {

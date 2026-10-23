@@ -36,6 +36,9 @@ enum CodexJSONLScanner {
         var filesScanned: Int
         var linesParsed: Int
         var failedFileCount: Int
+        /// 计入 `failedFileCount` 的可重试读取失败与原因，供诊断日志和界面提示；
+        /// 历史证据与边界不符属于内容层面的确定结果，不在此列。
+        var readFailures: [LogReadFailure] = []
         /// 仅 `historicalBoundary` 模式：根目录不可访问、文件读取失败或扫描中被移走的数量。
         /// 这类失败可重试，调用方不能把缺失的证据当成确定结果提交。
         var historicalTransientFailureCount = 0
@@ -89,13 +92,17 @@ enum CodexJSONLScanner {
     ) async -> Result {
         var filesByID: [String: JSONLFileDescriptor] = [:]
         var failedRootCount = 0
+        var readFailures: [LogReadFailure] = []
         for root in roots {
             let enumeration = JSONLDirectoryEnumerator.enumerate(
                 at: root,
                 minimumMtime: minimumMtime,
                 includeZstd: true
             )
-            if enumeration.accessFailed { failedRootCount += 1 }
+            if enumeration.accessFailed {
+                failedRootCount += 1
+                readFailures.append(LogReadFailure(path: root.path, reason: .directoryUnavailable))
+            }
             for file in enumeration.files {
                 let id = conversationID(from: file.url) ?? file.path
                 if let historicalBoundary, (historicalBoundary[id]?.offset ?? 0) == 0 { continue }
@@ -185,7 +192,10 @@ enum CodexJSONLScanner {
                 }
                 newState[result.stateKey] = result.state
                 linesParsed += result.linesParsed
-                if result.readFailed { failedFileCount += 1 }
+                if result.readFailed {
+                    failedFileCount += 1
+                    if !result.evidenceRejected { readFailures.append(.classify(files[item.index].url)) }
+                }
                 // 去重放在合并阶段：单文件解析是并发的，不能共享 seen 集合；
                 // batchResults 已按文件原始顺序排好，这里的插入顺序仍是确定的。
                 for pending in result.entries {
@@ -243,6 +253,7 @@ enum CodexJSONLScanner {
             filesScanned: files.count,
             linesParsed: linesParsed,
             failedFileCount: failedFileCount,
+            readFailures: readFailures,
             historicalTransientFailureCount: historicalTransientFailureCount,
             ledger: ledger
         )
