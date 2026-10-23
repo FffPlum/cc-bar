@@ -461,6 +461,9 @@ final class ScannerIncrementalTests: XCTestCase {
             parentEntries.allSatisfy { $0.timestamp < Date(timeIntervalSince1970: 1_784_161_800) },
             "保留的应是父文件里带原始时间的记录，而不是 fork 时刻的副本"
         )
+        let seeds = Dictionary(uniqueKeysWithValues: result.conversationSeeds.map { ($0.key, $0) })
+        XCTAssertNil(seeds["codex:\(Self.forkChildID)"]?.continuationKey, "手动 fork 不是续接段")
+        XCTAssertNil(seeds["codex:\(Self.forkParentID)"]?.continuationKey)
     }
 
     /// 扫描顺序不能影响结果：父会话按 UUIDv7 排序永远先于它的 fork。
@@ -517,6 +520,104 @@ final class ScannerIncrementalTests: XCTestCase {
 
         XCTAssertEqual(second.entries.count, 2, "重放段已在上一轮记入 seen，本轮只应收到 fork 后的新调用")
         XCTAssertTrue(second.entries.allSatisfy { $0.conversationKey == "codex:\(Self.forkChildID)" })
+    }
+
+    // MARK: - Codex 分页历史分段
+
+    private static let pagedThreadID = "019dbb00-0000-7000-8000-00000000000a"
+    private static let pagedSegmentID = "019dbb00-0000-7000-8000-00000000000b"
+
+    private static func pagedOriginalBody() -> String {
+        """
+        {"timestamp":"2026-07-16T03:00:00Z","type":"session_meta","payload":{"id":"\(pagedThreadID)","cwd":"/tmp/ccbar-fixture"}}
+        {"timestamp":"2026-07-16T03:00:01Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}
+        {"timestamp":"2026-07-16T03:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110}}}}
+
+        """
+    }
+
+    /// 分页历史的续写分段：文件名末尾是分段自己的 UUID，首行 session_meta 的 id 仍是原对话，
+    /// 并带 `history_base.thread_id` 指回它。
+    private static func pagedSegmentBody() -> String {
+        """
+        {"timestamp":"2026-07-16T04:00:00Z","type":"session_meta","payload":{"id":"\(pagedThreadID)","session_id":"\(pagedThreadID)","cwd":"/tmp/ccbar-fixture","history_mode":"paginated","history_base":{"thread_id":"\(pagedThreadID)","end_ordinal_exclusive":1,"end_byte_offset":400}}}
+        {"timestamp":"2026-07-16T04:00:01Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}
+        {"timestamp":"2026-07-16T04:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":250,"cached_input_tokens":0,"output_tokens":30,"reasoning_output_tokens":0,"total_tokens":280},"last_token_usage":{"input_tokens":150,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":170}}}}
+
+        """
+    }
+
+    @discardableResult
+    private func writePaginatedSegment(in directory: URL) throws -> URL {
+        let url = directory.appendingPathComponent(
+            "rollout-2026-07-16T04-00-00-\(Self.pagedThreadID)_\(Self.pagedSegmentID).jsonl"
+        )
+        try Data(Self.pagedSegmentBody().utf8).write(to: url)
+        return url
+    }
+
+    /// 同一对话续写进新的 rollout 分段：文件名末尾是分段 id，首行 session_meta 仍是原对话。
+    /// 分段要作为续接段挂回原对话（标题用原对话的 thread name），而不是无标题、无项目的新对话。
+    func testCodexPaginatedSegmentContinuesOriginalThread() async throws {
+        let sessions = tempDir.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        let original = sessions.appendingPathComponent("rollout-2026-07-16T03-00-00-\(Self.pagedThreadID).jsonl")
+        try Data(Self.pagedOriginalBody().utf8).write(to: original)
+        _ = try writePaginatedSegment(in: sessions)
+
+        let titles = [Self.pagedThreadID: "确认 v1 是否开发完成"]
+        let first = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: titles)
+        let seeds = Dictionary(uniqueKeysWithValues: first.conversationSeeds.map { ($0.key, $0) })
+        let segmentSeed = try XCTUnwrap(seeds["codex:\(Self.pagedSegmentID)"])
+        XCTAssertEqual(segmentSeed.continuationKey, "codex:\(Self.pagedThreadID)")
+        XCTAssertEqual(segmentSeed.title, "确认 v1 是否开发完成", "分段没有用户消息时用原对话标题兜底")
+        XCTAssertEqual(segmentSeed.project.name, "ccbar-fixture", "分段的 cwd 要采信")
+        XCTAssertNil(seeds["codex:\(Self.pagedThreadID)"]?.continuationKey, "原对话本身不是续接段")
+        XCTAssertEqual(first.newState[Self.pagedSegmentID]?.codexContinuationOf, Self.pagedThreadID)
+        XCTAssertEqual(first.entries.filter { $0.conversationKey == "codex:\(Self.pagedSegmentID)" }.count, 1,
+                       "分段用量仍按自身 key 记账，合并只发生在展示层")
+
+        // 文件不变时从保存的状态带出续接关系与标题。
+        let second = await CodexJSONLScanner.scan(previous: first.newState, roots: [sessions], indexedTitles: titles)
+        let unchangedSeed = try XCTUnwrap(second.conversationSeeds.first { $0.key == "codex:\(Self.pagedSegmentID)" })
+        XCTAssertEqual(unchangedSeed.continuationKey, "codex:\(Self.pagedThreadID)")
+        XCTAssertEqual(unchangedSeed.title, "确认 v1 是否开发完成")
+    }
+
+    /// 旧版本扫过的分段没有记录续接关系，offset 又已在文件中段：升级后靠首行补读补上。
+    func testCodexPaginatedSegmentBackfillsContinuationOnResume() async throws {
+        let sessions = tempDir.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        let original = sessions.appendingPathComponent("rollout-2026-07-16T03-00-00-\(Self.pagedThreadID).jsonl")
+        try Data(Self.pagedOriginalBody().utf8).write(to: original)
+        let segment = try writePaginatedSegment(in: sessions)
+
+        let first = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+        var stale = first.newState
+        stale[Self.pagedSegmentID]?.codexContinuationOf = nil
+        stale[Self.pagedSegmentID]?.conversationCwd = ""
+        XCTAssertNil(stale[Self.pagedSegmentID]?.codexContinuationOf, "模拟升级前的旧状态")
+
+        let appended = """
+        {"timestamp":"2026-07-16T04:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":400,"cached_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":0,"total_tokens":450},"last_token_usage":{"input_tokens":150,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":170}}}}
+
+        """
+        let handle = try FileHandle(forWritingTo: segment)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(appended.utf8))
+
+        let second = await CodexJSONLScanner.scan(
+            previous: stale,
+            roots: [sessions],
+            indexedTitles: [Self.pagedThreadID: "确认 v1 是否开发完成"]
+        )
+        XCTAssertEqual(second.entries.count, 1, "只读追加的那一条")
+        XCTAssertEqual(second.newState[Self.pagedSegmentID]?.codexContinuationOf, Self.pagedThreadID)
+        let seed = try XCTUnwrap(second.conversationSeeds.first { $0.key == "codex:\(Self.pagedSegmentID)" })
+        XCTAssertEqual(seed.continuationKey, "codex:\(Self.pagedThreadID)")
+        XCTAssertEqual(seed.title, "确认 v1 是否开发完成")
+        XCTAssertEqual(seed.project.name, "ccbar-fixture", "旧状态里被跳过的 cwd 一并补齐")
     }
 
     // MARK: - Claude

@@ -291,9 +291,10 @@ enum CodexJSONLScanner {
         // mtime 没变 & size 没变 → 跳过，用 state 元数据补种子。
         if boundary == nil, isUnchanged(state, file) {
             if let id = state.conversationID ?? filenameID {
-                // 旧版本扫描过的文件没有记录分支 / 父对话：只读一次首行的 session_meta 补齐，
-                // 读到或确认没有后写回（空串表示已检查），之后不再读。
-                if state.conversationGitBranch == nil || state.conversationParentSession == nil {
+                // 旧版本扫描过的文件没有记录分支 / 父对话 / 续接的原对话：只读一次首行的
+                // session_meta 补齐，读到或确认没有后写回（空串表示已检查），之后不再读。
+                if state.conversationGitBranch == nil || state.conversationParentSession == nil
+                    || state.codexContinuationOf == nil {
                     let meta = firstLineSessionMeta(url: url)
                     if state.conversationGitBranch == nil {
                         state.conversationGitBranch = meta.flatMap(gitBranch(inSessionMeta:)) ?? ""
@@ -301,7 +302,16 @@ enum CodexJSONLScanner {
                     if state.conversationParentSession == nil {
                         state.conversationParentSession = meta.flatMap(parentThreadID(inSessionMeta:)) ?? ""
                     }
+                    if state.codexContinuationOf == nil {
+                        state.codexContinuationOf = meta.flatMap(Self.continuationThreadID(inSessionMeta:)) ?? ""
+                    }
+                    // 旧状态里分段自己的 cwd 可能没记到（首条 session_meta 的 id 与文件名不同，
+                    // 曾被当成重放行跳过），补读首行时一并补齐。
+                    if (state.conversationCwd ?? "").isEmpty {
+                        state.conversationCwd = meta.flatMap { $0["cwd"] as? String } ?? state.conversationCwd
+                    }
                 }
+                let continuation = Self.continuationThread(of: id, in: state)
                 var projectResolver = ConversationProjectResolver()
                 return CodexFileScanResult(
                     stateKey: stateKey,
@@ -312,13 +322,16 @@ enum CodexJSONLScanner {
                         key: "codex:\(id)",
                         id: id,
                         app: .codex,
-                        title: indexedTitles[id] ?? state.fallbackTitle,
+                        title: indexedTitles[id]
+                            ?? continuation.flatMap { indexedTitles[$0] }
+                            ?? state.fallbackTitle,
                         project: projectResolver.resolve(rawPath: state.conversationCwd ?? "", source: .cwd),
                         gitBranch: nonEmpty(state.conversationGitBranch),
                         sourcePath: path,
                         includesSubtasks: false,
                         cacheCreationAvailable: false,
-                        parentKey: nonEmpty(state.conversationParentSession).map { "codex:\($0)" }
+                        parentKey: nonEmpty(state.conversationParentSession).map { "codex:\($0)" },
+                        continuationKey: continuation.map { "codex:\($0)" }
                     ),
                     linesParsed: 0,
                     readFailed: false
@@ -358,6 +371,11 @@ enum CodexJSONLScanner {
         var sessionCwd = state.conversationCwd ?? ""
         var sessionBranch = nonEmpty(state.conversationGitBranch)
         var parentThread = nonEmpty(state.conversationParentSession)
+        // 分页历史分段续接的原对话 id；首行 session_meta 的 `history_base.thread_id`。
+        var continuationOf = nonEmpty(state.codexContinuationOf)
+        // 是否已读过本文件自身的 session_meta。fork 文件里父会话的 session_meta 是原样重放的，
+        // 不能定义元数据；分页分段的首行则相反，靠 `history_base` 认作自身那条（见下方判定）。
+        var sawOwnMeta = !startsFromBeginning
         var fallbackTitle = state.fallbackTitle
         var timing = state.codexTiming ?? CodexTimingState()
         var entries: [PendingCodexEntry] = []
@@ -379,10 +397,19 @@ enum CodexJSONLScanner {
                     if ownSessionID == nil { ownSessionID = metaID }
                     if let metaID { emittingSessionID = metaID }
                     // fork 文件里混着父会话原样重放的 session_meta，只有自身那条能定义会话元数据。
-                    if metaID == nil || metaID == ownSessionID {
+                    // 分页历史的分段反过来：首行 session_meta 的 id 就是原对话（文件名里才是分段 id），
+                    // 它带 `history_base.thread_id` 指回自己，据此认作自身那条。
+                    let historyBase = Self.continuationThreadID(inSessionMeta: payload)
+                    let isOwnMeta = metaID == nil || metaID == ownSessionID
+                        || (!sawOwnMeta && historyBase != nil && historyBase == metaID)
+                    if isOwnMeta {
                         sessionCwd = (payload["cwd"] as? String) ?? sessionCwd
                         sessionBranch = Self.gitBranch(inSessionMeta: payload) ?? sessionBranch
                         parentThread = Self.parentThreadID(inSessionMeta: payload) ?? parentThread
+                        if let historyBase, historyBase != ownSessionID, continuationOf == nil {
+                            continuationOf = historyBase
+                        }
+                        sawOwnMeta = true
                     }
                     continue
                 }
@@ -538,25 +565,41 @@ enum CodexJSONLScanner {
         } else if state.conversationParentSession == nil {
             state.conversationParentSession = firstLineSessionMeta(url: url).flatMap(Self.parentThreadID(inSessionMeta:)) ?? ""
         }
+        // 续接的原对话也一样：分页分段的首行才有 history_base，旧状态没记录时补读一次。
+        if let continuationOf {
+            state.codexContinuationOf = continuationOf
+        } else if startsFromBeginning {
+            state.codexContinuationOf = ""
+        } else if state.codexContinuationOf == nil {
+            let meta = firstLineSessionMeta(url: url)
+            state.codexContinuationOf = meta.flatMap(Self.continuationThreadID(inSessionMeta:)) ?? ""
+            // 旧状态里分段自己的 cwd 也可能没记到，与续接关系一起补齐。
+            if sessionCwd.isEmpty {
+                sessionCwd = meta.flatMap { $0["cwd"] as? String } ?? sessionCwd
+                state.conversationCwd = sessionCwd
+            }
+        }
         state.fallbackTitle = fallbackTitle
 
         var seedKey: String?
         var seed: ConversationSeed?
         if let id = ownSessionID {
             seedKey = "codex:\(id)"
+            let continuation = Self.continuationThread(of: id, in: state)
             var projectResolver = ConversationProjectResolver()
             seed = ConversationSeed(
                 key: seedKey!,
                 id: id,
                 app: .codex,
-                title: indexedTitles[id] ?? fallbackTitle,
+                title: indexedTitles[id] ?? continuation.flatMap { indexedTitles[$0] } ?? fallbackTitle,
                 project: projectResolver.resolve(rawPath: sessionCwd, source: .cwd),
                 gitBranch: sessionBranch,
                 sourcePath: path,
                 includesSubtasks: false,
                 // 由调用方在跨文件去重之后统一补标（见 scan 收尾）。
                 cacheCreationAvailable: false,
-                parentKey: nonEmpty(state.conversationParentSession).map { "codex:\($0)" }
+                parentKey: nonEmpty(state.conversationParentSession).map { "codex:\($0)" },
+                continuationKey: continuation.map { "codex:\($0)" }
             )
         }
         return CodexFileScanResult(
@@ -668,6 +711,8 @@ enum CodexJSONLScanner {
         state.lastCodexTotalUsageSignature = nil
         state.lastCodexEmittingSessionID = nil
         state.codexTiming = nil
+        // 续接的原对话随首行重新判定，避免文件被替换后沿用旧关系。
+        state.codexContinuationOf = nil
     }
 
     /// 模型输出条目；其余条目（用户消息、命令、工具、子代理等）完成后才会发出下一次请求。
@@ -750,6 +795,23 @@ enum CodexJSONLScanner {
                 ?? nonEmpty(spawn?["parent_thread_id"] as? String),
               parent != (payload["id"] as? String) else { return nil }
         return parent
+    }
+
+    /// 分页历史（`history_mode=paginated`）分段文件所指的原对话 id：
+    /// `session_meta.payload.history_base.thread_id`。文件名末尾是分段自己的 UUID，
+    /// 首行 `session_meta` 的 id 仍是原对话；手动 fork 另建 thread 并写 `forked_from_id`，
+    /// 没有 `history_base`，不算续接段。字段缺失时返回 nil。
+    nonisolated static func continuationThreadID(inSessionMeta payload: [String: Any]) -> String? {
+        guard nonEmpty(payload["forked_from_id"] as? String) == nil,
+              let history = payload["history_base"] as? [String: Any]
+        else { return nil }
+        return nonEmpty(history["thread_id"] as? String)
+    }
+
+    /// 分段文件续接的原对话 id；不是分段（或指向自身）时返回 nil。
+    nonisolated static func continuationThread(of id: String, in state: ScanFileState) -> String? {
+        guard let thread = nonEmpty(state.codexContinuationOf), thread != id else { return nil }
+        return thread
     }
 
     private nonisolated static func nonEmpty(_ value: String?) -> String? {

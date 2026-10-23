@@ -335,6 +335,23 @@ final class ProjectUsageTests: XCTestCase {
         XCTAssertNil(CodexJSONLScanner.gitBranch(inSessionMeta: ["cwd": "/x"]))
     }
 
+    // MARK: - Codex 分页历史分段
+
+    func testCodexSessionMetaContinuationThread() {
+        XCTAssertEqual(CodexJSONLScanner.continuationThreadID(inSessionMeta: [
+            "id": "base",
+            "history_mode": "paginated",
+            "history_base": ["thread_id": "base", "end_ordinal_exclusive": 173]
+        ]), "base")
+        XCTAssertNil(CodexJSONLScanner.continuationThreadID(inSessionMeta: ["id": "base"]))
+        XCTAssertNil(CodexJSONLScanner.continuationThreadID(inSessionMeta: [
+            "id": "child", "forked_from_id": "base", "history_base": ["thread_id": "base"]
+        ]), "手动 fork 不算续接段")
+        XCTAssertNil(CodexJSONLScanner.continuationThreadID(inSessionMeta: [
+            "id": "base", "history_base": ["thread_id": ""]
+        ]))
+    }
+
     // MARK: - Codex 子任务并入父对话
 
     func testCodexSessionMetaParentThread() {
