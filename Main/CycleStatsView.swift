@@ -126,7 +126,8 @@ struct QuotaCycleCardsSection: View {
                 ProgressBar(value: usedPercent / 100, tint: color, height: 6)
 
                 HStack(alignment: .firstTextBaseline) {
-                    Text("\(tr("Used", "已用")) \(StatsFormatter.compactToken(summary.totals.totalTokens)) · \(StatsFormatter.tierCostWhole(summary.totals.costUSD, hasUnpricedUsage: summary.totals.hasUnpricedUsage))")
+                    // 只算当前额度段：Claude 周内重置不换周期，重置前的用量不再计入，与进度条对应。
+                    Text("\(tr("Used", "已用")) \(StatsFormatter.compactToken(summary.currentAllowanceTotals.totalTokens)) · \(StatsFormatter.tierCostWhole(summary.currentAllowanceTotals.costUSD, hasUnpricedUsage: summary.currentAllowanceTotals.hasUnpricedUsage))")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
@@ -267,11 +268,11 @@ private func cycleKindShort(_ kind: QuotaLimitKind) -> String {
     }
 }
 
-/// 周期卡主数字：用满预估 `Tokens · 费用`，Tokens 在前；无依据的一侧显示 `—`。
+/// 周期卡主数字：当前额度段的用满预估 `Tokens · 费用`，Tokens 在前；无依据的一侧显示 `—`。
 private func fullUseLine(_ summary: CycleUsageSummary) -> String {
-    let tokens = summary.projectedFullCycleTokens
+    let tokens = summary.estimatedFullAllowanceTokens
         .map { StatsFormatter.compactToken($0) } ?? "—"
-    let cost = summary.projectedFullCycleCostUSD
+    let cost = summary.estimatedFullAllowanceCostUSD
         .map { StatsFormatter.tierCostWhole($0, hasUnpricedUsage: false) } ?? "—"
     return "\(tokens) · \(cost)"
 }

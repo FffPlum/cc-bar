@@ -2624,8 +2624,8 @@ final class QuotaParsingTests: XCTestCase {
             currentAllowanceTotals: totals,
             quality: .exact
         )
-        XCTAssertEqual(summary.projectedFullCycleTokens, 5_000)
-        XCTAssertEqual(summary.projectedFullCycleCostUSD, 200)
+        XCTAssertEqual(summary.estimatedFullAllowanceTokens, 5_000)
+        XCTAssertEqual(summary.estimatedFullAllowanceCostUSD, 200)
         XCTAssertEqual(summary.forecastConfidence, .rough)
 
         var lowUsage = cycle
@@ -2638,8 +2638,8 @@ final class QuotaParsingTests: XCTestCase {
             currentAllowanceTotals: totals,
             quality: .exact
         )
-        XCTAssertEqual(lowSummary.projectedFullCycleTokens, 10_101)
-        if let projectedCost = lowSummary.projectedFullCycleCostUSD {
+        XCTAssertEqual(lowSummary.estimatedFullAllowanceTokens, 10_101)
+        if let projectedCost = lowSummary.estimatedFullAllowanceCostUSD {
             XCTAssertEqual(
                 NSDecimalNumber(decimal: projectedCost).doubleValue,
                 404.04,
@@ -2672,8 +2672,8 @@ final class QuotaParsingTests: XCTestCase {
         )
 
         XCTAssertEqual(summary.forecastObservedPercent, 20)
-        XCTAssertEqual(summary.projectedFullCycleTokens, 5_000)
-        XCTAssertEqual(summary.projectedFullCycleCostUSD, 100)
+        XCTAssertEqual(summary.estimatedFullAllowanceTokens, 5_000)
+        XCTAssertEqual(summary.estimatedFullAllowanceCostUSD, 100)
 
         let incompleteSummary = CycleUsageSummary(
             cycle: cycle,
@@ -2681,8 +2681,8 @@ final class QuotaParsingTests: XCTestCase {
             currentAllowanceTotals: totals,
             quality: .incomplete
         )
-        XCTAssertEqual(incompleteSummary.projectedFullCycleTokens, 5_000)
-        XCTAssertEqual(incompleteSummary.projectedFullCycleCostUSD, 100)
+        XCTAssertEqual(incompleteSummary.estimatedFullAllowanceTokens, 5_000)
+        XCTAssertEqual(incompleteSummary.estimatedFullAllowanceCostUSD, 100)
         XCTAssertEqual(incompleteSummary.forecastConfidence, .rough)
     }
 
@@ -2705,8 +2705,8 @@ final class QuotaParsingTests: XCTestCase {
             currentAllowanceTotals: totals,
             quality: .exact
         )
-        XCTAssertNil(noObservedUsage.projectedFullCycleTokens)
-        XCTAssertNil(noObservedUsage.projectedFullCycleCostUSD)
+        XCTAssertNil(noObservedUsage.estimatedFullAllowanceTokens)
+        XCTAssertNil(noObservedUsage.estimatedFullAllowanceCostUSD)
         XCTAssertNil(noObservedUsage.forecastConfidence)
 
         cycle.latestUsedPercent = 20
@@ -2721,8 +2721,8 @@ final class QuotaParsingTests: XCTestCase {
             currentAllowanceTotals: tokensOnly,
             quality: .exact
         )
-        XCTAssertEqual(noCostBasis.projectedFullCycleTokens, 5_000)
-        XCTAssertNil(noCostBasis.projectedFullCycleCostUSD)
+        XCTAssertEqual(noCostBasis.estimatedFullAllowanceTokens, 5_000)
+        XCTAssertNil(noCostBasis.estimatedFullAllowanceCostUSD)
 
         let noTokenBasis = CycleUsageSummary(
             cycle: cycle,
@@ -2730,8 +2730,8 @@ final class QuotaParsingTests: XCTestCase {
             currentAllowanceTotals: .zero,
             quality: .exact
         )
-        XCTAssertNil(noTokenBasis.projectedFullCycleTokens)
-        XCTAssertNil(noTokenBasis.projectedFullCycleCostUSD)
+        XCTAssertNil(noTokenBasis.estimatedFullAllowanceTokens)
+        XCTAssertNil(noTokenBasis.estimatedFullAllowanceCostUSD)
         XCTAssertNil(noTokenBasis.forecastConfidence)
     }
 
@@ -2762,8 +2762,8 @@ final class QuotaParsingTests: XCTestCase {
         )
 
         XCTAssertEqual(summary.forecastObservedPercent, 0)
-        XCTAssertNil(summary.projectedFullCycleTokens)
-        XCTAssertNil(summary.projectedFullCycleCostUSD)
+        XCTAssertNil(summary.estimatedFullAllowanceTokens)
+        XCTAssertNil(summary.estimatedFullAllowanceCostUSD)
         XCTAssertNil(summary.forecastConfidence)
     }
 
@@ -2819,12 +2819,12 @@ final class QuotaParsingTests: XCTestCase {
             quality: .incomplete
         )
 
-        XCTAssertEqual(summary.projectedFullCycleTokens, 5_000)
-        XCTAssertEqual(summary.projectedFullCycleCostUSD, 100)
+        XCTAssertEqual(summary.estimatedFullAllowanceTokens, 5_000)
+        XCTAssertEqual(summary.estimatedFullAllowanceCostUSD, 100)
         XCTAssertEqual(summary.forecastConfidence, .rough)
     }
 
-    func testCycleForecastKeepsActualUsageBeforeExtraReset() {
+    func testCycleForecastExcludesUsageBeforeExtraReset() {
         let start = Date(timeIntervalSince1970: 1_000)
         let resetAt = Date(timeIntervalSince1970: 1_500)
         var cycle = cycleRecord(
@@ -2861,8 +2861,8 @@ final class QuotaParsingTests: XCTestCase {
             quality: .estimated
         )
 
-        XCTAssertEqual(summary.projectedFullCycleTokens, 9_000)
-        XCTAssertEqual(summary.projectedFullCycleCostUSD, 90)
+        XCTAssertEqual(summary.estimatedFullAllowanceTokens, 5_000)
+        XCTAssertEqual(summary.estimatedFullAllowanceCostUSD, 50)
     }
 
     @MainActor
@@ -3236,7 +3236,7 @@ final class QuotaParsingTests: XCTestCase {
         ).first)
         XCTAssertEqual(summary.totals.totalTokens, 500)
         XCTAssertEqual(summary.currentAllowanceTotals.totalTokens, 100)
-        XCTAssertEqual(summary.projectedFullCycleTokens, 900)
+        XCTAssertEqual(summary.estimatedFullAllowanceTokens, 500)
     }
 
     func testCycleSummaryDistinguishesEmptyInferredHistory() {
@@ -3249,8 +3249,8 @@ final class QuotaParsingTests: XCTestCase {
         )
         let empty = CycleUsageSummary(cycle: cycle, totals: .zero, quality: .estimated)
         XCTAssertFalse(empty.hasLocalUsage)
-        XCTAssertNil(empty.projectedFullCycleTokens)
-        XCTAssertNil(empty.projectedFullCycleCostUSD)
+        XCTAssertNil(empty.estimatedFullAllowanceTokens)
+        XCTAssertNil(empty.estimatedFullAllowanceCostUSD)
         XCTAssertNil(empty.forecastConfidence)
 
         var unpriced = UsageTotals.zero

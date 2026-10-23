@@ -195,18 +195,6 @@ nonisolated struct CycleUsageSummary: Sendable, Equatable, Identifiable {
         else { return nil }
         return currentAllowanceTotals.costUSD * 100 / Decimal(forecastObservedPercent)
     }
-
-    var projectedFullCycleTokens: Int? {
-        guard let estimatedFullAllowanceTokens else { return nil }
-        let priorActual = max(0, totals.totalTokens - currentAllowanceTotals.totalTokens)
-        return priorActual + estimatedFullAllowanceTokens
-    }
-
-    var projectedFullCycleCostUSD: Decimal? {
-        guard let estimatedFullAllowanceCostUSD else { return nil }
-        let priorActual = max(0, totals.costUSD - currentAllowanceTotals.costUSD)
-        return priorActual + estimatedFullAllowanceCostUSD
-    }
 }
 
 enum CycleUsageRollupCache {
