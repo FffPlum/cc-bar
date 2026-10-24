@@ -232,6 +232,9 @@ enum OpencodeScanner {
         let messages = try columns(db, table: messageTable)
         let sessions = try columns(db, table: sessionTable)
         guard !messages.isEmpty || !sessions.isEmpty else { return nil }
+        // 2026-08 之前的 OpenCode 已建 session_message，会话仍在 session 表、还没有 session_v2；
+        // 这类库跳过 v2 来源，只读 v1 表，不判为读取失败。
+        if isV2, sessions.isEmpty { return nil }
         var required: Set<String> = ["id", "session_id", "time_created", "time_updated", "data"]
         if isV2 { required.insert("type") }
         guard messages.isSuperset(of: required),

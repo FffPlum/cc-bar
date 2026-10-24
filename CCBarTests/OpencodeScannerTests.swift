@@ -463,6 +463,24 @@ final class OpencodeScannerTests: XCTestCase {
         XCTAssertNil(result.conversationSeeds.first?.gitBranch)
     }
 
+    func testSessionMessageWithoutSessionV2ReadsLegacyTablesOnly() throws {
+        let db = try createSchema()
+        insertSession(db, id: "ses-1", title: "legacy", directory: "/tmp/a")
+        insertMessage(db, id: "msg-legacy", sessionID: "ses-1", timeCreated: 1000,
+                      data: assistantMessageData(input: 10))
+        // 2026-08 之前的 OpenCode：session_message 已存在并指向 session 表，还没有 session_v2。
+        exec(db, "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)", [])
+        exec(db, "INSERT INTO session_message (id, session_id, type, time_created, time_updated, data) VALUES ('msg-v2', 'ses-1', 'assistant', 1200, 1300, ?)",
+             [v2Assistant(input: 20)])
+        sqlite3_close(db)
+        let result = scan()
+        XCTAssertTrue(result.isComplete)
+        XCTAssertNil(result.error)
+        XCTAssertEqual(result.entries.count, 1)
+        XCTAssertEqual(result.entries.first?.inputTokens, 10)
+        XCTAssertEqual(result.conversationSeeds.first?.title, "legacy")
+    }
+
     func testPendingMessageCompletesAfterLaterMessagesHaveBeenScanned() throws {
         let db = try createV2Schema()
         insertV2Message(db, id: "msg-pending", updated: 1000, data: v2Assistant(completed: false))
