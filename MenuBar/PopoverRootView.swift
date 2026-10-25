@@ -214,7 +214,7 @@ struct PopoverRootView: View {
         switch app {
         case .codex:
             email = appState.codexAccount?.email
-            plan = CodexAccount.planName(appState.codexAccount?.planType)
+            plan = appState.codexPlanName
             fallback = "OpenAI"
         case .claude:
             email = appState.claudeDisplayEmail

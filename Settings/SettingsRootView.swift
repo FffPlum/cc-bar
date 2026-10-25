@@ -1068,7 +1068,7 @@ struct SettingsRootView: View {
         case .codex:
             return (
                 email: appState.codexAccount?.email,
-                plan: CodexAccount.planName(appState.codexAccount?.planType),
+                plan: appState.codexPlanName,
                 signedIn: appState.codexAccount != nil
             )
         case .claude:

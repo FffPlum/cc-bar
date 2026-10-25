@@ -165,7 +165,7 @@ private struct DetectAccountsStep: View {
                     app: .codex,
                     title: "Codex",
                     subtitle: "OpenAI",
-                    plan: CodexAccount.planName(appState.codexAccount?.planType),
+                    plan: appState.codexPlanName,
                     email: appState.codexAccount?.email,
                     source: codexSource,
                     tint: .codexAccent,

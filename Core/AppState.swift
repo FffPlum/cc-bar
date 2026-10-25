@@ -57,6 +57,12 @@ final class AppState {
         guard let account = claudeAccount else { return nil }
         return currentClaudeProfile(for: account)?.planName ?? account.localPlanName
     }
+    /// 界面展示用的 Codex 套餐名：优先 `wham/usage` 每次刷新返回的 `plan_type`；
+    /// auth.json 里 JWT 的 `chatgpt_plan_type` 只在 token 续期时更新，仅作兜底。
+    var codexPlanName: String? {
+        guard let account = codexAccount else { return nil }
+        return CodexAccount.planName(codexQuota?.planType ?? account.planType)
+    }
     /// 界面展示用的 Claude 邮箱：本地凭据有就用本地，只用 Desktop 时退回 profile 返回的邮箱。
     /// 只用于显示——`claudeAccount.email` 不回填，否则历史账号键会从 uuid 派生改为
     /// 邮箱派生，纯 Desktop 用户的额度历史会分到新键下。
