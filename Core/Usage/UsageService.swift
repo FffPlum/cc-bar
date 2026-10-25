@@ -14,6 +14,8 @@ nonisolated struct UsageScanRoots: Sendable {
     var dshRoot: URL
     /// Antigravity 数据根（含 `conversations/`）。默认空：测试不注入就不会读到真实对话库。
     var antigravityRoots: [URL] = []
+    /// Kimi share 根；测试默认空，不访问用户真实日志。
+    var kimiRoots: [URL] = []
 
     static var production: UsageScanRoots {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -28,7 +30,8 @@ nonisolated struct UsageScanRoots: Sendable {
             piRoot: home.appendingPathComponent(".pi/agent/sessions", isDirectory: true),
             opencodeDatabaseURL: OpencodeScanner.defaultDatabaseURL(),
             dshRoot: DshSessionScanner.defaultRoot,
-            antigravityRoots: AntigravityScanner.defaultRoots()
+            antigravityRoots: AntigravityScanner.defaultRoots(),
+            kimiRoots: KimiSessionScanner.defaultRoots()
         )
     }
 }
@@ -1852,6 +1855,8 @@ final class UsageService {
         let opencodeDatabaseURL = roots.opencodeDatabaseURL
         let dshRoot = roots.dshRoot
         let antigravityRoots = roots.antigravityRoots
+        let kimiRoots = roots.kimiRoots
+        let kimiPrevious = cachedScanState?.kimi
         let dshFrozen = isDshHistoryFrozen
         let preservedDshState = cachedScanState?.dsh ?? [:]
 
@@ -1914,6 +1919,9 @@ final class UsageService {
                 ? DshSessionScanner.frozenResult(preserving: preservedDshState)
                 : DshSessionScanner.scan(previous: [:], root: dshRoot, onProgress: progress)
         }.value
+        async let kimiTask = Task.detached(priority: .utility) {
+            KimiSessionScanner.scan(previous: kimiPrevious, roots: kimiRoots, force: true, onProgress: progress)
+        }.value
         async let antigravityTask = Task.detached(priority: .utility) {
             AntigravityScanner.scan(previous: nil, roots: antigravityRoots, onProgress: progress)
         }.value
@@ -1926,6 +1934,7 @@ final class UsageService {
         let opencode = await opencodeTask
         let dsh = await dshTask
         let antigravity = await antigravityTask
+        let kimi = await kimiTask
 
         recordLogReadFailures(claude: claude.readFailures, codex: codex.readFailures)
         var incomplete: [String] = []
@@ -1937,6 +1946,7 @@ final class UsageService {
             incomplete.append("OpenCode")
         }
         if !dshFrozen, !dsh.isComplete { incomplete.append("DSH") }
+        if !kimi.isComplete { incomplete.append("Kimi Code") }
 
         // 需要保留的历史分区（源库中已删除会话、DSH 历史贡献）先按基准装载，
         // 再由完整扫描结果覆盖；不能用空聚合器直接覆盖历史。
@@ -1946,7 +1956,7 @@ final class UsageService {
         let baselineCycles = cycleAggregator.snapshot()
         let candidateDaily = UsageAggregator()
         let candidateConversations = ConversationAggregator()
-        let sessionReplacedApps: Set<UsageApp> = [.opencode, .dsh, .antigravity]
+        let sessionReplacedApps: Set<UsageApp> = [.opencode, .dsh, .antigravity, .kimi]
         candidateDaily.load(from: baselineDay.filter { sessionReplacedApps.contains($0.app) })
         candidateConversations.load(
             infos: baselineConversation.infos.filter { sessionReplacedApps.contains($0.app) },
@@ -1961,6 +1971,7 @@ final class UsageService {
             aggregator: candidateDaily,
             conversations: candidateConversations
         )
+        _ = Self.applyKimiScan(kimi, aggregator: candidateDaily, conversations: candidateConversations)
         _ = Self.applyAntigravityScan(
             antigravity,
             aggregator: candidateDaily,
@@ -2084,7 +2095,8 @@ final class UsageService {
             pi: pi.newState,
             opencode: opencode.newState,
             dsh: dshFrozen ? preservedDshState : dsh.newState,
-            antigravity: antigravity.newState
+            antigravity: antigravity.newState,
+            kimi: kimi.newState
         )
         let requiredApps = Self.requiredCycleSourceApps(cycles: cycles)
         let completedApps = incomplete.isEmpty
@@ -2157,6 +2169,7 @@ final class UsageService {
         let opencodeDatabaseURL = roots.opencodeDatabaseURL
         let dshRoot = roots.dshRoot
         let antigravityRoots = roots.antigravityRoots
+        let kimiRoots = roots.kimiRoots
         let dshFrozen = isDshHistoryFrozen
         // 账本里的 ID 没有条数上限；基准建立之前账本不完整，旧 seen 列表照常参与去重。
         let claudeKnown = messageLedger.knownIDs(for: .claude)
@@ -2208,6 +2221,9 @@ final class UsageService {
                 ? DshSessionScanner.frozenResult(preserving: prev.dsh)
                 : DshSessionScanner.scan(previous: dshPrevious, root: dshRoot, onProgress: progress)
         }.value
+        async let kimiTask = Task.detached(priority: .utility) {
+            KimiSessionScanner.scan(previous: prev.kimi, roots: kimiRoots, onProgress: progress)
+        }.value
         async let antigravityTask = Task.detached(priority: .utility) {
             AntigravityScanner.scan(
                 previous: prev.antigravity,
@@ -2224,10 +2240,11 @@ final class UsageService {
         let opencode = await opencodeTask
         let dsh = await dshTask
         let antigravity = await antigravityTask
+        let kimi = await kimiTask
         // DSH 的坏帧、坏文件也要能浮出来（§6 决策 4）；pi / opencode 的既有行为不动。
         let failedFileCount = claude.failedFileCount + codex.failedFileCount
             + dsh.failedFileCount + dsh.failedDirectoryCount + dsh.duplicateSessionCount
-            + antigravity.failedDatabaseCount
+            + antigravity.failedDatabaseCount + kimi.failedFileCount
         recordLogReadFailures(claude: claude.readFailures, codex: codex.readFailures)
 
         aggregator.ingestLocal(claude.entries)
@@ -2240,6 +2257,7 @@ final class UsageService {
         let opencodeChanged = Self.applyOpenCodeScan(
             opencode, aggregator: aggregator, conversations: conversationAggregator
         )
+        let kimiChanged = Self.applyKimiScan(kimi, aggregator: aggregator, conversations: conversationAggregator)
         let antigravityChanged = Self.applyAntigravityScan(
             antigravity, aggregator: aggregator, conversations: conversationAggregator
         )
@@ -2328,7 +2346,7 @@ final class UsageService {
 
         // 没有用量或档案变化时仍统一保存完整快照，watermark 也受写盘节流约束。
         let hasNewEntries = !claude.entries.isEmpty || !codex.entries.isEmpty
-            || !pi.entries.isEmpty || opencodeChanged || antigravityChanged
+            || !pi.entries.isEmpty || opencodeChanged || antigravityChanged || kimiChanged
             || dshUpdate.changed || dshRebuildReady
         if hasNewEntries || conversationChanged { hasUnwrittenRollupChanges = true }
         // 尚未建立代次时必须立刻落盘，否则内存与磁盘无从对齐。
@@ -2393,7 +2411,8 @@ final class UsageService {
             piSeenEntryIds: piSeen,
             opencode: opencode.newState,
             dsh: dshStateForScan,
-            antigravity: antigravity.newState
+            antigravity: antigravity.newState,
+            kimi: kimi.newState
         )
         let cycleNeedsWrite = cycleChanged || loadedCycleGeneration == nil
         // 任何一次落盘都是「汇总 + 进度 + 周期 + DSH」的整份提交：不能只写其中一份。
@@ -2416,7 +2435,8 @@ final class UsageService {
             piSeenEntryIds: piSeen,
             opencode: opencode.newState,
             dsh: dshStateForScan,
-            antigravity: antigravity.newState
+            antigravity: antigravity.newState,
+            kimi: kimi.newState
         )
 
         if shouldCommitSnapshot {
@@ -2476,6 +2496,7 @@ final class UsageService {
             opencode messages=\(opencode.messagesRead) sessions=\(opencode.refreshedSessionIDs.count) entries=\(opencode.entries.count); \
             dsh files=\(dsh.filesScanned) new=\(dsh.entries.count) unreadable=\(dsh.failedFileCount) directories=\(dsh.failedDirectoryCount) duplicateIDs=\(dsh.duplicateSessionCount); \
             antigravity databases=\(antigravity.databasesRead) conversations=\(antigravity.refreshedConversationIDs.count) entries=\(antigravity.entries.count) unreadable=\(antigravity.failedDatabaseCount); \
+            kimi files=\(kimi.filesRead) conversations=\(kimi.refreshedConversationIDs.count) entries=\(kimi.entries.count) unreadable=\(kimi.failedFileCount); \
             unreadable=\(failedFileCount); elapsed=\(elapsed)
             """)
         return true
@@ -2766,6 +2787,23 @@ final class UsageService {
         return replaceConversations(
             app: .antigravity,
             refreshedKeys: Set(scan.refreshedConversationIDs.map { "antigravity:\($0)" }),
+            entries: scan.entries,
+            seeds: scan.conversationSeeds,
+            aggregator: aggregator,
+            conversations: conversations
+        )
+    }
+
+    /// Kimi 的刷新结果是逐会话完整贡献；失败会话不进入刷新集合，源文件删除保留历史。
+    @discardableResult
+    static func applyKimiScan(
+        _ scan: KimiSessionScanner.Result,
+        aggregator: UsageAggregator,
+        conversations: ConversationAggregator
+    ) -> Bool {
+        replaceConversations(
+            app: .kimi,
+            refreshedKeys: Set(scan.refreshedConversationIDs.map { "kimi:\($0)" }),
             entries: scan.entries,
             seeds: scan.conversationSeeds,
             aggregator: aggregator,

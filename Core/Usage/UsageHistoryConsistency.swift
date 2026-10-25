@@ -367,6 +367,7 @@ nonisolated enum UsageStatsRules {
         .opencode: 2,
         .dsh: 2,
         .antigravity: 2,
+        .kimi: 1,
     ]
 
     static var persisted: [String: Int] {

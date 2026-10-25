@@ -76,6 +76,8 @@
 		49C1BF02000000000001AABB /* QuotaRefreshPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF02000000000001AAAA /* QuotaRefreshPlanTests.swift */; };
 		49C1CC05000000000001AABB /* CommandCodeQuotaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC05000000000001AAAA /* CommandCodeQuotaTests.swift */; };
 		49C1CC09000000000001AABB /* OpenCodeGoQuotaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC09000000000001AAAA /* OpenCodeGoQuotaTests.swift */; };
+		B71D5000000000000000AABB /* KimiQuotaIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D5000000000000000AAAA /* KimiQuotaIntegrationTests.swift */; };
+		B71D4000000000000000AABB /* KimiQuotaClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D4000000000000000AAAA /* KimiQuotaClientTests.swift */; };
 		49C1BF03000000000001AABB /* ImportedCodexStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF03000000000001AAAA /* ImportedCodexStoreTests.swift */; };
 		49C1BF04000000000001AABB /* ScannerIncrementalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF04000000000001AAAA /* ScannerIncrementalTests.swift */; };
 		49C1BF05000000000001AABB /* UsageEquivalenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF05000000000001AAAA /* UsageEquivalenceTests.swift */; };
@@ -93,11 +95,15 @@
 		49C1CC01000000000001AABB /* commandcode.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1CC01000000000001AAAA /* commandcode.svg */; };
 		49C1EE01000000000001AABB /* pi.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1EE01000000000001AAAA /* pi.svg */; };
 		49C1EE02000000000001AABB /* opencode.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1EE02000000000001AAAA /* opencode.svg */; };
+		B71D6000000000000000AABB /* kimi.ico in Resources */ = {isa = PBXBuildFile; fileRef = B71D6000000000000000AAAA /* kimi.ico */; };
 		49C1EE03000000000001AABB /* dsh.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1EE03000000000001AAAA /* dsh.svg */; };
 		49C1CC02000000000001AABB /* CommandCodeAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC02000000000001AAAA /* CommandCodeAuth.swift */; };
 		49C1CC06000000000001AABB /* OpenCodeGoAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC06000000000001AAAA /* OpenCodeGoAuth.swift */; };
+		B71D1000000000000000AABB /* KimiCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D1000000000000000AAAA /* KimiCredentials.swift */; };
 		49C1CC03000000000001AABB /* CommandCodeQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC03000000000001AAAA /* CommandCodeQuotaClient.swift */; };
 		49C1CC07000000000001AABB /* OpenCodeGoQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC07000000000001AAAA /* OpenCodeGoQuotaClient.swift */; };
+		B71D3000000000000000AABB /* KimiTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D3000000000000000AAAA /* KimiTokenRefresher.swift */; };
+		B71D2000000000000000AABB /* KimiQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D2000000000000000AAAA /* KimiQuotaClient.swift */; };
 		49C1CC04000000000001AABB /* CommandCodeCredentialSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC04000000000001AAAA /* CommandCodeCredentialSheet.swift */; };
 		49C1CC08000000000001AABB /* OpenCodeGoCredentialSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC08000000000001AAAA /* OpenCodeGoCredentialSheet.swift */; };
 		49C1B150000000000001AABB /* UsageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B150000000000001AAAA /* UsageModels.swift */; };
@@ -106,6 +112,7 @@
 		49C1B153000000000001AABB /* ClaudeJSONLScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B153000000000001AAAA /* ClaudeJSONLScanner.swift */; };
 		49C1B154000000000001AABB /* CodexJSONLScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B154000000000001AAAA /* CodexJSONLScanner.swift */; };
 		49C1B32000000000000FAABB /* PiJSONLScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B32000000000000FAAAA /* PiJSONLScanner.swift */; };
+		B71C1000000000000000AABB /* KimiSessionScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71C1000000000000000AAAA /* KimiSessionScanner.swift */; };
 		A6A1B90000000000000FAABB /* AntigravityScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A1B90000000000000FAAAA /* AntigravityScanner.swift */; };
 		49C1B90000000000000FAABB /* OpencodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B90000000000000FAAAA /* OpencodeScanner.swift */; };
 		49C1B155000000000001AABB /* UsageAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B155000000000001AAAA /* UsageAggregator.swift */; };
@@ -143,6 +150,8 @@
 		49C1BC12000000000001AABB /* CursorAuthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC12000000000001AAAA /* CursorAuthTests.swift */; };
 		49C1BC15000000000001AABB /* CursorUsageFetcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC15000000000001AAAA /* CursorUsageFetcherTests.swift */; };
 		49C1B31000000000000FAABB /* PiJSONLScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B31000000000000FAAAA /* PiJSONLScannerTests.swift */; };
+		B71C3000000000000000AABB /* KimiUsageIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71C3000000000000000AAAA /* KimiUsageIntegrationTests.swift */; };
+		B71C2000000000000000AABB /* KimiSessionScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71C2000000000000000AAAA /* KimiSessionScannerTests.swift */; };
 		49C1B91000000000000FAABB /* OpencodeScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B91000000000000FAAAA /* OpencodeScannerTests.swift */; };
 		A6A1B90000000000000FBABB /* AntigravityScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A1B90000000000000FBAAA /* AntigravityScannerTests.swift */; };
 		49C1BF0A000000000001AABB /* ConversationProjectResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF0A000000000001AAAA /* ConversationProjectResolverTests.swift */; };
@@ -216,6 +225,8 @@
 		49C1BF02000000000001AAAA /* QuotaRefreshPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaRefreshPlanTests.swift; sourceTree = "<group>"; };
 		49C1CC05000000000001AAAA /* CommandCodeQuotaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeQuotaTests.swift; sourceTree = "<group>"; };
 		49C1CC09000000000001AAAA /* OpenCodeGoQuotaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoQuotaTests.swift; sourceTree = "<group>"; };
+		B71D5000000000000000AAAA /* KimiQuotaIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiQuotaIntegrationTests.swift; sourceTree = "<group>"; };
+		B71D4000000000000000AAAA /* KimiQuotaClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiQuotaClientTests.swift; sourceTree = "<group>"; };
 		49C1BF03000000000001AAAA /* ImportedCodexStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedCodexStoreTests.swift; sourceTree = "<group>"; };
 		49C1BF04000000000001AAAA /* ScannerIncrementalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerIncrementalTests.swift; sourceTree = "<group>"; };
 		49C1BF05000000000001AAAA /* UsageEquivalenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageEquivalenceTests.swift; sourceTree = "<group>"; };
@@ -233,11 +244,15 @@
 		49C1CC01000000000001AAAA /* commandcode.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = commandcode.svg; sourceTree = "<group>"; };
 		49C1EE01000000000001AAAA /* pi.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = pi.svg; sourceTree = "<group>"; };
 		49C1EE02000000000001AAAA /* opencode.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = opencode.svg; sourceTree = "<group>"; };
+		B71D6000000000000000AAAA /* kimi.ico */ = {isa = PBXFileReference; lastKnownFileType = image.ico; path = kimi.ico; sourceTree = "<group>"; };
 		49C1EE03000000000001AAAA /* dsh.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = dsh.svg; sourceTree = "<group>"; };
 		49C1CC02000000000001AAAA /* CommandCodeAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeAuth.swift; sourceTree = "<group>"; };
 		49C1CC06000000000001AAAA /* OpenCodeGoAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoAuth.swift; sourceTree = "<group>"; };
+		B71D1000000000000000AAAA /* KimiCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiCredentials.swift; sourceTree = "<group>"; };
 		49C1CC03000000000001AAAA /* CommandCodeQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeQuotaClient.swift; sourceTree = "<group>"; };
 		49C1CC07000000000001AAAA /* OpenCodeGoQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoQuotaClient.swift; sourceTree = "<group>"; };
+		B71D3000000000000000AAAA /* KimiTokenRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiTokenRefresher.swift; sourceTree = "<group>"; };
+		B71D2000000000000000AAAA /* KimiQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiQuotaClient.swift; sourceTree = "<group>"; };
 		49C1CC04000000000001AAAA /* CommandCodeCredentialSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeCredentialSheet.swift; sourceTree = "<group>"; };
 		49C1CC08000000000001AAAA /* OpenCodeGoCredentialSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoCredentialSheet.swift; sourceTree = "<group>"; };
 		49C1B150000000000001AAAA /* UsageModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageModels.swift; sourceTree = "<group>"; };
@@ -246,6 +261,7 @@
 		49C1B153000000000001AAAA /* ClaudeJSONLScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeJSONLScanner.swift; sourceTree = "<group>"; };
 		49C1B154000000000001AAAA /* CodexJSONLScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexJSONLScanner.swift; sourceTree = "<group>"; };
 		49C1B32000000000000FAAAA /* PiJSONLScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiJSONLScanner.swift; sourceTree = "<group>"; };
+		B71C1000000000000000AAAA /* KimiSessionScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiSessionScanner.swift; sourceTree = "<group>"; };
 		49C1BE06000000000001AAAA /* DshZstdFrames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshZstdFrames.swift; sourceTree = "<group>"; };
 		49C1BE07000000000001AAAA /* DshZstdDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshZstdDecoder.swift; sourceTree = "<group>"; };
 		49C1BE30000000000001AAAA /* ZstdStreamReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZstdStreamReader.swift; sourceTree = "<group>"; };
@@ -304,6 +320,8 @@
 		49C1BC12000000000001AAAA /* CursorAuthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorAuthTests.swift; sourceTree = "<group>"; };
 		49C1BC15000000000001AAAA /* CursorUsageFetcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorUsageFetcherTests.swift; sourceTree = "<group>"; };
 		49C1B31000000000000FAAAA /* PiJSONLScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiJSONLScannerTests.swift; sourceTree = "<group>"; };
+		B71C3000000000000000AAAA /* KimiUsageIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiUsageIntegrationTests.swift; sourceTree = "<group>"; };
+		B71C2000000000000000AAAA /* KimiSessionScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiSessionScannerTests.swift; sourceTree = "<group>"; };
 		49C1B91000000000000FAAAA /* OpencodeScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpencodeScannerTests.swift; sourceTree = "<group>"; };
 		A6A1B90000000000000FBAAA /* AntigravityScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityScannerTests.swift; sourceTree = "<group>"; };
 		49C1BF0A000000000001AAAA /* ConversationProjectResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationProjectResolverTests.swift; sourceTree = "<group>"; };
@@ -435,6 +453,7 @@
 				49C1D100000000000001AAAA /* AntigravityCredentials.swift */,
 				49C1CC02000000000001AAAA /* CommandCodeAuth.swift */,
 				49C1CC06000000000001AAAA /* OpenCodeGoAuth.swift */,
+				B71D1000000000000000AAAA /* KimiCredentials.swift */,
 				49C1B103000000000001AAAA /* CodexAuth.swift */,
 				49C1B104000000000001AAAA /* ClaudeAuth.swift */,
 				49C1B198000000000001AAAA /* ClaudeDesktopAuth.swift */,
@@ -473,6 +492,8 @@
 				49C1BC10000000000001AAAA /* CursorQuotaClient.swift */,
 				49C1CC03000000000001AAAA /* CommandCodeQuotaClient.swift */,
 				49C1CC07000000000001AAAA /* OpenCodeGoQuotaClient.swift */,
+				B71D3000000000000000AAAA /* KimiTokenRefresher.swift */,
+				B71D2000000000000000AAAA /* KimiQuotaClient.swift */,
 				49C1B128000000000001AAAA /* CodexResetCreditsClient.swift */,
 				49C1B123000000000001AAAA /* ClaudeQuotaClient.swift */,
 				49C1B124000000000001AAAA /* ClaudeCLIFallbackQuotaClient.swift */,
@@ -494,6 +515,7 @@
 				49C1CC01000000000001AAAA /* commandcode.svg */,
 				49C1EE01000000000001AAAA /* pi.svg */,
 				49C1EE02000000000001AAAA /* opencode.svg */,
+				B71D6000000000000000AAAA /* kimi.ico */,
 				49C1EE03000000000001AAAA /* dsh.svg */,
 			);
 			path = Logos;
@@ -530,6 +552,7 @@
 				49C2AB01000000000001AAAA /* CodexModelIdentityMigration.swift */,
 				49C1B154000000000001AAAA /* CodexJSONLScanner.swift */,
 				49C1B32000000000000FAAAA /* PiJSONLScanner.swift */,
+				B71C1000000000000000AAAA /* KimiSessionScanner.swift */,
 				A6A1B90000000000000FAAAA /* AntigravityScanner.swift */,
 				49C1B90000000000000FAAAA /* OpencodeScanner.swift */,
 				49C1BE06000000000001AAAA /* DshZstdFrames.swift */,
@@ -596,6 +619,8 @@
 				49C1BF02000000000001AAAA /* QuotaRefreshPlanTests.swift */,
 				49C1CC05000000000001AAAA /* CommandCodeQuotaTests.swift */,
 				49C1CC09000000000001AAAA /* OpenCodeGoQuotaTests.swift */,
+				B71D5000000000000000AAAA /* KimiQuotaIntegrationTests.swift */,
+				B71D4000000000000000AAAA /* KimiQuotaClientTests.swift */,
 				49C1BF03000000000001AAAA /* ImportedCodexStoreTests.swift */,
 				49C1BF04000000000001AAAA /* ScannerIncrementalTests.swift */,
 				49C1BF05000000000001AAAA /* UsageEquivalenceTests.swift */,
@@ -603,6 +628,8 @@
 				49C1BF07000000000001AAAA /* QuotaPersistenceCoordinatorTests.swift */,
 				49C1BD04000000000001AAAA /* RedactTests.swift */,
 				49C1B31000000000000FAAAA /* PiJSONLScannerTests.swift */,
+				B71C3000000000000000AAAA /* KimiUsageIntegrationTests.swift */,
+				B71C2000000000000000AAAA /* KimiSessionScannerTests.swift */,
 				49C1B91000000000000FAAAA /* OpencodeScannerTests.swift */,
 				A6A1B90000000000000FBAAA /* AntigravityScannerTests.swift */,
 				49C1BE08000000000001AAAA /* DshZstdFrameScannerTests.swift */,
@@ -753,6 +780,7 @@
 				49C1CC01000000000001AABB /* commandcode.svg in Resources */,
 				49C1EE01000000000001AABB /* pi.svg in Resources */,
 				49C1EE02000000000001AABB /* opencode.svg in Resources */,
+				B71D6000000000000000AABB /* kimi.ico in Resources */,
 				49C1EE03000000000001AABB /* dsh.svg in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -792,6 +820,7 @@
 				49C1D100000000000001AABB /* AntigravityCredentials.swift in Sources */,
 				49C1CC02000000000001AABB /* CommandCodeAuth.swift in Sources */,
 				49C1CC06000000000001AABB /* OpenCodeGoAuth.swift in Sources */,
+				B71D1000000000000000AABB /* KimiCredentials.swift in Sources */,
 				49C1BC13000000000001AABB /* CursorUsageCache.swift in Sources */,
 				49C1B103000000000001AABB /* CodexAuth.swift in Sources */,
 				49C1B104000000000001AABB /* ClaudeAuth.swift in Sources */,
@@ -805,6 +834,8 @@
 				49C1BC10000000000001AABB /* CursorQuotaClient.swift in Sources */,
 				49C1CC03000000000001AABB /* CommandCodeQuotaClient.swift in Sources */,
 				49C1CC07000000000001AABB /* OpenCodeGoQuotaClient.swift in Sources */,
+				B71D3000000000000000AABB /* KimiTokenRefresher.swift in Sources */,
+				B71D2000000000000000AABB /* KimiQuotaClient.swift in Sources */,
 				49C1BC14000000000001AABB /* CursorUsageFetcher.swift in Sources */,
 				49C1B128000000000001AABB /* CodexResetCreditsClient.swift in Sources */,
 				49C1BF01000000000001AABB /* QuotaRefreshPlan.swift in Sources */,
@@ -833,6 +864,7 @@
 				49C2AB02000000000001AAAA /* CodexModelIdentityMigration.swift in Sources */,
 				49C1B154000000000001AABB /* CodexJSONLScanner.swift in Sources */,
 				49C1B32000000000000FAABB /* PiJSONLScanner.swift in Sources */,
+				B71C1000000000000000AABB /* KimiSessionScanner.swift in Sources */,
 				A6A1B90000000000000FAABB /* AntigravityScanner.swift in Sources */,
 				49C1B90000000000000FAABB /* OpencodeScanner.swift in Sources */,
 				49C1BE09000000000001AAAA /* DshZstdFrames.swift in Sources */,
@@ -889,6 +921,8 @@
 				49C1BF02000000000001AABB /* QuotaRefreshPlanTests.swift in Sources */,
 				49C1CC05000000000001AABB /* CommandCodeQuotaTests.swift in Sources */,
 				49C1CC09000000000001AABB /* OpenCodeGoQuotaTests.swift in Sources */,
+				B71D5000000000000000AABB /* KimiQuotaIntegrationTests.swift in Sources */,
+				B71D4000000000000000AABB /* KimiQuotaClientTests.swift in Sources */,
 				49C1BF03000000000001AABB /* ImportedCodexStoreTests.swift in Sources */,
 				49C1BF04000000000001AABB /* ScannerIncrementalTests.swift in Sources */,
 				49C1BF05000000000001AABB /* UsageEquivalenceTests.swift in Sources */,
@@ -897,6 +931,8 @@
 				49C1BD04000000000001AABB /* RedactTests.swift in Sources */,
 				49C1BF09000000000001AABB /* UpdateCheckerTests.swift in Sources */,
 				49C1B31000000000000FAABB /* PiJSONLScannerTests.swift in Sources */,
+				B71C3000000000000000AABB /* KimiUsageIntegrationTests.swift in Sources */,
+				B71C2000000000000000AABB /* KimiSessionScannerTests.swift in Sources */,
 				49C1B91000000000000FAABB /* OpencodeScannerTests.swift in Sources */,
 				A6A1B90000000000000FBABB /* AntigravityScannerTests.swift in Sources */,
 				49C1BE0B000000000001AAAA /* DshZstdFrameScannerTests.swift in Sources */,

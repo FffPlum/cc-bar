@@ -593,7 +593,7 @@ nonisolated enum Pricing {
                 case .pi: return nil
                 case .opencode: return nil
                 case .dsh: return nil
-                case .antigravity: return nil
+                case .antigravity, .kimi: return nil
                 }
             }
             switch app {
@@ -622,7 +622,7 @@ nonisolated enum Pricing {
             case .dsh:
                 // DSH 没有 Fast 档位概念。
                 return nil
-            case .antigravity:
+            case .antigravity, .kimi:
                 // Antigravity 没有 Fast 档位概念。
                 return nil
             }
@@ -652,7 +652,9 @@ nonisolated enum Pricing {
     /// DSH 的 DeepSeek 路由名：`deepseek-account/deepseek-flash`（账号登录）、`deepseek-official/deepseek-v4-flash`（API Key）。
     private static let pricingOnlyPrefixes = [
         "antigravity/", "z-ai/", "zai/", "minimax/",
-        "deepseek-account/", "deepseek-official/"
+        "deepseek-account/", "deepseek-official/",
+        // Kimi 仅剥渠道前缀；k3 / kimi-for-coding 等订阅别名不猜 API 型号。
+        "moonshotai/", "moonshot/", "kimi-code/"
     ]
 
     private static let pricingPrefixes = identityPrefixes + pricingOnlyPrefixes
@@ -902,7 +904,7 @@ nonisolated enum Pricing {
             case .dsh:
                 // DSH 无 Fast 档位概念。
                 return nil
-            case .antigravity:
+            case .antigravity, .kimi:
                 // Antigravity 无 Fast 档位概念。
                 return nil
             }

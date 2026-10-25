@@ -260,6 +260,7 @@ struct ConversationStatsView: View {
         case .opencode: return .opencode
         case .dsh: return .dsh
         case .antigravity: return .antigravity
+        case .kimi: return .kimi
         }
     }
 

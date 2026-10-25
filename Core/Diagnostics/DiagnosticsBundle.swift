@@ -246,6 +246,11 @@ enum DiagnosticsBundle {
         } else {
             out.row("command code", "not loaded: \(Redact.message(appState.commandCodeError))")
         }
+        if let c = appState.kimiAccount {
+            out.row("kimi code", "source=\(c.source.displayName) signed-in=true")
+        } else {
+            out.row("kimi code", "not loaded: \(Redact.message(appState.kimiError))")
+        }
         if let c = appState.opencodeGoAccount {
             out.row("opencode go", "source=\(c.source.rawValue)")
         } else {
@@ -329,6 +334,8 @@ enum DiagnosticsBundle {
             ("~/.codex/archived_sessions", home.appendingPathComponent(".codex/archived_sessions", isDirectory: true)),
             ("~/.claude/projects", home.appendingPathComponent(".claude/projects", isDirectory: true)),
             ("~/.pi/agent/sessions", home.appendingPathComponent(".pi/agent/sessions", isDirectory: true)),
+            ("~/.kimi-code/sessions", home.appendingPathComponent(".kimi-code/sessions", isDirectory: true)),
+            ("~/.kimi/sessions", home.appendingPathComponent(".kimi/sessions", isDirectory: true)),
             ("~/.local/share/opencode/opencode.db", home.appendingPathComponent(".local/share/opencode/opencode.db", isDirectory: false)),
         ]
         for (label, url) in sources {

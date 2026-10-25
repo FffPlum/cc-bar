@@ -46,6 +46,7 @@ cc-bar 展示两类数据：**订阅额度**直连各服务官方接口获取剩
 | **Command Code** | 5 小时 / 周额度、GOAT 月度 Credits | 支持 | — | — | 本地 5 级只读探测 / Keychain Key |
 | **OpenCode Go** | 5 小时 / 周 / 月额度 | 支持 | — | — | OpenCode / Pi 本地只读探测 / Keychain Key |
 | **Pi / OpenCode / DSH** | — | — | 本地会话日志（Pi / OpenCode / DSH 多帧 zstd） | — | 严格只读本地日志与数据库 |
+| **Kimi Code** | 5 小时 / 周 / 月额度（依账号返回） | 支持 | 本机新旧 CLI 会话（含子任务）；可靠模型按 API 价估算 | — | 本地 CLI OAuth（自动续期）/ 官方 API Key |
 
 ---
 

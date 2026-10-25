@@ -301,6 +301,7 @@ enum StatsServiceFilter: Hashable, CaseIterable {
     case opencode
     case dsh
     case antigravity
+    case kimi
 
     var englishLabel: String {
         switch self {
@@ -312,6 +313,7 @@ enum StatsServiceFilter: Hashable, CaseIterable {
         case .opencode: return "OpenCode"
         case .dsh: return "DSH"
         case .antigravity: return "Antigravity"
+        case .kimi: return "Kimi Code"
         }
     }
 
@@ -325,6 +327,7 @@ enum StatsServiceFilter: Hashable, CaseIterable {
         case .opencode: return "OpenCode"
         case .dsh: return "DSH"
         case .antigravity: return "Antigravity"
+        case .kimi: return "Kimi Code"
         }
     }
 
@@ -338,6 +341,7 @@ enum StatsServiceFilter: Hashable, CaseIterable {
         case .opencode: return .opencode
         case .dsh: return .dsh
         case .antigravity: return .antigravity
+        case .kimi: return .kimi
         }
     }
 }
@@ -589,14 +593,14 @@ struct StatsView: View {
             switch provider.app {
             case .codex: return .codex
             case .claude: return .claude
-            case .antigravity, .cursor, .commandCode, .opencodeGo: return nil
+            case .antigravity, .cursor, .commandCode, .opencodeGo, .kimi: return nil
             }
         }
         switch serviceFilter {
         case .all: return ordered
         case .codex: return ordered.contains(.codex) ? [.codex] : []
         case .claude: return ordered.contains(.claude) ? [.claude] : []
-        case .cursor, .pi, .opencode, .dsh, .antigravity: return []
+        case .cursor, .pi, .opencode, .dsh, .antigravity, .kimi: return []
         }
     }
 
@@ -675,6 +679,7 @@ struct StatsView: View {
         case .opencode: return .opencode
         case .dsh: return .dsh
         case .antigravity: return .antigravity
+        case .kimi: return .kimi
         }
     }
 
@@ -969,7 +974,7 @@ struct StatsView: View {
                         isLoading: appState.refreshState(for: .claude).inFlight
                     ))
                 }
-            case .cursor, .pi, .opencode, .dsh, .antigravity:
+            case .cursor, .pi, .opencode, .dsh, .antigravity, .kimi:
                 break
             }
         }

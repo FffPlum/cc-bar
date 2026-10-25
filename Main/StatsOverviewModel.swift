@@ -518,6 +518,7 @@ enum CompositionBuilder {
         case .opencode: return "opencode.ai"
         case .dsh: return "DeepSeek Harness"
         case .antigravity: return "Google"
+        case .kimi: return "Kimi Code CLI"
         }
     }
 
@@ -565,6 +566,7 @@ struct DailySample: Identifiable {
     var opencode = UsageTotals.zero
     var dsh = UsageTotals.zero
     var antigravity = UsageTotals.zero
+    var kimi = UsageTotals.zero
 
     init(day: Date) {
         self.day = day
@@ -582,6 +584,7 @@ struct DailySample: Identifiable {
         case .opencode: opencode.add(bucket)
         case .dsh: dsh.add(bucket)
         case .antigravity: antigravity.add(bucket)
+        case .kimi: kimi.add(bucket)
         }
     }
 
@@ -594,6 +597,7 @@ struct DailySample: Identifiable {
         case .opencode: return opencode
         case .dsh: return dsh
         case .antigravity: return antigravity
+        case .kimi: return kimi
         }
     }
 
@@ -604,7 +608,7 @@ struct DailySample: Identifiable {
     /// 所有统计服务合并后的口径，供每日悬浮明细展示 token 拆分 + 命中率。
     var totalUsage: UsageTotals {
         var t = UsageTotals.zero
-        for totals in [codex, claude, cursor, pi, opencode, dsh, antigravity] {
+        for totals in [codex, claude, cursor, pi, opencode, dsh, antigravity, kimi] {
             t.add(totals)
         }
         return t

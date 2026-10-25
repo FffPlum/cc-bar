@@ -46,6 +46,7 @@ cc-bar presents two types of data: **Subscription Quotas** queried directly from
 | **Command Code** | 5h / weekly quotas, GOAT monthly Credits | Supported | — | — | 5-level auto-detection / Keychain Key |
 | **OpenCode Go** | 5h / weekly / monthly quotas | Supported | — | — | OpenCode / Pi read-only detection / Keychain Key |
 | **Pi / OpenCode / DSH** | — | — | Local sessions (Pi / OpenCode / DSH multi-frame zstd) | — | Strictly read-only local logs & DB |
+| **Kimi Code** | 5-hour / weekly / monthly quotas, when available | Supported | New and legacy CLI sessions, including subtasks; API estimates for priced models | — | Local CLI OAuth (automatic renewal) / official API key |
 
 ---
 

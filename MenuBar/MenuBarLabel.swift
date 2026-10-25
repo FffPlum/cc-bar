@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreImage
 
 struct MenuBarLabel: View {
     @Environment(AppState.self) private var appState
@@ -37,11 +38,23 @@ enum MenuBarLogo {
 
     static func rawImage(named name: String) -> NSImage? {
         if let cached = cache.object(forKey: name as NSString) { return cached }
-        guard let url = Bundle.main.url(forResource: name, withExtension: "svg"),
-              let img = NSImage(contentsOf: url) else { return nil }
-        img.size = size
-        cache.setObject(img, forKey: name as NSString)
-        return img
+        guard let url = ["svg", "png", "ico"].compactMap({
+            Bundle.main.url(forResource: name, withExtension: $0)
+        }).first, let img = NSImage(contentsOf: url) else { return nil }
+        let icon = name == "kimi" ? monochromeFavicon(img) ?? img : img
+        icon.size = size
+        cache.setObject(icon, forKey: name as NSString)
+        return icon
+    }
+    /// 官网 favicon 为黑底白字；菜单栏用系统滤镜提取亮度蒙版，避免模板化后只剩实心方块。
+    static func monochromeFavicon(_ image: NSImage) -> NSImage? {
+        guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let filter = CIFilter(name: "CIMaskToAlpha", parameters: [kCIInputImageKey: CIImage(cgImage: source)]),
+              let output = filter.outputImage,
+              let cgImage = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        let result = NSImage(cgImage: cgImage, size: image.size)
+        result.isTemplate = true
+        return result
     }
 }
 

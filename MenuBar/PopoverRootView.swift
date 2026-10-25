@@ -232,6 +232,10 @@ struct PopoverRootView: View {
             email = appState.commandCodeAccount?.email ?? appState.commandCodeAccount?.login
             plan = appState.commandCodeAccount?.planType ?? appState.quotaSnapshot(for: .commandCode)?.planType
             fallback = "Command Code"
+        case .kimi:
+            email = appState.kimiEmail
+            plan = appState.kimiPlanName ?? appState.quotaSnapshot(for: .kimi)?.planType
+            fallback = "Moonshot AI"
         case .opencodeGo:
             // Go 没有可读的账号信息，副标题只显示 vendor。
             email = nil
@@ -326,6 +330,7 @@ struct PopoverRootView: View {
         case .cursor: cursorTodayCost
         case .commandCode: nil
         case .opencodeGo: nil
+        case .kimi: nil
         }
     }
 
@@ -340,7 +345,7 @@ struct PopoverRootView: View {
         case .codex: appState.codexServiceStatus
         case .claude: appState.claudeServiceStatus
         case .cursor: appState.cursorServiceStatus
-        case .antigravity, .commandCode, .opencodeGo: nil
+        case .antigravity, .commandCode, .opencodeGo, .kimi: nil
         }
         guard let status else { return nil }
         // 本机连不上 statuspage 时旧快照仍被保留(刻意的,别的信息还能用),

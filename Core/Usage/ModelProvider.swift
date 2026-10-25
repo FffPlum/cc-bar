@@ -10,6 +10,7 @@ nonisolated enum ModelProvider: String, Sendable, CaseIterable {
     case openAI
     case anthropic
     case deepseek
+    case moonshot
     case opencodeGo
     case commandCode
     case other
@@ -28,6 +29,9 @@ nonisolated enum ModelProvider: String, Sendable, CaseIterable {
             ("openai/", .openAI),
             ("anthropic/", .anthropic),
             ("deepseek/", .deepseek),
+            ("moonshotai/", .moonshot),
+            ("moonshot/", .moonshot),
+            ("kimi-code/", .moonshot),
             ("opencode-go/", .opencodeGo),
             ("commandcode/", .commandCode),
             ("command-code/", .commandCode)
@@ -42,13 +46,14 @@ nonisolated enum ModelProvider: String, Sendable, CaseIterable {
             return .openAI
         }
         if m.hasPrefix("deepseek-") { return .deepseek }
+        if m.hasPrefix("kimi-") || m == "k3" || m.hasPrefix("k3-") || m.hasPrefix("k3.") { return .moonshot }
 
         switch app {
         case .codex: return .openAI
         case .claude: return .anthropic
         case .cursor: return .other
         case .pi, .opencode: return .other
-        case .dsh, .antigravity: return .other
+        case .dsh, .antigravity, .kimi: return .other
         }
     }
 
@@ -59,6 +64,7 @@ nonisolated enum ModelProvider: String, Sendable, CaseIterable {
         case .openAI: return tr("OpenAI", "OpenAI")
         case .anthropic: return tr("Anthropic", "Anthropic")
         case .deepseek: return tr("DeepSeek", "DeepSeek")
+        case .moonshot: return tr("Moonshot AI", "Moonshot AI")
         case .opencodeGo: return tr("OpenCode-Go", "OpenCode-Go")
         case .commandCode: return tr("Command Code", "Command Code")
         case .other: return tr("Other", "其他")

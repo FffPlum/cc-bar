@@ -115,6 +115,19 @@ final class AppState {
             }
         }
     }
+    var kimiAccount: KimiAuthSession? {
+        didSet {
+            if oldValue?.accountKey != kimiAccount?.accountKey || oldValue?.accessToken != kimiAccount?.accessToken {
+                primaryAlertEntryVersions[.kimi, default: 0] &+= 1
+            }
+        }
+    }
+    var kimiError: String?
+    var kimiEmail: String?
+    var kimiPlanName: String?
+    @ObservationIgnored private var kimiRefreshID: UUID?
+    @ObservationIgnored private var kimiProfileAttempt: (accountKey: String, at: Date)?
+
     var codexError: String?
     var claudeError: String?
     /// 用户拒绝过读取 Claude Desktop 登录所需的钥匙串授权，且本机有 Desktop 登录数据。
@@ -247,6 +260,22 @@ final class AppState {
         get { refreshState(for: .opencodeGo) }
         set { updatePrimaryState(.opencodeGo) { $0.refresh = newValue } }
     }
+    var kimiQuota: QuotaSnapshot? {
+        get { quotaSnapshot(for: .kimi) }
+        set { updatePrimaryState(.kimi) { $0.snapshot = newValue } }
+    }
+    var kimiQuotaError: String? {
+        get { quotaError(for: .kimi) }
+        set { updatePrimaryState(.kimi) { $0.error = newValue } }
+    }
+    var kimiQuotaSource: QuotaSnapshotSource? {
+        get { quotaSource(for: .kimi) }
+        set { updatePrimaryState(.kimi) { $0.source = newValue } }
+    }
+    var kimiRefreshState: QuotaRefreshState {
+        get { refreshState(for: .kimi) }
+        set { updatePrimaryState(.kimi) { $0.refresh = newValue } }
+    }
     var quotaHistory = QuotaHistoryPayload()
     var quotaCycles = QuotaCyclePayload()
 
@@ -298,6 +327,8 @@ final class AppState {
             let account = commandCodeAccount
             // user.id 是稳定身份；login / name / email 的变化不重置提醒机会。
             return QuotaAlertIdentity(app: app, accountID: nonEmpty(account?.userID), userID: nonEmpty(account?.orgID))
+        case .kimi:
+            return QuotaAlertIdentity(app: app, accountID: kimiAccount?.accountKey, userID: nil)
         case .opencodeGo:
             // Go 没有账号资料，只能用 key 的完整 SHA-256 摘要区分账号；摘要不可逆，不含 key 片段。
             return QuotaAlertIdentity(app: app, accountID: opencodeGoAccount?.accountKey, userID: nil)
@@ -313,6 +344,7 @@ final class AppState {
         case .cursor: name = cursorAccount?.email
         case .commandCode: name = commandCodeAccount?.login ?? commandCodeAccount?.email
         case .opencodeGo: name = nil
+        case .kimi: name = kimiEmail
         }
         return nonEmpty(name) ?? QuotaProviderDescriptor.descriptor(for: app)?.title ?? app.rawValue
     }
@@ -439,6 +471,7 @@ final class AppState {
         handleCursorAccessRequest()
         await loadCommandCode(allowDuringTermination: true)
         await loadOpenCodeGo(allowDuringTermination: true)
+        await loadKimi(allowDuringTermination: true)
         recordCachedQuotaCycleObservations()
         logCredentialSummary()
 
@@ -526,13 +559,14 @@ final class AppState {
                 || SettingsStore.shared.isUsageServiceVisible(.cursor),
             showCommandCode: SettingsStore.shared.isProviderEnabled(.commandCode),
             showOpenCodeGo: SettingsStore.shared.isProviderEnabled(.opencodeGo),
+            showKimi: SettingsStore.shared.isProviderEnabled(.kimi),
             hasVisibleImported: importedCodexAccounts.contains(where: \.visibleInPopover)
         )
         AppLog.debug(.quota, """
             refresh plan reason=\(reason) codex=\(plan.refreshCodex) claude=\(plan.refreshClaude) \
             antigravity=\(plan.refreshAntigravity) cursor=\(plan.refreshCursor) \
             commandCode=\(plan.refreshCommandCode) opencodeGo=\(plan.refreshOpenCodeGo) \
-            imported=\(plan.refreshImported)
+            kimi=\(plan.refreshKimi) imported=\(plan.refreshImported)
             """)
         if plan.refreshCodex {
             await loadCodex()
@@ -563,6 +597,11 @@ final class AppState {
         if plan.refreshOpenCodeGo {
             await loadOpenCodeGo()
             await loadOpenCodeGoQuota(reason: reason)
+        }
+        if plan.refreshKimi {
+            await loadKimi()
+            await loadKimiQuota(reason: reason)
+            await loadKimiProfileIfNeeded()
         }
         if plan.refreshImported {
             await loadAllImportedCodexQuotas(
@@ -1931,6 +1970,144 @@ final class AppState {
         saveQuotaCache()
     }
 
+    /// 只读本地登录；续期由同一 OAuth 锁保护，额度缓存只在身份确实变化时清除。
+    func loadKimi(allowDuringTermination: Bool = false) async {
+        guard beginStateOperation(allowDuringTermination: allowDuringTermination) else { return }
+        defer { activeStateOperations -= 1 }
+        let next = await Task.detached(priority: .utility) { KimiCredentials.load() }.value
+        guard let next else {
+            kimiAccount = nil
+            kimiEmail = nil
+            kimiPlanName = nil
+            kimiError = tr("Sign in with Kimi Code CLI first", "请先在 Kimi Code CLI 中登录")
+            return
+        }
+        adoptKimiAccount(next)
+    }
+
+    private func adoptKimiAccount(_ next: KimiAuthSession) {
+        let previousKey = kimiAccount?.accountKey ?? quotaCache.kimi?.accountID
+        if let previousKey, previousKey != next.accountKey {
+            kimiRefreshID = nil
+            kimiQuota = nil
+            kimiQuotaSource = nil
+            kimiQuotaError = nil
+            kimiRefreshState = QuotaRefreshState()
+            quotaCache.kimi = nil
+            kimiEmail = nil
+            kimiPlanName = nil
+            kimiProfileAttempt = nil
+            saveQuotaCache()
+        }
+        kimiAccount = next
+        kimiError = nil
+    }
+
+    /// 可注入请求与续期，仅用于确定性验证退避、凭据轮换和陈旧响应隔离。
+    func loadKimiQuota(
+        reason: QuotaRefreshReason,
+        fetch: @Sendable (KimiAuthSession) async -> Result<QuotaSnapshot, QuotaError> = { await KimiQuotaClient.fetch(auth: $0) },
+        refresh: @Sendable (KimiAuthSession, Bool) async -> Result<KimiAuthSession, KimiTokenRefresher.Failure> = {
+            await KimiTokenRefresher.ensureFresh(auth: $0, force: $1)
+        }
+    ) async {
+        guard !isPreparingForTermination, !kimiRefreshState.inFlight else { return }
+        let now = Date()
+        if let until = kimiRefreshState.backoffUntil, until > now {
+            markKimiFailure(backoffMessage(until: until))
+            return
+        }
+        if reason == .periodic, let last = kimiRefreshState.lastSuccessAt,
+           now.timeIntervalSince(last) < minSuccessInterval { return }
+        guard let initial = kimiAccount else {
+            markKimiFailure(kimiError ?? noAccountMessage)
+            return
+        }
+        let requestID = UUID()
+        kimiRefreshID = requestID
+        kimiRefreshState.inFlight = true
+        kimiRefreshState.lastAttemptAt = now
+        defer {
+            if kimiRefreshID == requestID {
+                kimiRefreshState.inFlight = false
+                kimiRefreshID = nil
+            }
+        }
+        var auth: KimiAuthSession
+        switch await refresh(initial, false) {
+        case .success(let next): auth = next
+        case .failure(let failure):
+            guard kimiRefreshID == requestID else { return }
+            markKimiFailure(failure.userMessage, error: failure.quotaError)
+            return
+        }
+        guard kimiRefreshID == requestID, kimiAccount?.accountKey == initial.accountKey,
+              kimiAccount?.accessToken == initial.accessToken else { return }
+        adoptKimiAccount(auth)
+        // adoption may reset a genuinely changed identity; this operation now owns its refresh slot.
+        kimiRefreshID = requestID
+        kimiRefreshState.inFlight = true
+        kimiRefreshState.lastAttemptAt = now
+        let settingsVersion = SettingsStore.shared.quotaAlertRuntimeVersion
+        var result = await fetch(auth)
+        guard kimiRefreshID == requestID, kimiAccount?.accountKey == auth.accountKey,
+              kimiAccount?.accessToken == auth.accessToken else { return }
+        if case .failure(let error) = result, error.httpStatusCode == 401, !error.looksLikeInterceptedResponse {
+            switch await refresh(auth, true) {
+            case .success(let renewed):
+                guard kimiRefreshID == requestID, kimiAccount?.accountKey == auth.accountKey,
+                      kimiAccount?.accessToken == auth.accessToken else { return }
+                auth = renewed
+                adoptKimiAccount(renewed)
+                kimiRefreshID = requestID
+                kimiRefreshState.inFlight = true
+                result = await fetch(renewed)
+            case .failure(let failure):
+                guard kimiRefreshID == requestID else { return }
+                markKimiFailure(failure.userMessage, error: failure.quotaError)
+                return
+            }
+        }
+        guard kimiRefreshID == requestID, kimiAccount?.accountKey == auth.accountKey,
+              kimiAccount?.accessToken == auth.accessToken else { return }
+        switch result {
+        case .success(let snapshot):
+            guard snapshot.app == .kimi else {
+                markKimiFailure(QuotaError.decode("unexpected provider").userMessage)
+                return
+            }
+            storeKimi(snapshot: snapshot, source: .api)
+            observePrimaryQuota(snapshot, settingsVersion: settingsVersion)
+        case .failure(let error):
+            let message = (error.httpStatusCode == 401 || error.httpStatusCode == 403) && !error.looksLikeInterceptedResponse
+                ? tr("Kimi Code sign-in expired. Sign in again in the CLI.", "Kimi Code 登录已失效，请在 CLI 中重新登录")
+                : error.userMessage
+            markKimiFailure(message, error: error)
+        }
+    }
+
+    private func loadKimiProfileIfNeeded() async {
+        guard let auth = kimiAccount, kimiRefreshState.backoffUntil.map({ $0 > Date() }) != true else { return }
+        if let attempt = kimiProfileAttempt, attempt.accountKey == auth.accountKey,
+           Date().timeIntervalSince(attempt.at) < (kimiPlanName == nil ? 3600 : 6 * 3600) { return }
+        kimiProfileAttempt = (auth.accountKey, Date())
+        if let profile = await KimiQuotaClient.fetchUserInfo(auth: auth),
+           kimiAccount?.accountKey == auth.accountKey, kimiAccount?.accessToken == auth.accessToken,
+           auth.userID == nil || profile.userID == auth.userID {
+            kimiEmail = profile.email
+            kimiPlanName = profile.userLevelName
+            if var snapshot = kimiQuota, let plan = profile.userLevelName {
+                snapshot.planType = plan
+                kimiQuota = snapshot
+                if var record = quotaCache.kimi {
+                    record.snapshot.planType = plan
+                    quotaCache.kimi = record
+                    saveQuotaCache()
+                }
+            }
+        }
+    }
+
     private func loadCodexQuota(reason: QuotaRefreshReason) async {
         guard beginCodexRefresh(reason: reason) else { return }
         let alertEntryVersion = codexAlertEntryVersion
@@ -2696,6 +2873,26 @@ final class AppState {
         saveQuotaCache()
     }
 
+    private func storeKimi(snapshot: QuotaSnapshot, source: QuotaSnapshotSource) {
+        let updatedAt = Date()
+        let mergedSnapshot = snapshot.preservingFutureResetDates(from: kimiQuota, now: updatedAt)
+        kimiQuota = mergedSnapshot
+        kimiQuotaSource = source
+        kimiQuotaError = nil
+        kimiRefreshState.lastSuccessAt = updatedAt
+        kimiRefreshState.lastError = nil
+        kimiRefreshState.lastErrorIsNetwork = false
+        kimiRefreshState.backoffUntil = nil
+        kimiRefreshState.source = source
+        quotaCache.kimi = QuotaCacheRecord(
+            snapshot: mergedSnapshot,
+            source: source,
+            updatedAt: updatedAt,
+            accountID: kimiAccount?.accountKey
+        )
+        saveQuotaCache()
+    }
+
     private func markCodexFailure(_ message: String, error: QuotaError? = nil) {
         codexQuotaError = message
         codexRefreshState.lastError = message
@@ -2738,6 +2935,15 @@ final class AppState {
         opencodeGoRefreshState.lastErrorIsNetwork = error?.isNetworkFailure == true
         if error?.isRateLimited == true {
             opencodeGoRefreshState.backoffUntil = Date().addingTimeInterval(rateLimitBackoff)
+        }
+    }
+
+    private func markKimiFailure(_ message: String, error: QuotaError? = nil) {
+        kimiQuotaError = message
+        kimiRefreshState.lastError = message
+        kimiRefreshState.lastErrorIsNetwork = error?.isNetworkFailure == true
+        if error?.isRateLimited == true {
+            kimiRefreshState.backoffUntil = Date().addingTimeInterval(rateLimitBackoff)
         }
     }
 

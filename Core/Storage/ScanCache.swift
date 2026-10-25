@@ -128,6 +128,8 @@ nonisolated struct ScanState: Sendable, Equatable, Codable {
     /// Antigravity 逐对话库文件签名。可选字段兼容旧缓存；nil 时仅从零扫描 Antigravity。
     /// 贡献与 OpenCode 一样保存在同代 conversation-rollup 中，签名必须与日 / 对话聚合一起提交。
     var antigravity: AntigravityScanner.State?
+    /// Kimi 可选分区：旧快照缺失时从零采集，不使其他服务历史失效。
+    var kimi: KimiSessionScanner.State?
 }
 
 /// 保留插入顺序的去重集合，供三个扫描器做跨文件 ID 去重并按「最近 N 条」截断。
