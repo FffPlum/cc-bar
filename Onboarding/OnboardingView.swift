@@ -207,7 +207,7 @@ private struct DetectAccountsStep: View {
                     tint: .cursorAccent,
                     logoName: "cursor",
                     fallback: "C",
-                    isDetected: appState.cursorAccount != nil
+                    isDetected: appState.cursorAccount != nil || appState.cursorKeychainAccessRequired
                 )
                 DetectedAccountRow(
                     app: .commandCode,
@@ -268,6 +268,7 @@ private struct DetectAccountsStep: View {
             || appState.claudeAccount != nil
             || appState.antigravityAccount != nil
             || appState.cursorAccount != nil
+            || appState.cursorKeychainAccessRequired
             || appState.commandCodeAccount != nil
     }
 }

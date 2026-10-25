@@ -2,6 +2,8 @@
 
 > 状态：开发实现已完成，待使用真实已登录的 Cursor.app 做端到端验收。额度基础模型、`usage-summary` 离线解析、只读 SQLite/JWT/Cookie 认证、刷新调度、账号隔离缓存，远端用量分页与主窗口统计均已落地；Popover、菜单栏、悬浮窗、设置、Onboarding 和图标也已接入。Cursor 的额度 Provider 与统计可独立开启，默认关闭时不会产生远端刷新；`All` 只使用现有缓存且不会无界回溯，覆盖与刷新状态不额外显示在页面。产品、技术、布局和设计风格文档已同步。本文保留为接口字段、映射规则与风险判断的追溯材料。
 
+> 后续变更（2026-10）：Cursor 按账号灰度把 `cursorAuth/accessToken` 改为加密保存（`cursor-safe-storage:v1:`）。现在加密时经系统 `security` 读钥匙串 `Cursor Safe Storage` 解密，本草案中「不碰 Keychain」的约定已被取代，以 `技术实现.md` §5.3 为准。
+
 ## 1. 背景、目标与范围
 
 在 cc-bar 中新增 Cursor 支持，展示形态对齐现有 Provider，但明确区分“远端账户数据”和“本机日志数据”：

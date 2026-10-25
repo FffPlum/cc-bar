@@ -112,6 +112,10 @@ final class AppState {
     private var isPresentingClaudeDesktopAccessAlert = false
     var antigravityError: String?
     var cursorError: String?
+    /// Cursor 登录态已加密，但还没拿到读取 `Cursor Safe Storage` 的钥匙串授权（未看过说明、
+    /// 拒绝过，或 Cursor 未开启时不主动读取）。设置页据此显示「未授权」和「授权…」入口。
+    var cursorKeychainAccessRequired = false
+    private var isPresentingCursorAccessAlert = false
     var commandCodeError: String?
     var opencodeGoError: String?
 
@@ -421,6 +425,7 @@ final class AppState {
         // Cursor 只读本机 SQLite，用于账号页和 Onboarding 的登录态检测；
         // 是否请求其远端额度仍由 Provider / Stats 开关控制。
         await loadCursor()
+        handleCursorAccessRequest()
         await loadCommandCode(allowDuringTermination: true)
         await loadOpenCodeGo(allowDuringTermination: true)
         recordCachedQuotaCycleObservations()
@@ -533,6 +538,7 @@ final class AppState {
         }
         if plan.refreshCursor {
             await loadCursor()
+            handleCursorAccessRequest()
             await loadCursorQuota(reason: reason)
             // 远端用量与额度是两个独立接口：usage-summary 失败、限流退避或返回空额度时，
             // get-filtered-usage-events 仍应照常拉取，否则统计页会永远停在"暂不可用"。
@@ -1720,10 +1726,17 @@ final class AppState {
     private func loadCursor() async {
         guard beginStateOperation(allowDuringTermination: true) else { return }
         defer { activeStateOperations -= 1 }
+        // 登录态加密时要读钥匙串：Cursor 开着，或用户已走过授权说明时才读；
+        // 否则启动时的登录态检测会为一个没开启的服务弹授权框。
+        let settings = SettingsStore.shared
+        let allowKeychainRead = settings.isProviderEnabled(.cursor)
+            || settings.isUsageServiceVisible(.cursor)
+            || CursorAuth.hasExplainedAccess
         do {
             let next = try await Task.detached(priority: .utility) {
-                try CursorAuth.load()
+                try CursorAuth.load(allowKeychainRead: allowKeychainRead)
             }.value
+            cursorKeychainAccessRequired = false
             guard let next else {
                 cursorAccount = nil
                 cursorError = "Cursor is not installed or is not signed in"
@@ -1750,8 +1763,58 @@ final class AppState {
             usageService.activateCursorRemoteUsage(accountID: next.userID)
             cursorError = nil
         } catch {
+            if case .keychainAccessRequired = error as? CursorAuthError {
+                cursorKeychainAccessRequired = true
+            } else {
+                cursorKeychainAccessRequired = false
+            }
             cursorAccount = nil
             cursorError = String(describing: error)
+        }
+    }
+
+    /// `CursorAuth` 第一次需要读钥匙串时只登记请求、不弹系统授权框；这里先弹
+    /// CCBar 自己的说明，用户选「继续」后再读一次，系统授权框随之出现。
+    /// 说明框异步弹出，不阻塞本轮刷新。
+    private func handleCursorAccessRequest() {
+        guard CursorAuth.takeExplanationRequest() else { return }
+        Task { @MainActor [weak self] in
+            self?.presentCursorAccessExplanation()
+        }
+    }
+
+    /// 设置页「授权…」：清掉拒绝标记，重新走说明 → 系统授权。
+    func authorizeCursorAccess() {
+        CursorAuth.clearDenial()
+        presentCursorAccessExplanation()
+    }
+
+    private func presentCursorAccessExplanation() {
+        guard !isPresentingCursorAccessAlert, !isPreparingForTermination else { return }
+        isPresentingCursorAccessAlert = true
+        defer { isPresentingCursorAccessAlert = false }
+
+        let alert = NSAlert()
+        alert.messageText = tr("Allow Reading Cursor Sign-in", "允许读取 Cursor 登录")
+        alert.informativeText = tr(
+            "Cursor encrypts its sign-in. CCBar reads it through the system's security tool to query your quota and usage. macOS will then ask whether \"security\" can access \"Cursor Safe Storage\" — choose \"Always Allow\" and CCBar updates won't ask again.",
+            "Cursor 会加密保存登录状态，CCBar 通过系统自带的 security 工具读取它来查询额度和用量。接下来系统会询问「security」能否访问「Cursor Safe Storage」，请选「始终允许」，之后更新 CCBar 不再询问。"
+        )
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: tr("Continue", "继续"))
+        alert.addButton(withTitle: tr("Not Now", "暂不"))
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            CursorAuth.recordDenial()
+            cursorKeychainAccessRequired = true
+            AppLog.info(.credentials, "user postponed Cursor keychain access")
+            return
+        }
+        CursorAuth.markAccessExplained()
+        Task { [weak self] in
+            // Cursor 未开启时刷新计划会跳过它，先单独读一次，设置页的登录态随之更新。
+            await self?.loadCursor()
+            await self?.refreshQuotas(reason: .userInitiated)
         }
     }
 
@@ -2157,7 +2220,7 @@ final class AppState {
         defer { cursorRefreshState.inFlight = false }
 
         guard let session = cursorAccount else {
-            markCursorFailure(noAccountMessage)
+            markCursorFailure(cursorKeychainAccessRequired ? cursorKeychainAccessMessage : noAccountMessage)
             return
         }
 
@@ -2653,6 +2716,15 @@ final class AppState {
     /// 只是 cc-bar 这边读不到,前者才是准确的描述。
     private var noAccountMessage: String {
         tr("No sign-in found", "未找到登录信息")
+    }
+
+    /// Cursor 登录态已加密、还没授权读取钥匙串。登录信息其实在，只差授权，
+    /// 不能说成"未找到登录信息"。
+    private var cursorKeychainAccessMessage: String {
+        tr(
+            "Not allowed to read Cursor's sign-in — authorize in Settings → Services & Accounts",
+            "未授权读取 Cursor 登录，请到「设置 → 服务与账号」授权"
+        )
     }
 
     /// 整机凭据状态快照,凭据加载后记一次。

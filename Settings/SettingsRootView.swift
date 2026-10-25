@@ -1173,6 +1173,8 @@ struct SettingsRootView: View {
         let authorizeClaudeDesktop = ServiceAction(title: tr("Authorize…", "授权…")) {
             appState.authorizeClaudeDesktopAccess()
         }
+        // Cursor 登录态已加密、还没授权读取钥匙串：登录信息在，只差授权，按已检测到处理。
+        let cursorKeychainRequired = app == .cursor && appState.cursorKeychainAccessRequired
         var isDetected: Bool
         switch app {
         case .codex, .claude:
@@ -1189,7 +1191,7 @@ struct SettingsRootView: View {
         case .cursor:
             sourceLines.append(tr("Usage: fetches usage records from your Cursor account online.",
                                   "用量：联网读取 Cursor 账号的用量记录。"))
-            isDetected = info.signedIn
+            isDetected = info.signedIn || cursorKeychainRequired
         case .antigravity:
             sourceLines.append(tr(
                 "Usage: reads conversation records of the Antigravity app, IDE and CLI in ~/.gemini and calculates tokens and cost on this Mac. Model names in the app's records are partly inferred, so costs are estimates.",
@@ -1222,6 +1224,8 @@ struct SettingsRootView: View {
         let subtitle: String
         if claudeDesktopDenied, !info.signedIn {
             subtitle = tr("Not allowed to read Claude Desktop's sign-in", "未授权读取 Claude 桌面版登录")
+        } else if cursorKeychainRequired {
+            subtitle = tr("Not allowed to read Cursor's sign-in", "未授权读取 Cursor 登录")
         } else if !isDetected {
             subtitle = connectHint(for: app)
         } else if !info.signedIn {
@@ -1256,6 +1260,10 @@ struct SettingsRootView: View {
         let connectAction: ServiceAction?
         if claudeDesktopDenied {
             connectAction = authorizeClaudeDesktop
+        } else if cursorKeychainRequired {
+            connectAction = ServiceAction(title: tr("Authorize…", "授权…")) {
+                appState.authorizeCursorAccess()
+            }
         } else if !isDetected, app == .commandCode {
             connectAction = ServiceAction(title: tr("Enter Credentials…", "填写凭据…")) { showCommandCodeSheet = true }
         } else if !isDetected, app == .opencodeGo {
@@ -1350,8 +1358,8 @@ struct SettingsRootView: View {
             tr("Quota: reads the sign-in in ~/.gemini (agy CLI / IDE plugin) and asks Google for remaining quota. Read-only; your sign-in is not changed.",
                "额度：读取 ~/.gemini 中的登录状态（agy CLI / IDE 插件登录），向 Google 查询剩余额度。只读取，不改动登录。")
         case .cursor:
-            tr("Quota: reads the sign-in from the Cursor app and asks Cursor for remaining quota. Read-only; your sign-in is not changed.",
-               "额度：读取 Cursor 应用的登录状态，向 Cursor 查询剩余额度。只读取，不改动登录。")
+            tr("Quota: reads the sign-in from the Cursor app (decrypted with the Cursor Safe Storage key in Keychain when Cursor encrypts it) and asks Cursor for remaining quota. Read-only; your sign-in is not changed.",
+               "额度：读取 Cursor 应用的登录状态（Cursor 加密保存时，用钥匙串里的 Cursor Safe Storage 密钥解密），向 Cursor 查询剩余额度。只读取，不改动登录。")
         case .commandCode:
             tr("Quota: reads Command Code's local credentials or the ones you entered (stored in Keychain), and asks Command Code for remaining quota.",
                "额度：读取 Command Code 的本机凭据或手动填写的凭据（保存在钥匙串），向 Command Code 查询剩余额度。")

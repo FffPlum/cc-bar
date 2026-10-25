@@ -1,4 +1,5 @@
 import XCTest
+import CommonCrypto
 import SQLite3
 @testable import CCBar
 
@@ -122,6 +123,56 @@ final class CursorAuthTests: XCTestCase {
 
         XCTAssertTrue(first.belongsToSameAccount(as: sameSubject))
         XCTAssertFalse(first.belongsToSameAccount(as: otherSubject))
+    }
+
+    func testSealedAccessTokenDecryptsWithSafeStorageKey() throws {
+        let token = makeJWT(subject: "google-oauth2|user_sealed", expiration: 2_000)
+        let key = try XCTUnwrap(CursorAuth.encryptionKey(password: "safe-storage-password"))
+        let sealed = try seal(token, key: key)
+
+        XCTAssertTrue(sealed.hasPrefix("cursor-safe-storage:v1:"))
+        XCTAssertEqual(CursorAuth.decryptAccessToken(sealedValue: sealed, key: key), token)
+    }
+
+    func testSealedAccessTokenRejectsWrongKeyAndUnknownVersion() throws {
+        let token = makeJWT(subject: "google-oauth2|user_sealed", expiration: 2_000)
+        let key = try XCTUnwrap(CursorAuth.encryptionKey(password: "safe-storage-password"))
+        let otherKey = try XCTUnwrap(CursorAuth.encryptionKey(password: "another-password"))
+        let sealed = try seal(token, key: key)
+
+        XCTAssertNil(CursorAuth.decryptAccessToken(sealedValue: sealed, key: otherKey))
+        let futureVersion = sealed.replacingOccurrences(of: ":v1:", with: ":v2:")
+        XCTAssertNil(CursorAuth.decryptAccessToken(sealedValue: futureVersion, key: key))
+    }
+
+    /// 按 Electron safeStorage 的格式加密：`v10` + AES-128-CBC（IV 为 16 个空格），再加 Cursor 的前缀。
+    private func seal(_ plaintext: String, key: Data) throws -> String {
+        let input = Data(plaintext.utf8)
+        let iv = Data(repeating: 0x20, count: kCCBlockSizeAES128)
+        var output = Data(count: input.count + kCCBlockSizeAES128)
+        var outputCount = 0
+        let outputCapacity = output.count
+        let status = output.withUnsafeMutableBytes { outputBuffer in
+            input.withUnsafeBytes { inputBuffer in
+                key.withUnsafeBytes { keyBuffer in
+                    iv.withUnsafeBytes { ivBuffer in
+                        CCCrypt(
+                            CCOperation(kCCEncrypt),
+                            CCAlgorithm(kCCAlgorithmAES128),
+                            CCOptions(kCCOptionPKCS7Padding),
+                            keyBuffer.baseAddress, key.count,
+                            ivBuffer.baseAddress,
+                            inputBuffer.baseAddress, input.count,
+                            outputBuffer.baseAddress, outputCapacity,
+                            &outputCount
+                        )
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(status, Int32(kCCSuccess))
+        let blob = Data("v10".utf8) + output.prefix(outputCount)
+        return "cursor-safe-storage:v1:" + blob.base64EncodedString()
     }
 
     @discardableResult
