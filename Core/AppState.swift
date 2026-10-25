@@ -76,6 +76,11 @@ final class AppState {
         guard let cached = claudeProfile, cached.accountKey == claudeProfileAccountKey(account) else { return nil }
         return cached.profile
     }
+    /// 上次在 agy 取数后补查套餐 / 邮箱的时间。agy JSON 不带套餐，不定期重查会一直停在旧订阅；
+    /// 成功后隔 `antigravityPlanRefreshInterval` 重查，失败或缺字段时隔 `antigravityPlanRetryInterval` 再试。仅内存。
+    @ObservationIgnored private var antigravityPlanAttempt: (at: Date, succeeded: Bool)?
+    private let antigravityPlanRefreshInterval: TimeInterval = 6 * 60 * 60
+    private let antigravityPlanRetryInterval: TimeInterval = 60 * 60
     var antigravityAccount: AntigravityAccount? {
         didSet {
             if oldValue?.email != antigravityAccount?.email || oldValue?.accessToken != antigravityAccount?.accessToken
@@ -1725,6 +1730,7 @@ final class AppState {
         antigravityQuotaSource = nil
         antigravityQuotaError = nil
         antigravityRefreshState = QuotaRefreshState()
+        antigravityPlanAttempt = nil
         quotaCache.antigravity = nil
         saveQuotaCache()
     }
@@ -2095,17 +2101,26 @@ final class AppState {
             account = current
             account.planType = account.planType ?? antigravityQuota?.planType
             var planRateLimit: QuotaError?
-            if let token = account.accessToken, !AntigravityCredentials.isExpired(expiryDate: account.expiryDate) {
-                if account.planType == nil {
-                    switch await AntigravityQuotaClient.fetchPlan(accessToken: token) {
-                    case .success(let plan): account.planType = plan
-                    case .failure(let error):
-                        if error.isRateLimited { planRateLimit = error }
+            let now = Date()
+            let planCheckDue = antigravityPlanCheckDue(now: now)
+            // 先记一次失败，拿不到令牌时也按重试间隔再试，不每轮读钥匙串。
+            if planCheckDue { antigravityPlanAttempt = (now, false) }
+            if planCheckDue, let token = await antigravityPlanLookupToken(account: account) {
+                var succeeded = false
+                switch await AntigravityQuotaClient.fetchPlan(accessToken: token) {
+                case .success(let plan):
+                    // 订阅变化（升级、到期）以服务端最新值为准；没返回套餐时保留旧值。
+                    if let plan {
+                        account.planType = plan
+                        succeeded = true
                     }
+                case .failure(let error):
+                    if error.isRateLimited { planRateLimit = error }
                 }
                 if account.email == nil, planRateLimit == nil {
                     account.email = await AntigravityQuotaClient.fetchAccountEmail(accessToken: token)
                 }
+                antigravityPlanAttempt = (now, succeeded && account.email != nil)
             }
             guard let current = antigravityAccount,
                   !antigravityIdentityChanged(previous: current, next: account) else { return }
@@ -2173,6 +2188,25 @@ final class AppState {
         case .failure(let err):
             markAntigravityFailure(err.userMessage, error: err)
         }
+    }
+
+    private func antigravityPlanCheckDue(now: Date) -> Bool {
+        guard let attempt = antigravityPlanAttempt else { return true }
+        let interval = attempt.succeeded ? antigravityPlanRefreshInterval : antigravityPlanRetryInterval
+        return now.timeIntervalSince(attempt.at) >= interval
+    }
+
+    /// agy 取数后查套餐 / 邮箱用的令牌：优先 agy 自己的（agy 刚取过额度，会自行续期），
+    /// 与 CLI 额度属于同一账号；没有有效的再退回 cc-bar 读到的云端令牌。
+    private func antigravityPlanLookupToken(account: AntigravityAccount) async -> String? {
+        let cliToken = await Task.detached(priority: .utility) { AntigravityCredentials.loadCLIToken() }.value
+        if case .found(let token) = cliToken, token.isValid, let accessToken = token.accessToken {
+            return accessToken
+        }
+        if let accessToken = account.accessToken, !AntigravityCredentials.isExpired(expiryDate: account.expiryDate) {
+            return accessToken
+        }
+        return nil
     }
 
     private func beginAntigravityRefresh(reason: QuotaRefreshReason) -> Bool {

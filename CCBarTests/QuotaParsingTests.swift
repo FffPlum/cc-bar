@@ -364,13 +364,23 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertEqual(fetched.snapshot.planType, "Google AI Pro")
     }
 
-    /// 没有付费订阅时仍保留 currentTier 作为套餐兜底。
+    /// 没有付费订阅时仍保留 currentTier 作为套餐兜底；free-tier 显示为 Free。
     func testAntigravityLoadCodeAssistFallsBackToCurrentTier() {
         let root: [String: Any] = [
             "currentTier": ["id": "free-tier", "name": "Antigravity"],
         ]
         let fetched = AntigravityQuotaClient.parse(root: root, fetchedAt: Date(timeIntervalSince1970: 1_750_000_000))
-        XCTAssertEqual(fetched.snapshot.planType, "free-tier")
+        XCTAssertEqual(fetched.snapshot.planType, "Free")
+    }
+
+    /// 免费账号的 paidTier 也是 free-tier（名为 Antigravity Starter Quota），显示为 Free。
+    func testAntigravityLoadCodeAssistShowsFreePaidTierAsFree() {
+        let root: [String: Any] = [
+            "currentTier": ["id": "free-tier", "name": "Antigravity"],
+            "paidTier": ["id": "free-tier", "name": "Antigravity Starter Quota"],
+        ]
+        let fetched = AntigravityQuotaClient.parse(root: root, fetchedAt: Date(timeIntervalSince1970: 1_750_000_000))
+        XCTAssertEqual(fetched.snapshot.planType, "Free")
     }
 
     /// 服务端未给 resetTime 时只展示额度，不按窗口长度虚构重置时间。

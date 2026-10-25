@@ -303,17 +303,17 @@ nonisolated enum AntigravityQuotaClient {
         // Google AI 订阅身份在 paidTier；Pro 账号仍可能同时返回 currentTier=free-tier，
         // 后者是基础 Code Assist 层级，不能覆盖付费订阅。展示优先用官方套餐名。
         if let paid = root["paidTier"] as? [String: Any],
-           let paidPlan = nonEmpty(paid["name"] as? String) ?? nonEmpty(paid["id"] as? String)
+           let paidPlan = paidTierPlanName(paid)
         {
             planType = paidPlan
         } else if let cur = root["currentTier"] as? [String: Any], let id = cur["id"] as? String {
-            planType = id
+            planType = tierPlanName(id)
         } else if let cur = root["currentTier"] as? String {
-            planType = cur
+            planType = tierPlanName(cur)
         } else if let allowed = root["allowedTiers"] as? [[String: Any]], let first = allowed.first, let id = first["id"] as? String {
-            planType = id
+            planType = tierPlanName(id)
         } else if let tier = root["tier"] as? [String: Any], let id = tier["id"] as? String {
-            planType = id
+            planType = tierPlanName(id)
         }
 
         // 2. 若 root 顶层包含 "groups"（retrieveUserQuotaSummary 的权威结构，
@@ -672,6 +672,17 @@ nonisolated enum AntigravityQuotaClient {
         // remainingAmount / limit 推算
         if let used = bucket["usedPercent"] as? Double { return 1 - used / 100 }
         return nil
+    }
+
+    /// 免费层 id 为 `free-tier`，官方名是「Antigravity Starter Quota」（paidTier）或「Antigravity」
+    /// （currentTier），都看不出是免费层，统一显示 Free；其他层级保持原值。
+    private static func tierPlanName(_ id: String) -> String {
+        id == "free-tier" ? "Free" : id
+    }
+
+    private static func paidTierPlanName(_ tier: [String: Any]) -> String? {
+        if let id = nonEmpty(tier["id"] as? String), id == "free-tier" { return tierPlanName(id) }
+        return nonEmpty(tier["name"] as? String) ?? nonEmpty(tier["id"] as? String)
     }
 
     private static func nonEmpty(_ value: String?) -> String? {
