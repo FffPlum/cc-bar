@@ -39,6 +39,11 @@ struct KimiManagedAccountsSettingsView: View {
                     ))
                     .frame(width: ServiceRowMetrics.destination)
                     Menu {
+                        if appState.kimiTokenStore.isAccessBlocked(accountID: account.id) {
+                            Button(tr("Retry Keychain Access…", "重试钥匙串访问…")) {
+                                Task { await appState.retryKimiKeychainAccess(id: account.id) }
+                            }
+                        }
                         Button(tr("Sign in again…", "重新登录…")) { loginAccountID = account.id }
                         Button(tr("Remove…", "删除…"), role: .destructive) { deleteTarget = account }
                     } label: {

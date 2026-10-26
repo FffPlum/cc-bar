@@ -130,7 +130,11 @@ extension AppState {
         if let until = state.backoffUntil, until > now { moonshotErrors[id] = backoffMessage(until: until); return }
         if reason == .periodic, let last = state.lastSuccessAt, now.timeIntervalSince(last) < 60 { return }
         guard let key = store.load(accountID: id) else {
-            moonshotErrors[id] = tr("Enter the Moonshot API key again", "请重新填写 Moonshot API Key")
+            let message = store.isAccessBlocked(accountID: id) ? ManagedKeychainError.pausedMessage
+                : tr("Enter the Moonshot API key again", "请重新填写 Moonshot API Key")
+            moonshotErrors[id] = message
+            state.lastError = message
+            moonshotRefreshStates[id] = state
             return
         }
         let fingerprint = KimiManagedAccount.digest(account.region.rawValue + ":" + key)
@@ -174,6 +178,12 @@ extension AppState {
             if error.isRateLimited { state.backoffUntil = Date().addingTimeInterval(600) }
             moonshotRefreshStates[id] = state
         }
+    }
+
+    func retryMoonshotKeychainAccess(id: String) async {
+        guard let account = moonshotAccounts.first(where: { $0.id == id }) else { return }
+        moonshotAPIKeyStore.retryAccess(accountID: id)
+        await loadMoonshotBalance(account: account, reason: .userInitiated)
     }
 
     private func saveMoonshotBalanceCache() {

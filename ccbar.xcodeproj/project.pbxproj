@@ -165,6 +165,7 @@
 		49C2AD05000000000001AABB /* QuotaAlertStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AD05000000000001AAAA /* QuotaAlertStore.swift */; };
 		49C2AD06000000000001AABB /* QuotaAlertTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AD06000000000001AAAA /* QuotaAlertTests.swift */; };
 		B71E0100000000000000AABB /* KimiManagedAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0100000000000000AAAA /* KimiManagedAccountStore.swift */; };
+		B71E3100000000000000AABB /* CachedManagedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E3100000000000000AAAA /* CachedManagedKeychain.swift */; };
 		B71E0200000000000000AABB /* KimiDeviceAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0200000000000000AAAA /* KimiDeviceAuthorization.swift */; };
 		B71E0300000000000000AABB /* KimiManagedTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0300000000000000AAAA /* KimiManagedTokenRefresher.swift */; };
 		B71E0400000000000000AABB /* KimiManagedQuotaCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0400000000000000AAAA /* KimiManagedQuotaCache.swift */; };
@@ -177,6 +178,7 @@
 		B71E0B00000000000000AABB /* MoonshotAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0B00000000000000AAAA /* MoonshotAccountsView.swift */; };
 		B71E0C00000000000000AABB /* MoonshotBalancesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0C00000000000000AAAA /* MoonshotBalancesSection.swift */; };
 		B71E2100000000000000AABB /* KimiManagedAccountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E2100000000000000AAAA /* KimiManagedAccountTests.swift */; };
+		B71E3200000000000000AABB /* CachedManagedKeychainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E3200000000000000AAAA /* CachedManagedKeychainTests.swift */; };
 		B71E2200000000000000AABB /* MoonshotBalanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E2200000000000000AAAA /* MoonshotBalanceTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -350,6 +352,7 @@
 		49C2AD05000000000001AAAA /* QuotaAlertStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaAlertStore.swift; sourceTree = "<group>"; };
 		49C2AD06000000000001AAAA /* QuotaAlertTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaAlertTests.swift; sourceTree = "<group>"; };
 		B71E0100000000000000AAAA /* KimiManagedAccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedAccountStore.swift; sourceTree = "<group>"; };
+		B71E3100000000000000AAAA /* CachedManagedKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedManagedKeychain.swift; sourceTree = "<group>"; };
 		B71E0200000000000000AAAA /* KimiDeviceAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiDeviceAuthorization.swift; sourceTree = "<group>"; };
 		B71E0300000000000000AAAA /* KimiManagedTokenRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedTokenRefresher.swift; sourceTree = "<group>"; };
 		B71E0400000000000000AAAA /* KimiManagedQuotaCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedQuotaCache.swift; sourceTree = "<group>"; };
@@ -362,6 +365,7 @@
 		B71E0B00000000000000AAAA /* MoonshotAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotAccountsView.swift; sourceTree = "<group>"; };
 		B71E0C00000000000000AAAA /* MoonshotBalancesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotBalancesSection.swift; sourceTree = "<group>"; };
 		B71E2100000000000000AAAA /* KimiManagedAccountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedAccountTests.swift; sourceTree = "<group>"; };
+		B71E3200000000000000AAAA /* CachedManagedKeychainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedManagedKeychainTests.swift; sourceTree = "<group>"; };
 		B71E2200000000000000AAAA /* MoonshotBalanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotBalanceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -494,6 +498,7 @@
 				49C1B191000000000001AAAA /* ImportedCodexAccount.swift */,
 				49C1B192000000000001AAAA /* ImportedCodexStore.swift */,
 				B71E0100000000000000AAAA /* KimiManagedAccountStore.swift */,
+				B71E3100000000000000AAAA /* CachedManagedKeychain.swift */,
 				B71E0800000000000000AAAA /* MoonshotAccountStore.swift */,
 			);
 			path = Credentials;
@@ -662,6 +667,7 @@
 				B71D5000000000000000AAAA /* KimiQuotaIntegrationTests.swift */,
 				B71D4000000000000000AAAA /* KimiQuotaClientTests.swift */,
 				B71E2100000000000000AAAA /* KimiManagedAccountTests.swift */,
+				B71E3200000000000000AAAA /* CachedManagedKeychainTests.swift */,
 				B71E2200000000000000AAAA /* MoonshotBalanceTests.swift */,
 				49C1BF03000000000001AAAA /* ImportedCodexStoreTests.swift */,
 				49C1BF04000000000001AAAA /* ScannerIncrementalTests.swift */,
@@ -950,6 +956,7 @@
 				49C1B194000000000001AABB /* ImportedCodexAccountsView.swift in Sources */,
 				49C1B195000000000001AABB /* CodexResetCreditsDetailView.swift in Sources */,
 				B71E0100000000000000AABB /* KimiManagedAccountStore.swift in Sources */,
+				B71E3100000000000000AABB /* CachedManagedKeychain.swift in Sources */,
 				B71E0200000000000000AABB /* KimiDeviceAuthorization.swift in Sources */,
 				B71E0300000000000000AABB /* KimiManagedTokenRefresher.swift in Sources */,
 				B71E0400000000000000AABB /* KimiManagedQuotaCache.swift in Sources */,
@@ -978,6 +985,7 @@
 				B71D5000000000000000AABB /* KimiQuotaIntegrationTests.swift in Sources */,
 				B71D4000000000000000AABB /* KimiQuotaClientTests.swift in Sources */,
 				B71E2100000000000000AABB /* KimiManagedAccountTests.swift in Sources */,
+				B71E3200000000000000AABB /* CachedManagedKeychainTests.swift in Sources */,
 				B71E2200000000000000AABB /* MoonshotBalanceTests.swift in Sources */,
 				49C1BF03000000000001AABB /* ImportedCodexStoreTests.swift in Sources */,
 				49C1BF04000000000001AABB /* ScannerIncrementalTests.swift in Sources */,

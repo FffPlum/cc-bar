@@ -228,6 +228,12 @@ extension AppState {
         }
     }
 
+    func retryKimiKeychainAccess(id: String) async {
+        guard let account = kimiManagedAccounts.first(where: { $0.id == id }) else { return }
+        kimiTokenStore.retryAccess(accountID: id)
+        await loadKimiManagedQuota(account: account, reason: .userInitiated)
+    }
+
     func loadKimiManagedQuota(
         account: KimiManagedAccount, reason: QuotaRefreshReason, tokenStore: (any KimiTokenStore)? = nil,
         fetch: @Sendable (KimiAuthSession) async -> Result<QuotaSnapshot, QuotaError> = { await KimiQuotaClient.fetch(auth: $0) },
@@ -259,7 +265,7 @@ extension AppState {
         switch await KimiManagedTokenRefresher.ensureFresh(account: account, tokenStore: store, isCurrent: isCurrent) {
         case .success(let value): tokens = value
         case .failure(let error):
-            if isCurrent() { markKimiManagedFailure(account: account, error: error) }
+            if isCurrent() { markKimiManagedFailure(account: account, error: error, keychainBlocked: store.isAccessBlocked(accountID: id)) }
             return
         }
         guard isCurrent(), tokensMatchKimiAccount(tokens, account: account) else { return }
@@ -272,7 +278,7 @@ extension AppState {
                 guard isCurrent(), tokensMatchKimiAccount(tokens, account: account) else { return }
                 result = await fetch(account.auth(tokens: tokens, homeDirectory: FileManager.default.homeDirectoryForCurrentUser))
             case .failure(let error):
-                if isCurrent() { markKimiManagedFailure(account: account, error: error) }
+                if isCurrent() { markKimiManagedFailure(account: account, error: error, keychainBlocked: store.isAccessBlocked(accountID: id)) }
                 return
             }
         }
@@ -337,10 +343,11 @@ extension AppState {
         recordKimiQuotaHistory(snapshot: merged, sampledAt: now, managedAccountKey: account.auth(tokens: tokens, homeDirectory: FileManager.default.homeDirectoryForCurrentUser).accountKey)
     }
 
-    private func markKimiManagedFailure(account: KimiManagedAccount, error: QuotaError) {
-        kimiManagedErrors[account.id] = error.userMessage
+    private func markKimiManagedFailure(account: KimiManagedAccount, error: QuotaError, keychainBlocked: Bool = false) {
+        let message = keychainBlocked ? ManagedKeychainError.pausedMessage : error.userMessage
+        kimiManagedErrors[account.id] = message
         var state = kimiManagedRefreshStates[account.id] ?? QuotaRefreshState()
-        state.lastError = error.userMessage
+        state.lastError = message
         state.lastErrorIsNetwork = error.isNetworkFailure
         if error.isRateLimited { state.backoffUntil = Date().addingTimeInterval(600) }
         kimiManagedRefreshStates[account.id] = state

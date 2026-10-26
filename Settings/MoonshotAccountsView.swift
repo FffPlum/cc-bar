@@ -44,6 +44,11 @@ struct MoonshotAccountsSettingsView: View {
                     ))
                     .frame(width: ServiceRowMetrics.destination)
                     Menu {
+                        if appState.moonshotAPIKeyStore.isAccessBlocked(accountID: account.id) {
+                            Button(tr("Retry Keychain Access…", "重试钥匙串访问…")) {
+                                Task { await appState.retryMoonshotKeychainAccess(id: account.id) }
+                            }
+                        }
                         Button(tr("Edit…", "编辑…")) {
                             editingID = account.id
                             showEditor = true

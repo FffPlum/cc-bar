@@ -1,3 +1,4 @@
+import Security
 import XCTest
 @testable import CCBar
 
@@ -561,6 +562,78 @@ final class KimiManagedAccountTests: XCTestCase {
         XCTAssertEqual(state.displayedKimiServiceStatus?.indicator, .unknown)
         XCTAssertEqual(state.displayedKimiServiceStatus?.components.count, 1)
         XCTAssertTrue(state.displayedKimiServiceStatus?.isStale ?? false)
+    }
+
+    func testKimiCachedRefreshPausesDeniedAccessAndRejectsReplacedCredentials() async throws {
+        let (state, root) = try isolatedState()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let previous = SettingsStore.shared.isProviderEnabled(.kimi)
+        SettingsStore.shared.setServiceEnabled(true, for: .kimi)
+        defer { SettingsStore.shared.setServiceEnabled(previous, for: .kimi) }
+        let backend = CountingManagedKeychain()
+        let store = KimiKeychainStore(keychain: CachedManagedKeychain(service: "test", backend: backend, defaults: nil))
+        state.kimiTokenStore = store
+        let account = KimiManagedAccount(id: "cached", region: .china, userID: "user")
+        state.kimiManagedAccounts = [account]
+        let snapshot = Self.regressionSnapshot()
+        state.kimiManagedQuotas[account.id] = snapshot
+        backend.state.withLock { $0.readStatus = errSecUserCanceled }
+        for reason in [QuotaRefreshReason.periodic, .periodic, .userInitiated] {
+            await state.loadKimiManagedQuota(account: account, reason: reason,
+                fetch: { _ in XCTFail("Paused credentials must not reach the network"); return .success(snapshot) },
+                profile: { _ in nil })
+        }
+        XCTAssertEqual(backend.state.withLock { $0.reads }, 1)
+        XCTAssertEqual(state.kimiManagedErrors[account.id], ManagedKeychainError.pausedMessage)
+        XCTAssertEqual(state.kimiManagedQuotas[account.id], snapshot)
+
+        let tokens = regressionTokens()
+        backend.state.withLock {
+            $0.readStatus = nil
+            $0.data["test:cached"] = try? JSONEncoder().encode(tokens)
+        }
+        store.retryAccess(accountID: account.id)
+        await state.loadKimiManagedQuota(account: account, reason: .userInitiated,
+            fetch: { _ in .success(snapshot) }, profile: { _ in nil })
+        XCTAssertNil(state.kimiManagedErrors[account.id])
+        XCTAssertEqual(backend.state.withLock { $0.reads }, 2, "All response checks must reuse the one cached read")
+
+        // A replacement written during the request is immediately visible to
+        // late-response checks, even though those checks no longer hit Keychain.
+        let late = try XCTUnwrap(KimiQuotaClient.parse(root: ["usages": ["limit_5h": ["used_ratio": 0.9]]]))
+        let renewed = KimiManagedTokens(accessToken: "new", refreshToken: "new-refresh", expiresAt: nil)
+        await state.loadKimiManagedQuota(account: account, reason: .userInitiated,
+            fetch: { _ in
+                try? store.save(renewed, accountID: account.id)
+                return .success(late)
+            }, profile: { _ in nil })
+        XCTAssertEqual(state.kimiManagedQuotas[account.id], snapshot)
+        XCTAssertEqual(store.load(accountID: account.id), renewed)
+        XCTAssertEqual(backend.state.withLock { $0.reads }, 2)
+    }
+
+    func testMoonshotCachedRefreshPausesDeniedAccessAndKeeps429Backoff() async throws {
+        let (state, root) = try isolatedState()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let backend = CountingManagedKeychain()
+        let store = MoonshotKeychainStore(keychain: CachedManagedKeychain(service: "test", backend: backend, defaults: nil))
+        state.moonshotAPIKeyStore = store
+        let account = MoonshotAccount(id: "cached", name: "test", region: .china)
+        state.moonshotAccounts = [account]
+        backend.state.withLock { $0.readStatus = errSecAuthFailed }
+        for _ in 0..<3 {
+            await state.loadMoonshotBalance(account: account, reason: .userInitiated,
+                fetch: { _, _ in XCTFail("Paused credentials must not reach the network"); return .failure(.missingToken) })
+        }
+        XCTAssertEqual(backend.state.withLock { $0.reads }, 1)
+        XCTAssertEqual(state.moonshotErrors[account.id], ManagedKeychainError.pausedMessage)
+        backend.state.withLock { $0.readStatus = nil; $0.data["test:cached"] = Data("key".utf8) }
+        store.retryAccess(accountID: account.id)
+        await state.loadMoonshotBalance(account: account, reason: .userInitiated,
+            fetch: { _, _ in .failure(.http(429, "limited")) })
+        await state.retryMoonshotKeychainAccess(id: account.id)
+        XCTAssertEqual(backend.state.withLock { $0.reads }, 2)
+        XCTAssertTrue((state.moonshotRefreshStates[account.id]?.backoffUntil ?? .distantPast) > Date())
     }
 
     private func isolatedState() throws -> (AppState, URL) {

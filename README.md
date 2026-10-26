@@ -161,7 +161,7 @@ sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 SPARKLE_PUBLIC_ED_KEY="你的更新公钥" ./scripts/build.sh
 ```
 
-构建前需按 [更新签名配置](docs/打包发布.md#首次配置更新签名密钥) 设置 `SPARKLE_PUBLIC_ED_KEY` 公钥。构建脚本使用 `CODE_SIGNING_ALLOWED=NO` 编译，再逐层进行 ad-hoc 签名，产出 `dist/CCBar.dmg` 与 `dist/CCBar.app.zip`。安装包不绑定本机开发证书；支持的 CPU 架构以实际构建产物为准，首次启动的系统提示见上方安装说明。
+构建前需按 [更新签名配置](docs/打包发布.md#首次配置更新签名密钥) 设置 `SPARKLE_PUBLIC_ED_KEY` 公钥。构建脚本使用 `CODE_SIGNING_ALLOWED=NO` 编译，再逐层签名，产出 `dist/CCBar.dmg` 与 `dist/CCBar.app.zip`。默认使用 ad-hoc；本机自用可先运行一次 `python3 scripts/setup-local-signing.py`，后续打包自动复用固定的自签名证书，详见 [本机签名配置](docs/打包发布.md#本机固定自签名仅本机自用)。默认 ad-hoc 安装包不绑定本机开发证书；支持的 CPU 架构以实际构建产物为准，首次启动的系统提示见上方安装说明。
 
 > [!WARNING]
 > 请勿使用 Xcode 菜单中的 **Product → Archive** 导出分发，该方式会绑定个人开发证书，导致构建包无法在其他设备运行。

@@ -98,7 +98,7 @@ xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destinat
 
 - 更新签名需按 `docs/打包发布.md` 一次性配置公钥和 CI 私钥；本地打包传入 `SPARKLE_PUBLIC_ED_KEY`。缺失时正式打包 / 发布会停止，避免分发无法验证更新的 App。
 - 首次需要把命令行工具指向完整 Xcode（一次性）：`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`。
-- 脚本用 `CODE_SIGN_IDENTITY="" CODE_SIGNING_ALLOWED=NO` 做 Release 构建，再为 Sparkle 嵌套组件和主 App 逐层 ad-hoc 签名，不需要付费 Developer ID 证书或公证。支持的 CPU 架构以实际构建产物为准。
+- 脚本用 `CODE_SIGN_IDENTITY="" CODE_SIGNING_ALLOWED=NO` 做 Release 构建，再为 Sparkle 嵌套组件和主 App 逐层签名；默认与 CI 保持 ad-hoc，本机可运行 `python3 scripts/setup-local-signing.py` 配置固定自签名身份供后续打包自动复用，不需要付费 Developer ID 证书或公证。支持的 CPU 架构以实际构建产物为准。
 - **产物固定输出到 `dist/CCBar.dmg` 和 `dist/CCBar.app.zip`**（`dist/` 已在 `.gitignore` 里，不进版本库）。脚本会先清空 `build/` 目录再重新构建。
 - 打包好的 DMG 和 zip 上传到 GitHub Release 即可分发；不要直接替换用户本机 `/Applications/CCBar.app`——那是覆盖用户正在使用的安装，属于有风险操作，要打包验证就在 `dist/` 或临时目录里查看，不要动 `/Applications`。
 - 完整背景说明见 [README.md](README.md#从源码构建) 和 [docs/打包发布.md](docs/打包发布.md)（该文档里的 Archive / Developer ID 流程只是给需要公证发布给别人用的场景保留的可选项，日常打包不要用）。

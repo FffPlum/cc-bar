@@ -2,7 +2,7 @@
 #
 # build.sh — 命令行构建 CCBar 并同时打包成可分发的 DMG 和 zip。
 #
-# 免费 ad-hoc 分发。Sparkle 的框架和安装助手逐层签名后，再封装外层 App；
+# 本机可复用固定证书；未配置时沿用 ad-hoc。Sparkle 的嵌套组件逐层签名；
 # Sparkle 的 EdDSA 更新包签名由 release workflow 完成，和 Apple 代码签名独立。
 #
 # 用法:
@@ -19,6 +19,38 @@ BUILD_DIR="$REPO_ROOT/build"
 OUT_DIR="${1:-$REPO_ROOT/dist}"
 APP="$BUILD_DIR/Build/Products/Release/CCBar.app"
 
+# Local private keys remain in Keychain. CI never consumes a workstation config.
+# An explicitly configured but unavailable identity must not fall back to ad-hoc.
+SIGN_IDENTITY="${CCBAR_SIGN_IDENTITY:-}"
+if [[ -z "$SIGN_IDENTITY" && -z "${CI:-}" ]]; then
+  SIGN_IDENTITY="$(python3 - <<'PY'
+import json
+from pathlib import Path
+p = Path.home() / 'Library/Application Support/CCBar/local-signing.json'
+if p.exists():
+    identity = json.loads(p.read_text()).get('identity')
+    if not isinstance(identity, str) or not identity:
+        raise SystemExit('本机签名配置无效；请检查 local-signing.json')
+    print(identity)
+PY
+)"
+fi
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+if [[ "$SIGN_IDENTITY" != "-" ]]; then
+  SIGN_IDENTITY="$(CCBAR_REQUESTED_IDENTITY="$SIGN_IDENTITY" python3 - <<'PY'
+import os, re, subprocess
+requested = os.environ['CCBAR_REQUESTED_IDENTITY']
+output = subprocess.check_output(['/usr/bin/security', 'find-identity', '-v', '-p', 'codesigning'], text=True)
+matches = [(fingerprint, name) for fingerprint, name in re.findall(r'([0-9A-F]{40}) "([^"\n]+)"', output)
+           if requested.upper() == fingerprint or requested == name]
+if len(matches) != 1:
+    raise SystemExit('指定的签名身份不存在、无效或不唯一；请恢复原证书与私钥。')
+print(matches[0][0])
+PY
+)"
+fi
+echo "==> 签名身份: $SIGN_IDENTITY"
+
 # 正式分发必须包含更新验证公钥。仅有 UI、没有公钥的包不能发布。
 : "${SPARKLE_PUBLIC_ED_KEY:?请先配置 SPARKLE_PUBLIC_ED_KEY；见 docs/打包发布.md}"
 python3 -c 'import base64, os, sys
@@ -32,7 +64,7 @@ if len(key) != 32:
 echo "==> [1/4] 清理旧构建"
 rm -rf "$BUILD_DIR"
 
-echo "==> [2/4] 编译(Release,不签名 → 自动 ad-hoc)"
+echo "==> [2/4] 编译(Release,由脚本统一签名)"
 xcodebuild \
   -project ccbar.xcodeproj \
   -scheme ccbar \
@@ -56,15 +88,15 @@ SPARKLE_CONTENTS="$SPARKLE_FRAMEWORK/Versions/B"
 }
 for SERVICE in "$SPARKLE_CONTENTS"/XPCServices/*.xpc; do
   [[ -d "$SERVICE" ]] || continue
-  codesign --force --sign - --options runtime --timestamp=none \
+  codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none \
     --preserve-metadata=entitlements "$SERVICE"
 done
-codesign --force --sign - --options runtime --timestamp=none "$SPARKLE_CONTENTS/Autoupdate"
-codesign --force --sign - --options runtime --timestamp=none "$SPARKLE_CONTENTS/Updater.app"
-codesign --force --sign - --options runtime --timestamp=none "$SPARKLE_FRAMEWORK"
+codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$SPARKLE_CONTENTS/Autoupdate"
+codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$SPARKLE_CONTENTS/Updater.app"
+codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$SPARKLE_FRAMEWORK"
 
-echo "   -> 对 Bundle 做最终签名(ad-hoc,封装资源)"
-codesign --force --sign - \
+echo "   -> 对 Bundle 做最终签名(封装资源)"
+codesign --force --sign "$SIGN_IDENTITY" \
   --entitlements "$REPO_ROOT/CCBar.entitlements" \
   --options runtime --timestamp=none \
   "$APP"

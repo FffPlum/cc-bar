@@ -24,45 +24,37 @@ nonisolated protocol MoonshotAPIKeyStore: Sendable {
     func load(accountID: String) -> String?
     func save(_ apiKey: String, accountID: String) throws
     func delete(accountID: String)
+    func isAccessBlocked(accountID: String) -> Bool
+    func retryAccess(accountID: String)
+}
+
+extension MoonshotAPIKeyStore {
+    func isAccessBlocked(accountID: String) -> Bool { false }
+    func retryAccess(accountID: String) {}
 }
 
 nonisolated struct MoonshotKeychainStore: MoonshotAPIKeyStore {
     static let service = "com.cc-bar.moonshot.api"
 
+    private static let shared = CachedManagedKeychain(service: service)
+    private let keychain: CachedManagedKeychain
+
+    init() { keychain = Self.shared }
+    init(keychain: CachedManagedKeychain) { self.keychain = keychain }
+
     func load(accountID: String) -> String? {
-        var query = baseQuery(accountID: accountID)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let key = String(data: data, encoding: .utf8)
-        else { return nil }
-        return key
+        guard let data = keychain.load(account: accountID) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     func save(_ apiKey: String, accountID: String) throws {
-        guard let data = apiKey.data(using: .utf8) else { return }
-        let status = SecItemUpdate(
-            baseQuery(accountID: accountID) as CFDictionary,
-            [kSecValueData as String: data, kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock] as CFDictionary
-        )
-        if status == errSecSuccess { return }
-        guard status == errSecItemNotFound else { throw ImportedCodexStore.KeychainError.unexpected(status) }
-        var query = baseQuery(accountID: accountID)
-        query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        let addStatus = SecItemAdd(query as CFDictionary, nil)
-        guard addStatus == errSecSuccess else { throw ImportedCodexStore.KeychainError.unexpected(addStatus) }
+        try keychain.save(Data(apiKey.utf8), account: accountID)
     }
 
-    func delete(accountID: String) {
-        SecItemDelete(baseQuery(accountID: accountID) as CFDictionary)
-    }
+    func delete(accountID: String) { keychain.delete(account: accountID) }
+    func isAccessBlocked(accountID: String) -> Bool { keychain.isAccessBlocked(account: accountID) }
+    func retryAccess(accountID: String) { keychain.retryAccess(account: accountID) }
 
-    private func baseQuery(accountID: String) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: Self.service, kSecAttrAccount as String: accountID]
-    }
 }
 
 nonisolated enum MoonshotAccountStore {
