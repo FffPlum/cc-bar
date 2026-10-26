@@ -11,7 +11,7 @@ nonisolated enum KimiRegion: String, Codable, Sendable, CaseIterable, Identifiab
     var oauthHost: URL { self == .china ? KimiCredentials.defaultOAuthHost : KimiCredentials.globalOAuthHost }
 
     @MainActor var displayName: String {
-        self == .china ? tr("China (.com)", "国内 (.com)") : tr("Overseas (.ai)", "海外 (.ai)")
+        self == .china ? tr("China edition", "国内版") : tr("Global edition", "海外版")
     }
 }
 

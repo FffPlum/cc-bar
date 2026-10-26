@@ -14,12 +14,16 @@ struct KimiManagedAccountsSettingsView: View {
             ForEach(appState.kimiManagedAccounts) { account in
                 divider
                 HStack(spacing: 0) {
-                    Color.clear.frame(width: ServiceRowMetrics.textLeading - 30)
-                    ServiceTile(logoName: "kimi", fallback: "K", tint: .purple, size: 20, logoSize: 13, cornerRadius: 5.5)
-                        .padding(.trailing, 10)
+                    Color.clear.frame(width: ServiceRowMetrics.handleWidth + ServiceRowMetrics.handleGap)
+                    ServiceTile(logoName: "kimi", fallback: "K", tint: .purple,
+                                size: ServiceRowMetrics.tileSize, logoSize: 18, cornerRadius: 7.5)
+                        .padding(.trailing, ServiceRowMetrics.tileGap)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(appState.kimiManagedSubtitle(account)).font(.system(size: 12.5)).lineLimit(1)
-                        Text(account.region.displayName)
+                        HStack(spacing: 6) {
+                            Text("Kimi Code").font(.system(size: 13, weight: .medium))
+                            if appState.kimiManagedMirrorsCLI(account) { KimiCurrentAccountBadge() }
+                        }
+                        Text("\(appState.kimiManagedSubtitle(account)) · \(account.region.displayName)")
                             .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                         if appState.kimiManagedErrors[account.id] != nil {
                             Text(tr("Refresh failed", "刷新失败")).font(.system(size: 11)).foregroundStyle(.orange)
@@ -61,7 +65,8 @@ struct KimiManagedAccountsSettingsView: View {
                 }
                 .padding(.leading, 16)
                 .padding(.trailing, ServiceRowMetrics.trailingPadding)
-                .padding(.vertical, 8)
+                .padding(.vertical, 9)
+                .frame(minHeight: 50)
             }
             divider
             Button { loginAccountID = "" } label: {
@@ -80,7 +85,6 @@ struct KimiManagedAccountsSettingsView: View {
             .help(tr("Use official device authorization. Your Kimi Code CLI sign-in is not changed.",
                      "使用官方设备授权登录，不会更改 Kimi Code CLI 的登录账号"))
         }
-        .background(Color.primary.opacity(0.02))
         .sheet(isPresented: Binding(get: { loginAccountID != nil }, set: { if !$0 { loginAccountID = nil } })) {
             KimiDeviceLoginView(account: appState.kimiManagedAccounts.first { $0.id == loginAccountID })
         }

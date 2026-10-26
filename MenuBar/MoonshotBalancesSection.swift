@@ -5,25 +5,32 @@ struct MoonshotBalancesSection: View {
 
     var body: some View {
         let accounts = appState.moonshotAccounts.filter(\.visibleInPopover)
-        VStack(alignment: .leading, spacing: 10) {
-            Text(tr("Moonshot API · Pay as you go", "Moonshot API · 按量计费"))
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
             ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
-                if index > 0 { Divider() }
+                if index > 0 { Divider().padding(.horizontal, 16) }
                 row(account)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
     }
 
     private func row(_ account: MoonshotAccount) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 9) {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("Moonshot API").font(.system(size: 13, weight: .semibold))
+                        Text(account.region.displayName).font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Text(appState.moonshotDisplayName(account))
+                        .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
             HStack(alignment: .firstTextBaseline) {
-                Text(appState.moonshotDisplayName(account))
-                    .font(.system(size: 12.5, weight: .medium)).lineLimit(1)
-                Spacer()
                 if let balance = appState.moonshotBalances[account.id] {
                     Text(MoonshotBalanceFormatter.amount(balance.available, currencyCode: balance.currencyCode))
                         .font(.system(size: 18, weight: .semibold)).monospacedDigit()
@@ -32,6 +39,7 @@ struct MoonshotBalancesSection: View {
                 } else {
                     Text("—").font(.system(size: 18)).foregroundStyle(.secondary)
                 }
+                Spacer()
             }
             if let balance = appState.moonshotBalances[account.id] {
                 HStack {
@@ -52,5 +60,8 @@ struct MoonshotBalancesSection: View {
                     .font(.system(size: 10.5)).foregroundStyle(.orange).lineLimit(2)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

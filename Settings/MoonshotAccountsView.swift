@@ -11,23 +11,17 @@ struct MoonshotAccountsSettingsView: View {
             if let error = appState.moonshotOperationError {
                 Text(error).font(.system(size: 11)).foregroundStyle(.orange).padding(8)
             }
-            divider
-            Text(tr("Moonshot API · Pay as you go", "Moonshot API · 按量计费"))
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, ServiceRowMetrics.textLeading)
-                .padding(.vertical, 8)
             ForEach(appState.moonshotAccounts) { account in
                 divider
                 HStack(spacing: 0) {
-                    Color.clear.frame(width: ServiceRowMetrics.textLeading - 30)
-                    Image(systemName: "key.fill").font(.system(size: 12)).foregroundStyle(.secondary)
-                        .frame(width: 20).padding(.trailing, 10)
+                    Color.clear.frame(width: ServiceRowMetrics.handleWidth + ServiceRowMetrics.handleGap)
+                    Image(systemName: "key.fill").font(.system(size: 18)).foregroundStyle(.secondary)
+                        .frame(width: ServiceRowMetrics.tileSize, height: ServiceRowMetrics.tileSize)
+                        .padding(.trailing, ServiceRowMetrics.tileGap)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(appState.moonshotDisplayName(account)).font(.system(size: 12.5)).lineLimit(1)
-                        Text("\(account.region.displayName) · \(account.currencyCode)")
-                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text("Moonshot API").font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        Text("\(appState.moonshotDisplayName(account)) · \(account.region.displayName) · \(account.currencyCode)")
+                            .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                         if appState.moonshotErrors[account.id] != nil {
                             Text(tr("Refresh failed", "刷新失败")).font(.system(size: 11)).foregroundStyle(.orange)
                         }
@@ -69,7 +63,8 @@ struct MoonshotAccountsSettingsView: View {
                 }
                 .padding(.leading, 16)
                 .padding(.trailing, ServiceRowMetrics.trailingPadding)
-                .padding(.vertical, 8)
+                .padding(.vertical, 9)
+                .frame(minHeight: 50)
             }
             divider
             Button {
@@ -87,7 +82,6 @@ struct MoonshotAccountsSettingsView: View {
             }
             .buttonStyle(.plain).pointingHandCursor()
         }
-        .background(Color.primary.opacity(0.02))
         .sheet(isPresented: $showEditor) {
             MoonshotAccountEditor(account: appState.moonshotAccounts.first { $0.id == editingID })
         }

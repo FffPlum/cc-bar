@@ -275,7 +275,9 @@ struct PopoverRootView: View {
             periodIsBillingCycle: cursorCycleBounds(for: provider.app) != nil,
             todayCost: todayCost(for: provider.app),
             serviceStatus: serviceStatus(for: provider.app),
-            showsCost: provider.showsCost
+            showsCost: provider.showsCost,
+            accountEdition: provider.app == .kimi ? appState.kimiCLIRegion?.displayName : nil,
+            isKimiCurrentAccount: provider.app == .kimi && appState.kimiAccount != nil
         )
     }
 
@@ -503,7 +505,7 @@ struct PopoverRootView: View {
 
 // MARK: - ServiceBlockView
 
-private struct ServiceBlockView: View {
+struct ServiceBlockView: View {
     let app: QuotaApp
     let title: String
     let subtitle: String
@@ -518,6 +520,8 @@ private struct ServiceBlockView: View {
     let todayCost: Decimal?
     let serviceStatus: ServiceStatus?
     let showsCost: Bool
+    var accountEdition: String? = nil
+    var isKimiCurrentAccount = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -552,29 +556,45 @@ private struct ServiceBlockView: View {
         HStack(spacing: 9) {
             ServiceTile(logoName: logoName, fallback: fallback, tint: tint)
 
-            // 服务名与副标题之间用固定 8pt 间距，不用空格字符（空格宽度随字体变化）；
-            // 宽度不够时只截断副标题，服务名保持完整。
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .kerning(-0.1)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                Text(subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            if let accountEdition {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(title).font(.system(size: 13, weight: .semibold))
+                        if isKimiCurrentAccount { KimiCurrentAccountBadge() }
+                        Text(accountEdition).font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            } else {
+                headerLabels
             }
 
             Spacer(minLength: 0)
 
-            // `.unknown` 也要显示(灰点):它现在还承担"本机拉不到 statuspage"这一档,
-            // 直接隐藏会让用户以为功能没了,而继续显示绿点则是在说一件不成立的事。
             if let status = serviceStatus {
                 ServiceStatusDot(status: status, title: title)
             }
+        }
+    }
+
+    /// Other services keep the existing inline title and account presentation.
+    private var headerLabels: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .kerning(-0.1)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .layoutPriority(1)
+            Text(subtitle)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
     }
 

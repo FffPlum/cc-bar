@@ -24,6 +24,11 @@ extension AppState {
         kimiAccount?.userID == account.userID && kimiAccount?.baseURL == account.region.baseURL
     }
 
+    var kimiCLIRegion: KimiRegion? {
+        guard let account = kimiAccount else { return nil }
+        return KimiRegion.allCases.first { $0.baseURL == account.baseURL }
+    }
+
     func loadKimiManagedAccounts() {
         kimiManagedAccounts = KimiManagedAccount.deduplicated(KimiManagedAccountStore.loadAll(
             from: accountStorageURL("kimi_subscription_accounts.json")
