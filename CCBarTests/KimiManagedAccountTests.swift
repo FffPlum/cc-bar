@@ -19,6 +19,73 @@ final class KimiManagedAccountTests: XCTestCase {
         ))
     }
 
+    func testDeviceAuthorizationAcceptsOfficialWebHosts() async throws {
+        let session = oauthSession()
+        defer { KimiManagedOAuthProtocol.handler = nil; session.invalidateAndCancel() }
+        let now = Date()
+
+        for region in [KimiRegion.china, .global] {
+            let domain = region == .china ? "kimi.com" : "kimi.ai"
+            let otherDomain = region == .china ? "kimi.ai" : "kimi.com"
+            let verificationURL = "https://www.\(domain)/device?code=CODE"
+            KimiManagedOAuthProtocol.handler = { request in
+                XCTAssertEqual(request.url?.absoluteString, "https://auth.\(domain)/api/oauth/device_authorization")
+                let json = #"{"user_code":"CODE","device_code":"DEVICE","verification_uri_complete":""#
+                    + verificationURL + #"","expires_in":600,"interval":5}"#
+                return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                        Data(json.utf8))
+            }
+
+            let authorization = try await KimiDeviceAuthorizationClient.request(region: region, now: now, session: session)
+            XCTAssertEqual(authorization.verificationURL.absoluteString, verificationURL)
+            XCTAssertEqual(authorization.expiresAt, now.addingTimeInterval(600))
+            XCTAssertTrue(KimiDeviceAuthorizationClient.isTrusted(
+                URL(string: "https://www.\(domain):443/device")!, region: region
+            ))
+            XCTAssertFalse(KimiDeviceAuthorizationClient.isTrusted(
+                URL(string: "http://www.\(domain)/device")!, region: region
+            ))
+            XCTAssertFalse(KimiDeviceAuthorizationClient.isTrusted(
+                URL(string: "https://www.\(domain):8443/device")!, region: region
+            ))
+            XCTAssertFalse(KimiDeviceAuthorizationClient.isTrusted(
+                URL(string: "https://www.\(otherDomain)/device")!, region: region
+            ))
+        }
+    }
+
+    func testDeviceLoginAutomaticallyOpensBrowserAndShowsCancellation() async throws {
+        let (state, root) = try isolatedState()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let authorization = KimiDeviceAuthorization(
+            region: .china,
+            userCode: "CODE",
+            deviceCode: "DEVICE",
+            verificationURL: URL(string: "https://www.kimi.com/device?code=CODE")!,
+            expiresAt: Date().addingTimeInterval(600),
+            interval: 5
+        )
+        let browserOpened = expectation(description: "official authorization page opened")
+        state.startKimiDeviceLogin(
+            region: .china,
+            requestAuthorization: { _ in authorization },
+            openAuthorization: { url in
+                XCTAssertEqual(url, authorization.verificationURL)
+                state.cancelKimiDeviceLogin(showCancellation: true)
+                browserOpened.fulfill()
+            }
+        )
+
+        await fulfillment(of: [browserOpened], timeout: 1)
+        XCTAssertFalse(state.kimiDeviceLoginInProgress)
+        XCTAssertNil(state.kimiDeviceAuthorization)
+        XCTAssertNil(state.kimiDeviceLoginID)
+        XCTAssertNil(state.kimiDeviceLoginTask)
+        XCTAssertEqual(state.kimiDeviceLoginError, KimiDeviceAuthorizationError.cancelled.userMessage)
+        XCTAssertEqual(KimiDeviceAuthorizationError.denied.userMessage, KimiDeviceAuthorizationError.cancelled.userMessage)
+        XCTAssertTrue(state.kimiManagedAccounts.isEmpty)
+    }
+
     func testDevicePollingAddsFiveSecondsAfterSlowDown() async throws {
         let authorization = KimiDeviceAuthorization(
             region: .china,
@@ -276,6 +343,120 @@ final class KimiManagedAccountTests: XCTestCase {
         XCTAssertNotNil(state.kimiManagedQuotas[second.id])
         XCTAssertFalse(state.kimiManagedRefreshStates[first.id]?.inFlight ?? true)
         XCTAssertTrue(state.quotaCycles.records.isEmpty, "Managed accounts cannot duplicate local subscription estimates")
+    }
+
+    func testManagedFreeLegacyResponseRefreshSucceedsAndClearsDecodeError() async throws {
+        let (state, root) = try isolatedState()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let previous = SettingsStore.shared.isProviderEnabled(.kimi)
+        SettingsStore.shared.setServiceEnabled(true, for: .kimi)
+        defer { SettingsStore.shared.setServiceEnabled(previous, for: .kimi) }
+
+        let account = KimiManagedAccount(id: "legacy-free", region: .china, userID: "free-user")
+        state.kimiManagedAccounts = [account]
+        try state.kimiTokenStore.save(regressionTokens(), accountID: account.id)
+
+        // 旧版响应：顶层 usage 是周额度；limits[] 中 300 分钟窗口的 detail 是 5 小时额度。
+        let legacyRoot: [String: Any] = [
+            "usage": ["limit": 100, "used": 25, "remaining": 75, "resetTime": "2026-10-27T00:00:00Z"],
+            "limits": [
+                [
+                    "window": ["duration": 300, "timeUnit": "TIME_UNIT_MINUTE"],
+                    "detail": [
+                        "limit": 200,
+                        "used": 80,
+                        "remaining": 120,
+                        "resetTime": "2026-10-25T04:00:00Z",
+                    ],
+                ],
+            ],
+        ]
+        guard let snapshot = KimiQuotaClient.parse(root: legacyRoot, fetchedAt: Date(timeIntervalSince1970: 1_800_000_000)) else {
+            return XCTFail("Legacy usage + limits response must parse into a snapshot")
+        }
+
+        let decodeMessage = QuotaError.decode("missing usage windows").userMessage
+        state.kimiManagedErrors[account.id] = decodeMessage
+        var failedState = QuotaRefreshState()
+        failedState.lastError = decodeMessage
+        state.kimiManagedRefreshStates[account.id] = failedState
+
+        await state.loadKimiManagedQuota(account: account, reason: .userInitiated,
+                                         fetch: { _ in .success(snapshot) }, profile: { _ in nil })
+
+        let stored = state.kimiManagedQuotas[account.id]
+        XCTAssertEqual(stored?.primaryLimit?.kind, .fiveHour)
+        XCTAssertEqual(stored?.secondaryLimit?.kind, .weekly)
+        XCTAssertEqual(stored?.fiveHourLimit?.window.usedPercent ?? 0, 40, accuracy: 0.001)
+        XCTAssertEqual(stored?.weeklyLimit?.window.usedPercent ?? 0, 25, accuracy: 0.001)
+        XCTAssertEqual(stored?.fiveHourLimit?.window.windowSeconds, 18_000)
+        XCTAssertEqual(stored?.weeklyLimit?.window.windowSeconds, 604_800)
+
+        XCTAssertNil(state.kimiManagedErrors[account.id], "Successful refresh clears the previous decode error")
+        XCTAssertNil(state.kimiManagedRefreshStates[account.id]?.lastError)
+        XCTAssertEqual(state.kimiManagedSources[account.id], .api)
+        XCTAssertEqual(state.kimiManagedRefreshStates[account.id]?.source, .api)
+        XCTAssertNotNil(state.kimiManagedRefreshStates[account.id]?.lastSuccessAt)
+        XCTAssertFalse(state.kimiManagedRefreshStates[account.id]?.inFlight ?? true)
+    }
+
+    func testFreeEmptyQuotaRefreshKeepsProfileAndClearsFailure() async throws {
+        let (state, root) = try isolatedState()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let previous = SettingsStore.shared.isProviderEnabled(.kimi)
+        SettingsStore.shared.setServiceEnabled(true, for: .kimi)
+        defer { SettingsStore.shared.setServiceEnabled(previous, for: .kimi) }
+        let account = KimiManagedAccount(id: "empty-free", region: .china, userID: "free-user")
+        state.kimiManagedAccounts = [account]
+        try state.kimiTokenStore.save(regressionTokens(), accountID: account.id)
+        state.kimiManagedErrors[account.id] = QuotaError.decode("missing usage windows").userMessage
+        var failedState = QuotaRefreshState()
+        failedState.lastError = state.kimiManagedErrors[account.id]
+        state.kimiManagedRefreshStates[account.id] = failedState
+
+        let session = oauthSession()
+        defer { KimiManagedOAuthProtocol.handler = nil; session.invalidateAndCancel() }
+        KimiManagedOAuthProtocol.handler = { request in
+            XCTAssertEqual(request.url?.host, "api.kimi.com")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-access")
+            let body = request.url?.lastPathComponent == "me"
+                ? #"{"user_id":"free-user","nickname":"Free nickname","user_level_name":"Free"}"#
+                : "{}"
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(body.utf8))
+        }
+        let fetch: @Sendable (KimiAuthSession) async -> Result<QuotaSnapshot, QuotaError> = {
+            await KimiQuotaClient.fetch(auth: $0, session: session)
+        }
+        await state.loadKimiManagedQuota(account: account, reason: .userInitiated, fetch: fetch,
+            profile: { await KimiQuotaClient.fetchUserInfo(auth: $0, session: session) })
+
+        XCTAssertNil(state.kimiManagedErrors[account.id])
+        XCTAssertNil(state.kimiManagedRefreshStates[account.id]?.lastError)
+        XCTAssertNotNil(state.kimiManagedRefreshStates[account.id]?.lastSuccessAt)
+        XCTAssertFalse(state.kimiManagedRefreshStates[account.id]?.inFlight ?? true)
+        XCTAssertEqual(state.kimiManagedAccounts.first?.nickname, "Free nickname")
+        XCTAssertEqual(state.kimiManagedAccounts.first?.userLevelName, "Free")
+        XCTAssertEqual(state.kimiManagedQuotas[account.id]?.isEmptyKimiQuota, true)
+        XCTAssertEqual(state.kimiManagedQuotas[account.id]?.planType, "Free")
+        XCTAssertTrue(state.quotaCycles.records.isEmpty)
+
+        // 一小时内限频 /me 时，下一次空额度刷新仍保留套餐与昵称。
+        await state.loadKimiManagedQuota(account: account, reason: .userInitiated, fetch: fetch,
+            profile: { _ in XCTFail("Profile should be throttled"); return nil })
+        XCTAssertEqual(state.kimiManagedQuotas[account.id]?.planType, "Free")
+        let restored = KimiManagedQuotaCache.load(from: root.appendingPathComponent("kimi_subscription_quota_cache.json"))
+        XCTAssertEqual(restored[account.id]?.snapshot.isEmptyKimiQuota, true)
+        XCTAssertEqual(restored[account.id]?.snapshot.planType, "Free")
+
+        // 后续损坏响应仍报错并保留成功的空快照，不能误填成 0% 或无限。
+        let snapshot = state.kimiManagedQuotas[account.id]
+        KimiManagedOAuthProtocol.handler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+             Data(#"{"usages":{"limit_5h":{}}}"#.utf8))
+        }
+        await state.loadKimiManagedQuota(account: account, reason: .userInitiated, fetch: fetch, profile: { _ in nil })
+        XCTAssertNotNil(state.kimiManagedErrors[account.id])
+        XCTAssertEqual(state.kimiManagedQuotas[account.id], snapshot)
     }
 
     func testMoonshotKeyChangeInvalidatesInFlightBalanceAndRestartCache() async throws {

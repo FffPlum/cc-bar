@@ -44,6 +44,11 @@ struct KimiManagedAccountsSection: View {
             .frame(width: 104, alignment: .leading)
             VStack(alignment: .leading, spacing: 5) {
                 if let snapshot = appState.kimiManagedQuotas[account.id] {
+                    if snapshot.isEmptyKimiQuota {
+                        Text(tr("No quota data available", "暂无额度数据"))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
                     ForEach([snapshot.primaryLimit, snapshot.secondaryLimit].compactMap { $0 } + snapshot.auxiliaryLimits) { limit in
                         quotaRow(limit)
                     }

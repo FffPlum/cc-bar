@@ -27,9 +27,9 @@ nonisolated enum KimiDeviceAuthorizationError: Error, Equatable, Sendable {
         case .rateLimited: tr("Too many sign-in attempts. Try again later.", "登录请求过于频繁，请稍后再试")
         case .http(let code): tr("Official sign-in failed (HTTP \(code)).", "官方登录失败（HTTP \(code)）")
         case .network: tr("Couldn't connect to Kimi. Check your network or proxy.", "无法连接 Kimi，请检查网络或代理")
-        case .denied: tr("Authorization was denied.", "授权已被拒绝")
-        case .expired: tr("The verification code expired. Start sign-in again.", "验证码已过期，请重新登录")
-        case .cancelled: tr("Sign-in cancelled.", "已取消登录")
+        case .denied: tr("Authorization was cancelled.", "授权已取消")
+        case .expired: tr("Authorization expired. Start sign-in again.", "授权已过期，请重新登录")
+        case .cancelled: tr("Authorization was cancelled.", "授权已取消")
         case .differentAccount: tr("Sign in with this account. Use Add account for a different identity.", "请登录此账号；添加其他身份请使用“添加账号”")
         }
     }
@@ -114,7 +114,10 @@ nonisolated enum KimiDeviceAuthorizationClient {
     }
 
     static func isTrusted(_ url: URL, region: KimiRegion) -> Bool {
-        url.scheme?.lowercased() == "https" && url.host?.lowercased() == region.oauthHost.host
+        let host = url.host?.lowercased()
+        let officialWebHost = region == .china ? "www.kimi.com" : "www.kimi.ai"
+        let isOfficialHost = host == region.oauthHost.host || host == officialWebHost
+        return url.scheme?.lowercased() == "https" && isOfficialHost
             && (url.port == nil || url.port == 443) && url.user == nil && url.password == nil
     }
 

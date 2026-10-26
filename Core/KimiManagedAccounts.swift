@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 @MainActor
@@ -109,7 +110,14 @@ extension AppState {
         catch { AppLog.error(.quota, "Kimi account cache save failed: \(Redact.error(error))") }
     }
 
-    func startKimiDeviceLogin(region: KimiRegion, replacing accountID: String? = nil) {
+    func startKimiDeviceLogin(
+        region: KimiRegion,
+        replacing accountID: String? = nil,
+        requestAuthorization: @escaping @MainActor (KimiRegion) async throws -> KimiDeviceAuthorization = {
+            try await KimiDeviceAuthorizationClient.request(region: $0)
+        },
+        openAuthorization: @escaping @MainActor (URL) -> Void = { _ = NSWorkspace.shared.open($0) }
+    ) {
         guard !isPreparingForTermination, !kimiDeviceLoginInProgress else { return }
         if let until = kimiDeviceLoginBackoffUntil, until > Date() {
             kimiDeviceLoginError = tr("Too many sign-in attempts. Try again later.", "登录请求过于频繁，请稍后再试")
@@ -128,9 +136,11 @@ extension AppState {
                 }
             }
             do {
-                let authorization = try await KimiDeviceAuthorizationClient.request(region: region)
+                let authorization = try await requestAuthorization(region)
                 guard self.ownsKimiLogin(loginID) else { return }
                 self.kimiDeviceAuthorization = authorization
+                openAuthorization(authorization.verificationURL)
+                guard self.ownsKimiLogin(loginID) else { return }
                 let tokens = try await KimiDeviceLoginRunner.run(authorization: authorization)
                 guard self.ownsKimiLogin(loginID) else { return }
                 try await self.completeKimiDeviceLogin(region: region, tokens: tokens, loginID: loginID, replacing: accountID)
@@ -147,13 +157,13 @@ extension AppState {
         }
     }
 
-    func cancelKimiDeviceLogin() {
+    func cancelKimiDeviceLogin(showCancellation: Bool = false) {
         kimiDeviceLoginID = nil
         kimiDeviceLoginTask?.cancel()
         kimiDeviceLoginTask = nil
         kimiDeviceLoginInProgress = false
         kimiDeviceAuthorization = nil
-        kimiDeviceLoginError = nil
+        kimiDeviceLoginError = showCancellation ? KimiDeviceAuthorizationError.cancelled.userMessage : nil
     }
 
     private func ownsKimiLogin(_ id: UUID) -> Bool {
@@ -309,6 +319,8 @@ extension AppState {
 
     private func storeKimiManagedQuota(_ snapshot: QuotaSnapshot, account: KimiManagedAccount, tokens: KimiManagedTokens) {
         let now = Date()
+        var snapshot = snapshot
+        snapshot.planType = kimiManagedAccounts.first(where: { $0.id == account.id })?.userLevelName ?? snapshot.planType
         let merged = snapshot.preservingFutureResetDates(from: kimiManagedQuotas[account.id], now: now)
         kimiManagedQuotas[account.id] = merged
         kimiManagedSources[account.id] = .api

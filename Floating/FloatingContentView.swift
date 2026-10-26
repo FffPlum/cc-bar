@@ -102,7 +102,14 @@ private struct FloatingRow: View {
 
             // Unlimited 没有可填充的比例；留空 bar 位保持各行 tile / 数值三段对齐，
             // 右侧只用一个 ∞ 表达，不再另起一行文字重复同一件事。
-            if isUnlimited {
+            if snapshot?.isEmptyKimiQuota == true {
+                Spacer(minLength: 56)
+                Text("—")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: Self.percentWidth, alignment: .trailing)
+                    .help(tr("No quota data available", "暂无额度数据"))
+            } else if isUnlimited {
                 Spacer(minLength: 56)
 
                 Text("∞")

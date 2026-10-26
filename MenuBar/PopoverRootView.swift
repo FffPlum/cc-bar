@@ -522,7 +522,13 @@ private struct ServiceBlockView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             headerRow
-            bodyRow
+            if snapshot?.isEmptyKimiQuota == true {
+                Text(tr("No quota data available", "暂无额度数据"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            } else {
+                bodyRow
+            }
             ForEach(compactLimits) { limit in
                 compactLimitRow(limit)
             }

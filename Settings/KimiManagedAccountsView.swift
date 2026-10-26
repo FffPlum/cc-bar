@@ -23,6 +23,8 @@ struct KimiManagedAccountsSettingsView: View {
                             .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                         if appState.kimiManagedErrors[account.id] != nil {
                             Text(tr("Refresh failed", "刷新失败")).font(.system(size: 11)).foregroundStyle(.orange)
+                        } else if appState.kimiManagedQuotas[account.id]?.isEmptyKimiQuota == true {
+                            Text(tr("No quota data available", "暂无额度数据")).font(.system(size: 11)).foregroundStyle(.secondary)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -118,36 +120,20 @@ private struct KimiDeviceLoginView: View {
             .pickerStyle(.segmented)
             .disabled(appState.kimiDeviceLoginInProgress || account != nil)
 
-            if let authorization = appState.kimiDeviceAuthorization {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(tr("Verification code", "验证码")).font(.system(size: 11)).foregroundStyle(.secondary)
-                    Text(authorization.userCode)
-                        .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                        .textSelection(.enabled)
-                    Button(tr("Open official authorization page", "打开官方授权页面")) {
-                        if KimiDeviceAuthorizationClient.isTrusted(authorization.verificationURL, region: authorization.region) {
-                            NSWorkspace.shared.open(authorization.verificationURL)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    Text(tr("Return here after approving. Sign-in continues automatically.", "完成授权后返回这里，登录会自动继续。"))
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-            } else {
-                Text(tr("CCBar will request a code from the official Kimi service. The browser opens only when you choose to open it.",
-                        "CCBar 将向 Kimi 官方服务申请验证码。只有你点击打开时才会启动浏览器。"))
-                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             if appState.kimiDeviceLoginInProgress {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text(appState.kimiDeviceAuthorization == nil
-                         ? tr("Requesting verification code…", "正在申请验证码…")
-                         : tr("Waiting for authorization…", "正在等待授权…"))
+                         ? tr("Requesting official authorization…", "正在申请官方授权…")
+                         : tr("Complete authorization in your browser. Sign-in continues automatically.", "请在浏览器中完成授权，登录会自动继续。"))
                         .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+            } else if !didStart {
+                Text(tr("After you start, CCBar will open the official Kimi authorization page in your browser.",
+                        "点击开始登录后，CCBar 会自动在浏览器中打开 Kimi 官方授权页。"))
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let error = appState.kimiDeviceLoginError {
                 Text(error).font(.system(size: 11.5)).foregroundStyle(.red)
@@ -160,9 +146,13 @@ private struct KimiDeviceLoginView: View {
             Divider()
             HStack {
                 Spacer()
-                Button(tr("Cancel", "取消")) {
-                    appState.cancelKimiDeviceLogin()
-                    dismiss()
+                Button(appState.kimiDeviceLoginInProgress ? tr("Cancel authorization", "取消授权") : tr("Cancel", "取消")) {
+                    if appState.kimiDeviceLoginInProgress {
+                        appState.cancelKimiDeviceLogin(showCancellation: true)
+                    } else {
+                        appState.cancelKimiDeviceLogin()
+                        dismiss()
+                    }
                 }
                 .keyboardShortcut(.escape, modifiers: [])
                 if !appState.kimiDeviceLoginInProgress {

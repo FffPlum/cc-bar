@@ -326,9 +326,7 @@ final class KimiQuotaClientTests: XCTestCase {
         XCTAssertEqual(monthlyOnly.primaryLimit?.displayName, "MONTHLY")
         XCTAssertEqual(monthlyOnly.secondaryLimit?.id, "kimi-monthly-code")
 
-        // 全缺：nil。
-        XCTAssertNil(KimiQuotaClient.parse(root: usages()))
-        XCTAssertNil(KimiQuotaClient.parse(root: [:]))
+        // 存在损坏的窗口时不能按 Free 的空响应成功。
         XCTAssertNil(KimiQuotaClient.parse(root: ["usages": "unexpected"]))
         XCTAssertNil(KimiQuotaClient.parse(root: usages(limit5h: [:])))
     }
@@ -368,6 +366,219 @@ final class KimiQuotaClientTests: XCTestCase {
             "usages": [:],
             "boosterWallet": ["balanceCents": 500],
         ]))
+    }
+
+    func testFreeEmptyQuotaResponseHasNoInventedWindows() throws {
+        let fetchedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let responses: [[String: Any]] = [
+            [:], // 真实 Free 账户的 HTTP 200 /usages 响应。
+            ["usages": [:]],
+            ["code": 0, "data": [:]],
+            ["code": 200, "data": ["usages": [:]]],
+            ["kind": "ok", "quota": ["usages": [:], "extraUsage": NSNull()]],
+        ]
+        for response in responses {
+            let snapshot = try XCTUnwrap(KimiQuotaClient.parse(root: response, fetchedAt: fetchedAt))
+            XCTAssertTrue(snapshot.isEmptyKimiQuota)
+            XCTAssertEqual(snapshot.fetchedAt, fetchedAt)
+            XCTAssertNil(snapshot.primaryWindow)
+            XCTAssertTrue(snapshot.allLimits.isEmpty)
+            XCTAssertNotEqual(snapshot.isUnlimited, true)
+        }
+    }
+
+    func testMalformedQuotaCannotMasqueradeAsFreeEmptyResponse() {
+        let responses: [[String: Any]] = [
+            ["message": "upstream error"],
+            ["kind": "error", "quota": ["usages": [:]]],
+            ["code": 500, "data": [:]],
+            ["code": false, "data": [:]],
+            ["usages": ["limit_5h": [:]]],
+            ["usages": ["limit_5h": ["used_ratio": -1]]],
+            ["usages": [:], "unknown": true],
+            ["kind": "ok", "quota": ["usages": [:], "extraUsage": ["balanceCents": 500]]],
+        ]
+        for response in responses {
+            XCTAssertNil(KimiQuotaClient.parse(root: response))
+        }
+    }
+
+    func testLegacyAbsoluteCountsOnly() throws {
+        let snapshot = try XCTUnwrap(KimiQuotaClient.parse(root: legacyRoot(
+            usage: absoluteCounts(limit: 200, used: 50, resetTime: "2026-10-27T00:00:00Z"),
+            limits: [
+                legacyLimit(
+                    duration: 300,
+                    timeUnit: "TIME_UNIT_MINUTE",
+                    limit: 100,
+                    used: 20,
+                    resetTime: "2026-10-25T04:00:00Z"
+                ),
+            ]
+        )))
+        XCTAssertEqual(snapshot.app, .kimi)
+
+        let primary = try XCTUnwrap(snapshot.primaryLimit)
+        XCTAssertEqual(primary.id, "kimi-five-hour")
+        XCTAssertEqual(primary.kind, .fiveHour)
+        XCTAssertEqual(primary.displayName, "5HOUR")
+        XCTAssertEqual(primary.window.usedPercent, 20)
+        XCTAssertEqual(primary.window.remainingPercent, 80)
+        XCTAssertEqual(primary.window.windowSeconds, 18_000)
+        XCTAssertNotNil(primary.window.resetsAt)
+
+        let secondary = try XCTUnwrap(snapshot.secondaryLimit)
+        XCTAssertEqual(secondary.id, "kimi-weekly")
+        XCTAssertEqual(secondary.kind, .weekly)
+        XCTAssertEqual(secondary.window.usedPercent, 25)
+        XCTAssertEqual(secondary.window.remainingPercent, 75)
+        XCTAssertEqual(secondary.window.windowSeconds, 604_800)
+
+        XCTAssertTrue(snapshot.auxiliaryLimits.isEmpty)
+    }
+
+    func testLegacyWeeklyOnly() throws {
+        let snapshot = try XCTUnwrap(KimiQuotaClient.parse(root: legacyRoot(
+            usage: absoluteCounts(limit: 200, used: 60, resetTime: "2026-10-27T00:00:00Z")
+        )))
+        XCTAssertEqual(snapshot.primaryLimit?.id, "kimi-weekly")
+        XCTAssertEqual(snapshot.primaryLimit?.window.usedPercent, 30)
+        XCTAssertNil(snapshot.secondaryLimit)
+        XCTAssertTrue(snapshot.auxiliaryLimits.isEmpty)
+    }
+
+    func testLegacyFiveHourIgnoresUnknownWindow() throws {
+        // 非 300 分钟或非 TIME_UNIT_MINUTE 的 limits 条目不算 5 小时额度。
+        let snapshot = try XCTUnwrap(KimiQuotaClient.parse(root: legacyRoot(
+            usage: absoluteCounts(limit: 200, used: 10),
+            limits: [
+                legacyLimit(duration: 600, timeUnit: "TIME_UNIT_MINUTE", limit: 100, used: 90),
+                legacyLimit(duration: 300, timeUnit: "TIME_UNIT_SECOND", limit: 100, used: 90),
+                legacyLimit(duration: 300, timeUnit: "TIME_UNIT_MINUTE", limit: 100, used: 20),
+            ]
+        )))
+        XCTAssertEqual(snapshot.primaryLimit?.id, "kimi-five-hour")
+        XCTAssertEqual(snapshot.primaryLimit?.window.usedPercent, 20)
+        XCTAssertEqual(snapshot.secondaryLimit?.id, "kimi-weekly")
+    }
+
+    func testLegacyUsesRemainingWhenUsedMissing() throws {
+        let snapshot = try XCTUnwrap(KimiQuotaClient.parse(root: legacyRoot(
+            usage: absoluteCounts(limit: 200, remaining: 140, resetTime: "2026-10-27T00:00:00Z"),
+            limits: [
+                legacyLimit(
+                    duration: 300,
+                    timeUnit: "TIME_UNIT_MINUTE",
+                    limit: 100,
+                    remaining: 70,
+                    resetTime: "2026-10-25T04:00:00Z"
+                ),
+            ]
+        )))
+        XCTAssertEqual(snapshot.primaryLimit?.id, "kimi-five-hour")
+        XCTAssertEqual(snapshot.primaryLimit?.window.usedPercent, 30)
+        XCTAssertEqual(snapshot.primaryLimit?.window.remainingPercent, 70)
+        XCTAssertEqual(snapshot.secondaryLimit?.id, "kimi-weekly")
+        XCTAssertEqual(snapshot.secondaryLimit?.window.usedPercent, 30)
+        XCTAssertEqual(snapshot.secondaryLimit?.window.remainingPercent, 70)
+    }
+
+    func testLegacyCountsRejectInvalidValues() throws {
+        // 数值字符串接受。
+        let strings = try XCTUnwrap(KimiQuotaClient.parse(root: legacyRoot(
+            usage: absoluteCounts(limit: "200", used: "40")
+        )))
+        XCTAssertEqual(strings.primaryLimit?.window.usedPercent, 20)
+
+        // bool、非有限、负数、limit<=0 的窗口丢弃，只剩周额度。
+        let invalid = try XCTUnwrap(KimiQuotaClient.parse(root: legacyRoot(
+            usage: absoluteCounts(limit: "200", used: 40),
+            limits: [
+                legacyLimit(duration: 300, timeUnit: "TIME_UNIT_MINUTE", limit: true, used: 10),
+                legacyLimit(duration: 300, timeUnit: "TIME_UNIT_MINUTE", limit: "1e999", used: 10),
+                legacyLimit(duration: 300, timeUnit: "TIME_UNIT_MINUTE", limit: 100, used: -5, remaining: 50),
+                legacyLimit(duration: 300, timeUnit: "TIME_UNIT_MINUTE", limit: 100, remaining: 120),
+                legacyLimit(duration: 300, timeUnit: "TIME_UNIT_MINUTE", limit: 0, used: 10),
+            ]
+        )))
+        XCTAssertEqual(invalid.primaryLimit?.id, "kimi-weekly")
+        XCTAssertNil(invalid.secondaryLimit)
+        XCTAssertTrue(invalid.auxiliaryLimits.isEmpty)
+    }
+
+    func testLegacyOverQuotaClampsRemainingToZero() throws {
+        let snapshot = try XCTUnwrap(KimiQuotaClient.parse(root: legacyRoot(
+            usage: absoluteCounts(limit: 100, used: 130, resetTime: "2026-10-27T00:00:00Z"),
+            limits: [
+                legacyLimit(
+                    duration: 300,
+                    timeUnit: "TIME_UNIT_MINUTE",
+                    limit: 100,
+                    used: 120,
+                    resetTime: "2026-10-25T04:00:00Z"
+                ),
+            ]
+        )))
+        XCTAssertEqual(snapshot.primaryLimit?.window.usedPercent, 100)
+        XCTAssertEqual(snapshot.primaryLimit?.window.remainingPercent, 0)
+        XCTAssertEqual(snapshot.secondaryLimit?.window.usedPercent, 100)
+        XCTAssertEqual(snapshot.secondaryLimit?.window.remainingPercent, 0)
+    }
+
+    func testNewWindowsTakePriorityOverLegacy() throws {
+        // 新版有周窗口时旧版周不覆盖；旧版只补缺 5 小时。
+        let partial = try XCTUnwrap(KimiQuotaClient.parse(root: [
+            "usages": ["limit_7d": ["used_ratio": 0.6, "reset_time": "2026-10-27T00:00:00Z"]],
+            "usage": absoluteCounts(limit: 200, used: 40),
+            "limits": [
+                legacyLimit(duration: 300, timeUnit: "TIME_UNIT_MINUTE", limit: 100, used: 20),
+            ],
+        ]))
+        XCTAssertEqual(partial.primaryLimit?.id, "kimi-five-hour")
+        XCTAssertEqual(partial.primaryLimit?.window.usedPercent, 20)
+        XCTAssertEqual(partial.secondaryLimit?.id, "kimi-weekly")
+        XCTAssertEqual(partial.secondaryLimit?.window.usedPercent, 60)
+
+        // 新版 5 小时与周都有效时，旧版完全不覆盖。
+        let both = try XCTUnwrap(KimiQuotaClient.parse(root: [
+            "usages": [
+                "limit_5h": ["used_ratio": 0.1],
+                "limit_7d": ["used_ratio": 0.2],
+            ],
+            "usage": absoluteCounts(limit: 200, used: 100),
+            "limits": [
+                legacyLimit(duration: 300, timeUnit: "TIME_UNIT_MINUTE", limit: 100, used: 90),
+            ],
+        ]))
+        XCTAssertEqual(both.primaryLimit?.id, "kimi-five-hour")
+        XCTAssertEqual(both.primaryLimit?.window.usedPercent, 10)
+        XCTAssertEqual(both.secondaryLimit?.id, "kimi-weekly")
+        XCTAssertEqual(both.secondaryLimit?.window.usedPercent, 20)
+    }
+
+    func testLegacyFieldsDoNotRescueErrorWrapper() {
+        XCTAssertNil(KimiQuotaClient.parse(root: [
+            "kind": "error",
+            "message": "nope",
+            "usage": absoluteCounts(limit: 200, used: 40),
+            "limits": [
+                legacyLimit(duration: 300, timeUnit: "TIME_UNIT_MINUTE", limit: 100, used: 20),
+            ],
+        ]))
+        XCTAssertNil(KimiQuotaClient.parse(root: [
+            "code": 500,
+            "usage": absoluteCounts(limit: 200, used: 40),
+        ]))
+    }
+
+    func testLegacyEmptyOrMissingFieldsNil() {
+        XCTAssertNil(KimiQuotaClient.parse(root: ["usage": [:]]))
+        XCTAssertNil(KimiQuotaClient.parse(root: ["limits": []]))
+        XCTAssertNil(KimiQuotaClient.parse(root: ["usage": "unexpected"]))
+        // limit 缺 used/remaining 的窗口不可靠。
+        XCTAssertNil(KimiQuotaClient.parse(root: legacyRoot(
+            usage: absoluteCounts(limit: 200)
+        )))
     }
 
     // MARK: - fetch 与请求构造
@@ -429,10 +640,20 @@ final class KimiQuotaClientTests: XCTestCase {
         XCTAssertTrue(error.isNetworkFailure)
     }
 
-    func testFetchDecodeFailureOnEmptyWindows() async throws {
+    func testFetchFreeEmptyResponseSucceeds() async throws {
+        MockKimiURLProtocol.handler = { _ in
+            (self.httpResponse(status: 200), Data("{}".utf8))
+        }
+        let result = await KimiQuotaClient.fetch(auth: makeAuthSession(), session: mockSession())
+        guard case .success(let snapshot) = result else { return XCTFail("HTTP 200 {} is a valid empty quota") }
+        XCTAssertTrue(snapshot.isEmptyKimiQuota)
+        XCTAssertNil(snapshot.primaryWindow)
+    }
+
+    func testFetchDecodeFailureOnMalformedWindows() async throws {
         let session = makeAuthSession()
         MockKimiURLProtocol.handler = { _ in
-            let body = try JSONSerialization.data(withJSONObject: ["usages": [:]])
+            let body = try JSONSerialization.data(withJSONObject: ["usages": ["limit_5h": [:]]])
             return (self.httpResponse(status: 200), body)
         }
         let result = await KimiQuotaClient.fetch(auth: session, session: mockSession())
@@ -442,6 +663,37 @@ final class KimiQuotaClientTests: XCTestCase {
         if case .decode = error {} else {
             XCTFail("expected decode error, got \(error)")
         }
+    }
+
+    func testFetchParsesLegacyAbsoluteCounts() async throws {
+        let session = makeAuthSession()
+        MockKimiURLProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/coding/v1/usages")
+            let body = try JSONSerialization.data(withJSONObject: [
+                "usage": ["limit": 200, "used": 50, "resetTime": "2026-10-27T00:00:00Z"],
+                "limits": [
+                    [
+                        "window": ["duration": 300, "timeUnit": "TIME_UNIT_MINUTE"],
+                        "detail": [
+                            "limit": 100,
+                            "used": 20,
+                            "resetTime": "2026-10-25T04:00:00Z",
+                        ],
+                    ],
+                ],
+            ])
+            return (self.httpResponse(status: 200), body)
+        }
+
+        let result = await KimiQuotaClient.fetch(auth: session, session: mockSession())
+        guard case .success(let snapshot) = result else {
+            return XCTFail("expected success, got \(result)")
+        }
+        XCTAssertEqual(snapshot.primaryLimit?.id, "kimi-five-hour")
+        XCTAssertEqual(snapshot.primaryLimit?.window.usedPercent, 20)
+        XCTAssertEqual(snapshot.secondaryLimit?.id, "kimi-weekly")
+        XCTAssertEqual(snapshot.secondaryLimit?.window.usedPercent, 25)
     }
 
     func testFetchUsesOfficialBaseURLFromAuth() async throws {
@@ -622,6 +874,43 @@ final class KimiQuotaClientTests: XCTestCase {
         usages["limit_month_total"] = monthTotal
         usages["limit_month_code"] = monthCode
         return ["usages": usages]
+    }
+
+    private func legacyRoot(
+        usage: [String: Any]? = nil,
+        limits: [[String: Any]]? = nil
+    ) -> [String: Any] {
+        var root: [String: Any] = [:]
+        root["usage"] = usage
+        root["limits"] = limits
+        return root
+    }
+
+    private func absoluteCounts(
+        limit: Any,
+        used: Any? = nil,
+        remaining: Any? = nil,
+        resetTime: String? = nil
+    ) -> [String: Any] {
+        var dict: [String: Any] = ["limit": limit]
+        if let used { dict["used"] = used }
+        if let remaining { dict["remaining"] = remaining }
+        if let resetTime { dict["resetTime"] = resetTime }
+        return dict
+    }
+
+    private func legacyLimit(
+        duration: Int,
+        timeUnit: String,
+        limit: Any,
+        used: Any? = nil,
+        remaining: Any? = nil,
+        resetTime: String? = nil
+    ) -> [String: Any] {
+        [
+            "window": ["duration": duration, "timeUnit": timeUnit],
+            "detail": absoluteCounts(limit: limit, used: used, remaining: remaining, resetTime: resetTime),
+        ]
     }
 
     private func httpResponse(status: Int) -> HTTPURLResponse {
