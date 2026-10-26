@@ -124,7 +124,17 @@ final class AppState {
     }
     var kimiError: String?
     var kimiEmail: String?
+    var kimiNickname: String?
     var kimiPlanName: String?
+    var kimiDisplaySubtitle: String {
+        guard kimiAccount != nil else { return tr("Not signed in", "未登录") }
+        var parts: [String] = []
+        if !SettingsStore.shared.privacyMode, let nickname = kimiNickname, !nickname.isEmpty {
+            parts.append(nickname)
+        }
+        if let plan = kimiPlanName ?? kimiQuota?.planType, !plan.isEmpty { parts.append(plan) }
+        return parts.isEmpty ? tr("Signed in", "已登录") : parts.joined(separator: " · ")
+    }
     @ObservationIgnored private var kimiRefreshID: UUID?
     @ObservationIgnored private var kimiProfileAttempt: (accountKey: String, at: Date)?
 
@@ -155,6 +165,32 @@ final class AppState {
     var importedCodexSources: [String: QuotaSnapshotSource] = [:]
     var importedCodexErrors: [String: String] = [:]
     var importedCodexRefreshStates: [String: QuotaRefreshState] = [:]
+
+    var kimiManagedAccounts: [KimiManagedAccount] = []
+    var kimiManagedQuotas: [String: QuotaSnapshot] = [:]
+    var kimiManagedSources: [String: QuotaSnapshotSource] = [:]
+    var kimiManagedErrors: [String: String] = [:]
+    var kimiManagedRefreshStates: [String: QuotaRefreshState] = [:]
+    var kimiDeviceAuthorization: KimiDeviceAuthorization?
+    var kimiDeviceLoginError: String?
+    var kimiDeviceLoginInProgress = false
+    @ObservationIgnored var kimiManagedRequestIDs: [String: UUID] = [:]
+    @ObservationIgnored var kimiDeviceLoginTask: Task<Void, Never>?
+    @ObservationIgnored var kimiDeviceLoginID: UUID?
+    @ObservationIgnored var kimiTokenStore: any KimiTokenStore = KimiKeychainStore()
+    @ObservationIgnored var moonshotAPIKeyStore: any MoonshotAPIKeyStore = MoonshotKeychainStore()
+    @ObservationIgnored var accountPersistenceDirectory: URL?
+    var kimiManagedOperationError: String?
+    var moonshotOperationError: String?
+    @ObservationIgnored var kimiDeviceLoginBackoffUntil: Date?
+    @ObservationIgnored var kimiManagedQuotaCacheRecords: [String: QuotaCacheRecord] = [:]
+    @ObservationIgnored var kimiManagedProfileAttempts: [String: Date] = [:]
+
+    var moonshotAccounts: [MoonshotAccount] = []
+    var moonshotBalances: [String: MoonshotBalance] = [:]
+    var moonshotErrors: [String: String] = [:]
+    var moonshotRefreshStates: [String: QuotaRefreshState] = [:]
+    @ObservationIgnored var moonshotRequestIDs: [String: UUID] = [:]
 
     /// 主窗口当前 tab,允许 ⌘1 / ⌘, 等命令从外部驱动切换
     var mainTab: MainTab = .stats
@@ -457,6 +493,8 @@ final class AppState {
         loadQuotaHistory()
         loadQuotaCycles()
         reloadImportedCodexAccounts()
+        loadKimiManagedAccounts()
+        loadMoonshotAccounts()
         await usageService.bootstrap(appState: self)
         await loadCodex()
         maybeShowKeychainPrompt()
@@ -603,8 +641,11 @@ final class AppState {
         }
         if plan.refreshKimi {
             await loadKimi()
-            await loadKimiQuota(reason: reason)
-            await loadKimiProfileIfNeeded()
+            if kimiAccount != nil || kimiManagedAccounts.isEmpty {
+                await loadKimiQuota(reason: reason)
+                await loadKimiProfileIfNeeded()
+            }
+            await loadAllKimiManagedQuotas(reason: reason)
         }
         if plan.refreshImported {
             await loadAllImportedCodexQuotas(
@@ -612,6 +653,7 @@ final class AppState {
                 canMirrorPrimary: plan.canMirrorPrimary
             )
         }
+        await loadAllMoonshotBalances(reason: reason)
         logQuotaSummary()
         // 批次 C：本轮标脏的额度文件统一落盘（每文件每轮最多写一次）
         scheduleQuotaPersistenceFlush()
@@ -671,6 +713,7 @@ final class AppState {
     func prepareForTermination() async throws {
         guard !isPreparingForTermination else { throw AppTerminationError.busy }
         terminationRequested = true
+        cancelKimiDeviceLogin()
         quotaNotifications.suspendForTermination()
         scheduler.suspendForTermination()
         UsageLogWatcher.shared.suspendForTermination()
@@ -1434,9 +1477,9 @@ final class AppState {
         )
     }
 
-    private func recordKimiQuotaHistory(snapshot: QuotaSnapshot, sampledAt: Date) {
+    func recordKimiQuotaHistory(snapshot: QuotaSnapshot, sampledAt: Date, managedAccountKey: String? = nil) {
         recordQuotaHistory(
-            accountKey: QuotaHistoryAccountKey.kimiPrimary(accountKey: kimiAccount?.accountKey),
+            accountKey: QuotaHistoryAccountKey.kimiPrimary(accountKey: managedAccountKey ?? kimiAccount?.accountKey),
             app: .kimi,
             kind: .kimiPrimary,
             snapshot: snapshot,
@@ -1454,7 +1497,7 @@ final class AppState {
         )
     }
 
-    private func recordQuotaHistory(
+    func recordQuotaHistory(
         accountKey: String,
         app: QuotaApp,
         kind: QuotaHistoryAccountKind,
@@ -2027,6 +2070,7 @@ final class AppState {
         guard let next else {
             kimiAccount = nil
             kimiEmail = nil
+            kimiNickname = nil
             kimiPlanName = nil
             kimiError = tr("Sign in with Kimi Code CLI first", "请先在 Kimi Code CLI 中登录")
             return
@@ -2044,6 +2088,7 @@ final class AppState {
             kimiRefreshState = QuotaRefreshState()
             quotaCache.kimi = nil
             kimiEmail = nil
+            kimiNickname = nil
             kimiPlanName = nil
             kimiProfileAttempt = nil
             saveQuotaCache()
@@ -2144,6 +2189,7 @@ final class AppState {
            kimiAccount?.accountKey == auth.accountKey, kimiAccount?.accessToken == auth.accessToken,
            auth.userID == nil || profile.userID == auth.userID {
             kimiEmail = profile.email
+            kimiNickname = profile.nickname
             kimiPlanName = profile.userLevelName
             if var snapshot = kimiQuota, let plan = profile.userLevelName {
                 snapshot.planType = plan
@@ -3006,7 +3052,7 @@ final class AppState {
         }
     }
 
-    private func backoffMessage(until: Date) -> String {
+    func backoffMessage(until: Date) -> String {
         let remaining = relativeAge(until: until)
         // 不说"限流":那是服务端视角的词。用户看到的事实是请求太频繁、正在等。
         return tr(

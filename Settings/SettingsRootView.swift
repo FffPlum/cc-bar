@@ -298,6 +298,10 @@ struct SettingsRootView: View {
             if entry.id == .quota(.codex) {
                 ImportedCodexAccountsView()
             }
+            if entry.id == .quota(.kimi) {
+                KimiManagedAccountsSettingsView()
+                MoonshotAccountsSettingsView()
+            }
         }
     }
 
@@ -1096,7 +1100,7 @@ struct SettingsRootView: View {
                 signedIn: appState.commandCodeAccount != nil
             )
         case .kimi:
-            return (email: appState.kimiEmail, plan: appState.kimiPlanName, signedIn: appState.kimiAccount != nil)
+            return (email: appState.kimiNickname, plan: appState.kimiPlanName, signedIn: appState.hasKimiSubscriptionAccount)
         case .opencodeGo:
             // Go 没有可读的账号信息，检测到 key 即视为已登录，副标题显示「已登录」。
             return (email: nil, plan: nil, signedIn: appState.opencodeGoAccount != nil)
@@ -2109,7 +2113,7 @@ private struct ServiceInfoButton: View {
 
 /// 矩阵单元格里的 13pt 复选框，没有文字标签（列头说明含义），`title` 只作无障碍标签。
 /// 整个单元格可点，不只是 13pt 的框。
-private struct DisplayDestinationCheckbox: View {
+struct DisplayDestinationCheckbox: View {
     let title: String
     @Binding var isOn: Bool
     var disabled: Bool = false

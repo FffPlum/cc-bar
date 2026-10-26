@@ -56,7 +56,11 @@ final class QuotaParsingTests: XCTestCase {
                 kimiStatusChild(id: "three", name: "Three", status: "partial_outage"),
             ]
         )
-        XCTAssertEqual(try ServiceStatusClient.parseKimiComponents(from: data).indicator, .major)
+        let status = try ServiceStatusClient.parseKimiComponents(from: data)
+        XCTAssertEqual(status.indicator, .major)
+        XCTAssertEqual(status.components.map(\.id), ["cyrtlddz0q8c", "one", "two", "three"])
+        XCTAssertEqual(status.components.map(\.name), ["Kimi Code", "One", "Two", "Three"])
+        XCTAssertEqual(status.components.map(\.indicator), [.none, .maintenance, .minor, .major])
     }
 
     func testKimiStatusUnknownChildPreventsOperationalAggregate() throws {

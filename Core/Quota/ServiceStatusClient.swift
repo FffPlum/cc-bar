@@ -45,6 +45,24 @@ enum ServiceStatusIndicator: String, Sendable, Codable {
         case .unknown: return tr("Status unknown", "状态未知")
         }
     }
+
+    @MainActor
+    var componentLabel: String {
+        switch self {
+        case .none: return tr("Operational", "运行正常")
+        case .minor: return tr("Degraded performance", "性能下降")
+        case .major: return tr("Partial outage", "部分故障")
+        case .critical: return tr("Major outage", "严重故障")
+        case .maintenance: return tr("Under maintenance", "维护中")
+        case .unknown: return tr("Unknown", "未知")
+        }
+    }
+}
+
+struct ServiceStatusComponent: Sendable, Equatable {
+    var id: String
+    var name: String
+    var indicator: ServiceStatusIndicator
 }
 
 struct ServiceStatus: Sendable, Equatable {
@@ -52,6 +70,8 @@ struct ServiceStatus: Sendable, Equatable {
     var description: String?
     var updatedAt: Date?
     var fetchedAt: Date
+    var components: [ServiceStatusComponent] = []
+    var isStale = false
 }
 
 enum ServiceStatusClient {
@@ -138,11 +158,15 @@ enum ServiceStatusClient {
             kimiSeverity($1) > kimiSeverity($0) ? $1 : $0
         }
         let updatedAt = ([group.updatedAt] + children.map(\.updatedAt)).compactMap { $0 }.max()
+        let components = ([group] + children).map {
+            ServiceStatusComponent(id: $0.id, name: $0.name, indicator: kimiIndicator(for: $0.status))
+        }
         return ServiceStatus(
             indicator: indicator,
             description: nil,
             updatedAt: updatedAt,
-            fetchedAt: fetchedAt
+            fetchedAt: fetchedAt,
+            components: components
         )
     }
 

@@ -9,12 +9,14 @@ nonisolated struct KimiAuthSession: Sendable, Equatable {
         case kimiCode
         case legacyCLI
         case apiKey
+        case appManaged
 
         var displayName: String {
             switch self {
             case .kimiCode: return "Kimi Code"
             case .legacyCLI: return "Kimi 旧版 CLI"
             case .apiKey: return "API Key"
+            case .appManaged: return "CCBar"
             }
         }
     }

@@ -498,6 +498,14 @@ final class KimiQuotaClientTests: XCTestCase {
         XCTAssertNil(info, "/me 失败不阻止额度展示")
     }
 
+    func testModelDisplayNameOnlyRemovesExactLeadingKimiCodePrefix() {
+        XCTAssertEqual(ModelDisplayName.text("kimi-code/k3.1-pro"), "k3.1-pro")
+        XCTAssertEqual(ModelDisplayName.text("kimi-code/"), "")
+        XCTAssertEqual(ModelDisplayName.text("Kimi-Code/k3"), "Kimi-Code/k3")
+        XCTAssertEqual(ModelDisplayName.text("other/kimi-code/k3"), "other/kimi-code/k3")
+        XCTAssertEqual(ModelDisplayName.list(["kimi-code/k3", "kimi-code/k3"]), ["k3", "k3"])
+    }
+
     // MARK: - Helpers
 
     private enum CredentialRoot {

@@ -1,5 +1,16 @@
 import Foundation
 
+nonisolated enum ModelDisplayName {
+    static func text(_ model: String) -> String {
+        let prefix = "kimi-code/"
+        return model.hasPrefix(prefix) ? String(model.dropFirst(prefix.count)) : model
+    }
+
+    static func list(_ models: [String]) -> [String] {
+        models.map(text)
+    }
+}
+
 /// 模型提供商（厂商归并 + opencode-go / command code 单列）分组键。
 ///
 /// 从 `UsageBucket.model` 字符串推导：前缀优先（`openai/`、`openai-codex/`、
