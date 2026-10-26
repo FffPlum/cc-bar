@@ -195,6 +195,12 @@ struct PopoverRootView: View {
                     if index > 0 {
                         Divider().padding(.horizontal, 16)
                     }
+                    if provider.app == .kimi,
+                       appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty
+                        || appState.kimiManagedAccounts.contains(where: \.visibleInPopover) {
+                        AccountVendorHeader(title: provider.title, logoName: provider.logoName,
+                                            status: appState.displayedKimiServiceStatus)
+                    }
                     if provider.app != .kimi || appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty {
                         primaryServiceBlock(provider)
                     }
@@ -204,7 +210,7 @@ struct PopoverRootView: View {
                         OtherCodexAccountsSection(dedupPrimary: true)
                     }
                     if provider.app == .kimi && appState.kimiManagedAccounts.contains(where: { $0.visibleInPopover && !appState.kimiManagedMirrorsCLI($0) }) {
-                        Divider().padding(.horizontal, 16)
+                        if appState.kimiAccount != nil { Divider().padding(.horizontal, 16) }
                         KimiManagedAccountsSection()
                     }
                 }
@@ -277,7 +283,8 @@ struct PopoverRootView: View {
             serviceStatus: serviceStatus(for: provider.app),
             showsCost: provider.showsCost,
             accountEdition: provider.app == .kimi ? appState.kimiCLIRegion?.displayName : nil,
-            isKimiCurrentAccount: provider.app == .kimi && appState.kimiAccount != nil
+            isKimiCurrentAccount: provider.app == .kimi && appState.kimiAccount != nil,
+            showsProviderHeader: provider.app != .kimi
         )
     }
 
@@ -505,6 +512,32 @@ struct PopoverRootView: View {
 
 // MARK: - ServiceBlockView
 
+/// One vendor title and status, followed by account rows with the same inset.
+struct AccountVendorHeader: View {
+    let title: String
+    var logoName: String? = nil
+    var status: ServiceStatus? = nil
+
+    var body: some View {
+        HStack(spacing: 9) {
+            if let logoName {
+                ServiceTile(logoName: logoName, fallback: "K", tint: .purple)
+            } else {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+            }
+            Text(title).font(.system(size: 13, weight: .semibold))
+            Spacer(minLength: 0)
+            if let status { ServiceStatusDot(status: status, title: title) }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 4)
+    }
+}
+
 struct ServiceBlockView: View {
     let app: QuotaApp
     let title: String
@@ -522,10 +555,15 @@ struct ServiceBlockView: View {
     let showsCost: Bool
     var accountEdition: String? = nil
     var isKimiCurrentAccount = false
+    var showsProviderHeader = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            headerRow
+            if showsProviderHeader {
+                headerRow
+            } else {
+                accountHeader
+            }
             if snapshot?.isEmptyKimiQuota == true {
                 Text(tr("No quota data available", "暂无额度数据"))
                     .font(.system(size: 11))
@@ -578,6 +616,23 @@ struct ServiceBlockView: View {
             if let status = serviceStatus {
                 ServiceStatusDot(status: status, title: title)
             }
+        }
+    }
+
+    private var accountHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(subtitle)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if isKimiCurrentAccount { KimiCurrentAccountBadge() }
+            if let accountEdition {
+                Text(accountEdition)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+            Spacer(minLength: 0)
         }
     }
 

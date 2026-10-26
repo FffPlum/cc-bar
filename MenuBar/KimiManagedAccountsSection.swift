@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// App-managed subscriptions use the same peer card as the CLI service.
+/// Account content under the shared Kimi vendor header, without extra inset.
 struct KimiManagedAccountsSection: View {
     @Environment(AppState.self) private var appState
 
@@ -24,7 +24,8 @@ struct KimiManagedAccountsSection: View {
                     serviceStatus: appState.displayedKimiServiceStatus,
                     showsCost: false,
                     accountEdition: account.region.displayName,
-                    isKimiCurrentAccount: appState.kimiManagedMirrorsCLI(account)
+                    isKimiCurrentAccount: appState.kimiManagedMirrorsCLI(account),
+                    showsProviderHeader: false
                 )
             }
         }

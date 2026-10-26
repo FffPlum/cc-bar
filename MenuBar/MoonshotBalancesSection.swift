@@ -6,6 +6,7 @@ struct MoonshotBalancesSection: View {
     var body: some View {
         let accounts = appState.moonshotAccounts.filter(\.visibleInPopover)
         VStack(spacing: 0) {
+            AccountVendorHeader(title: "Moonshot API")
             ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
                 if index > 0 { Divider().padding(.horizontal, 16) }
                 row(account)
@@ -15,19 +16,11 @@ struct MoonshotBalancesSection: View {
 
     private func row(_ account: MoonshotAccount) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 9) {
-                Image(systemName: "key.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text("Moonshot API").font(.system(size: 13, weight: .semibold))
-                        Text(account.region.displayName).font(.system(size: 10)).foregroundStyle(.secondary)
-                    }
-                    Text(appState.moonshotDisplayName(account))
-                        .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(appState.moonshotDisplayName(account))
+                    .font(.system(size: 12, weight: .medium)).lineLimit(1)
+                Text(account.region.displayName)
+                    .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize()
                 Spacer(minLength: 0)
             }
             HStack(alignment: .firstTextBaseline) {
