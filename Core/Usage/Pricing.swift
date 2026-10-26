@@ -165,6 +165,12 @@ nonisolated enum Pricing {
         "gemini-2.5-flash":  .init(input: 0.30, output: 2.50,  cacheRead: 0.03,  cacheCreation: 0),
         "gemini-2.5-flash-lite": .init(input: 0.10, output: 0.40, cacheRead: 0.01, cacheCreation: 0),
 
+        // —— Moonshot / Kimi 公开 API 费率（USD / 百万 token）——
+        // Kimi Code 订阅路由通过 kimiAPIPricingAliases 精确映射到这里；订阅账单仍与 API 等值估算分开。
+        "kimi-k3":                    .init(input: 3, output: 15, cacheRead: 0.30, cacheCreation: 3),
+        "kimi-k3.1-pro":              .init(input: 2, output: 10, cacheRead: 0.20, cacheCreation: 2),
+        "kimi-k3.1-pro-highspeed":    .init(input: 4, output: 20, cacheRead: 0.20, cacheCreation: 4),
+
         // —— DeepSeek 系列（与 cc-switch seed_model_pricing 对齐）——
         // 缓存语义：通过 Anthropic 兼容端点使用时 input 不含 cache_read，直接乘价。
         // V4 系列官方 CNY 按 1 USD ≈ 7.14 折算；下面 deepseek-v4-pro / flash 四 key 的
@@ -639,8 +645,18 @@ nonisolated enum Pricing {
 
     /// 查价用的模型键：在 `normalize(model:)` 基础上再剥转售标签，不作为任何存储身份。
     nonisolated static func pricingKey(model: String) -> String {
-        normalize(model: model, stripping: pricingPrefixes)
+        let key = normalize(model: model, stripping: pricingPrefixes)
+        return kimiAPIPricingAliases[key] ?? key
     }
+
+    /// Kimi Code 日志里的订阅路由与公开 API 型号的精确对应。只用于查价，绝不回写历史模型名；
+    /// `kimi-for-coding` 是独立滚动路由，没有可靠公开 API 价格，不在此白名单中。
+    private static let kimiAPIPricingAliases = [
+        "k3": "kimi-k3",
+        "k3-256k": "kimi-k3",
+        "k3.1-pro": "kimi-k3.1-pro",
+        "k3.1-pro-highspeed": "kimi-k3.1-pro-highspeed",
+    ]
 
     private static let identityPrefixes = [
         "openai-codex/", "openai/", "anthropic/", "deepseek/",
@@ -653,7 +669,7 @@ nonisolated enum Pricing {
     private static let pricingOnlyPrefixes = [
         "antigravity/", "z-ai/", "zai/", "minimax/",
         "deepseek-account/", "deepseek-official/",
-        // Kimi 仅剥渠道前缀；k3 / kimi-for-coding 等订阅别名不猜 API 型号。
+        // Kimi 渠道前缀只在这里剥除；订阅路由是否对应公开 API 型号由精确白名单决定。
         "moonshotai/", "moonshot/", "kimi-code/"
     ]
 
@@ -1031,9 +1047,12 @@ nonisolated enum Pricing {
         let cacheRuleBody = "claude-cache-creation-1h:\(claudeCacheCreation1hMultiplier)"
         let fixedOverrideBody = fixedLocalOverrideKeys.sorted().joined(separator: ";")
         let fixedFastOverrideBody = fixedFastLocalOverrideKeys.sorted().joined(separator: ";")
-        // 查价前缀变化会让原本未定价的用量命中价格，也要触发重建。
+        // 查价前缀或精确路由映射变化会让原本未定价的用量命中价格，也要触发重建。
         let pricingPrefixBody = pricingPrefixes.joined(separator: ";")
-        return "\(baseBody)|\(tierBody)|\(timedTierBody)|\(timedFastBody)|\(fastLongBody)|\(timedFastLongBody)|\(overrideBody)|\(fixedOverrideBody)|\(fixedFastOverrideBody)|\(fastPriceBody)|\(cacheRuleBody)|\(pricingPrefixBody)"
+        let pricingAliasBody = kimiAPIPricingAliases.keys.sorted().map {
+            "kimi-api:\($0)=\(kimiAPIPricingAliases[$0]!)"
+        }.joined(separator: ";")
+        return "\(baseBody)|\(tierBody)|\(timedTierBody)|\(timedFastBody)|\(fastLongBody)|\(timedFastLongBody)|\(overrideBody)|\(fixedOverrideBody)|\(fixedFastOverrideBody)|\(fastPriceBody)|\(cacheRuleBody)|\(pricingPrefixBody)|\(pricingAliasBody)"
     }
 
     private static func fingerprintBody(_ values: [String: ModelPrice], prefix: String) -> String {

@@ -11,7 +11,7 @@ nonisolated enum UsageApp: String, Sendable, Codable, Hashable, CaseIterable {
     case dsh
     /// Antigravity（2.0 App / IDE / agy CLI）本机对话库；只接入主窗口普通统计与对话，不进 Cycles 与额度 Timeline。
     case antigravity
-    /// Kimi Code CLI 本机会话日志；只参与普通用量、对话和项目统计。
+    /// Kimi Code CLI 本机会话日志；参与普通用量、对话、项目及官方订阅额度周期统计。
     case kimi
 
     /// 当前本地扫描器实际支持的数据源。Cursor 虽属于 `UsageApp`，但不在此集合中。

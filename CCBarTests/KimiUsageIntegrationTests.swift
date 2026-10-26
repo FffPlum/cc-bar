@@ -51,6 +51,122 @@ final class KimiUsageIntegrationTests: XCTestCase {
         XCTAssertEqual(tokens(restarted), 370, "重算保留源日志已删除的 Kimi 历史")
     }
 
+    func testKimiCycleOfficialAttributionRebuildRestartAndDeletedHistory() async throws {
+        let env = try UsageTestEnvironment(name: "kimi-cycle-integration")
+        let share = env.root.appendingPathComponent("kimi-code", isDirectory: true)
+        let session = share.appendingPathComponent("sessions/workspace/session_cycle", isDirectory: true)
+        let wire = session.appendingPathComponent("agents/main/wire.jsonl")
+        let now = Date()
+        let models = [
+            ("kimi-code/k3", 100),
+            ("kimi-code/kimi-for-coding", 200),
+            ("deepseek/deepseek-v4-pro", 1_000),
+            ("custom/kimi-code/k3", 2_000),
+            ("unknown", 3_000),
+        ]
+        for (index, item) in models.enumerated() {
+            let time = Int64(now.addingTimeInterval(TimeInterval(index - 60)).timeIntervalSince1970 * 1_000)
+            try env.append(usage(time: time, input: item.1, model: item.0), to: wire)
+        }
+
+        let accountKey = "fixture-kimi-account"
+        func cycle(kind: QuotaLimitKind, seconds: TimeInterval) -> QuotaCycleRecord {
+            let start = now.addingTimeInterval(-120)
+            let end = start.addingTimeInterval(seconds)
+            let id = "kimi|\(kind.rawValue)"
+            return QuotaCycleRecord(
+                id: id,
+                accountKey: accountKey,
+                app: .kimi,
+                limitID: kind.rawValue,
+                limitKind: kind,
+                startAt: start,
+                endAt: end,
+                scheduledEndAt: end,
+                firstSampleAt: now,
+                lastSampleAt: now,
+                latestUsedPercent: 20,
+                allowanceSegments: [QuotaCycleAllowanceSegment(
+                    id: "\(id)|allowance",
+                    startAt: start,
+                    endAt: nil,
+                    baselineUsedPercent: 0,
+                    latestUsedPercent: 20,
+                    maximumUsedPercent: 20,
+                    firstSampleAt: now,
+                    lastSampleAt: now,
+                    startReason: .initial
+                )],
+                source: .api,
+                boundaryQuality: .observed
+            )
+        }
+        var quotaCycles = QuotaCyclePayload()
+        quotaCycles.trackingStartedAt = now.addingTimeInterval(-8 * 86_400)
+        quotaCycles.records = [cycle(kind: .fiveHour, seconds: 18_000), cycle(kind: .weekly, seconds: 604_800)]
+        quotaCycles.accountSegments = [QuotaCycleAccountSegment(
+            id: "kimi-account",
+            accountKey: accountKey,
+            app: .kimi,
+            startAt: quotaCycles.trackingStartedAt,
+            endAt: nil
+        )]
+        env.appState.quotaCycles = quotaCycles
+        var roots = env.scanRoots
+        roots.kimiRoots = [share]
+        func service() -> UsageService {
+            UsageService(historyStore: env.store, roots: roots, legacyLocations: env.legacyLocations,
+                         backfillURL: env.backfillURL, cursorCacheDirectory: env.cursorCacheDirectory)
+        }
+        func assertCycle(_ service: UsageService, file: StaticString = #filePath, line: UInt = #line) {
+            let buckets = service.cycleAggregator.snapshot()
+            XCTAssertEqual(Set(buckets.map(\.cycleID)), Set(quotaCycles.records.map(\.id)), file: file, line: line)
+            XCTAssertEqual(buckets.reduce(0) { $0 + $1.inputTokens }, 600, file: file, line: line)
+            XCTAssertEqual(buckets.reduce(0) { $0 + $1.requestCount }, 4, file: file, line: line)
+            XCTAssertTrue(buckets.allSatisfy { $0.app == .kimi && $0.model.hasPrefix("kimi-code/") }, file: file, line: line)
+            XCTAssertEqual(Set(buckets.map(\.model)), ["kimi-code/k3", "kimi-code/kimi-for-coding"], file: file, line: line)
+            XCTAssertTrue(buckets.filter { $0.model == "kimi-code/k3" }.allSatisfy {
+                $0.costUSD == Decimal(string: "0.000471")! && !$0.hasUnpricedUsage
+            }, file: file, line: line)
+            XCTAssertTrue(buckets.filter { $0.model == "kimi-code/kimi-for-coding" }.allSatisfy(\.hasUnpricedUsage), file: file, line: line)
+        }
+
+        let first = service()
+        await env.bootstrap(first)
+        await first.scanNow()
+        assertCycle(first)
+        XCTAssertEqual(tokens(first), 6_475, "普通统计仍保留全部 Kimi 渠道")
+        var expected = UsageHistoryConsistency.cycleVector(first.cycleAggregator.snapshot())
+
+        await first.scanNow()
+        XCTAssertEqual(UsageHistoryConsistency.cycleVector(first.cycleAggregator.snapshot()), expected)
+        await first.rebuildCycleUsageForRecentChanges(reasons: ["fixture committed Kimi events"])
+        XCTAssertEqual(UsageHistoryConsistency.cycleVector(first.cycleAggregator.snapshot()), expected,
+                       "committedEvents 窗口补算不能漏记或重复")
+
+        let appendedTime = Int64(now.addingTimeInterval(-20).timeIntervalSince1970 * 1_000)
+        try env.append(usage(time: appendedTime, input: 50, model: "kimi-code/k3"), to: wire)
+        await first.scanNow()
+        XCTAssertEqual(first.cycleAggregator.snapshot().reduce(0) { $0 + $1.inputTokens }, 700)
+        XCTAssertEqual(first.cycleAggregator.snapshot().reduce(0) { $0 + $1.requestCount }, 6)
+        expected = UsageHistoryConsistency.cycleVector(first.cycleAggregator.snapshot())
+        await first.rebuildCycleUsageForRecentChanges(reasons: ["fixture appended Kimi request"])
+        XCTAssertEqual(UsageHistoryConsistency.cycleVector(first.cycleAggregator.snapshot()), expected,
+                       "追加后的完整会话贡献必须替换，不能与旧贡献叠加")
+
+        let restarted = service()
+        await env.bootstrap(restarted)
+        await restarted.scanNow()
+        XCTAssertEqual(UsageHistoryConsistency.cycleVector(restarted.cycleAggregator.snapshot()), expected)
+        try FileManager.default.removeItem(at: session)
+        await restarted.rebuildCycleUsageForRecentChanges(reasons: ["fixture deleted Kimi source"])
+        XCTAssertEqual(UsageHistoryConsistency.cycleVector(restarted.cycleAggregator.snapshot()), expected)
+        await restarted.forceRescan()
+        XCTAssertEqual(UsageHistoryConsistency.cycleVector(restarted.cycleAggregator.snapshot()), expected,
+                       "删除日志后的 Kimi 周期历史必须保留")
+        XCTAssertEqual(tokens(restarted), 6_560)
+    }
+
     func testMoonshotCatalogExcludesSubscriptionZeroPricesAndRegionalConversion() throws {
         let fixture: [String: Any] = [
             "moonshotai": ["models": ["kimi-fixture": ["cost": ["input": 2, "output": 10, "cache_read": 0.2]]]],
@@ -70,8 +186,39 @@ final class KimiUsageIntegrationTests: XCTestCase {
         XCTAssertNil(Pricing.costBreakdown(app: .kimi, model: "kimi-code/kimi-for-coding", speed: .standard,
                                           input: 100, output: 20, cacheRead: 30, cacheCreation: 0, at: Date()))
         XCTAssertNil(CycleUsageAggregator.cycleApp(app: .kimi, model: "openai-codex/gpt-5"))
+        XCTAssertEqual(CycleUsageAggregator.cycleApp(app: .kimi, model: "kimi-code/k3"), .kimi)
+        XCTAssertNil(CycleUsageAggregator.cycleApp(app: .kimi, model: "deepseek/deepseek-v4-pro"))
+        XCTAssertNil(CycleUsageAggregator.cycleApp(app: .kimi, model: "custom/kimi-code/k3"))
+        XCTAssertNil(CycleUsageAggregator.cycleApp(app: .kimi, model: "kimi-code/deepseek-v4-pro"))
+        XCTAssertNil(CycleUsageAggregator.cycleApp(app: .kimi, model: "kimi-code/custom-model"))
+        XCTAssertFalse(CycleUsageAggregator.isSubscriptionUsage(app: .kimi, model: "kimi-code/deepseek-v4-pro"))
+        XCTAssertNil(CycleUsageAggregator.cycleApp(app: .kimi, model: "unknown"))
         XCTAssertEqual(ModelProvider.resolve(app: .kimi, model: "kimi-code/k3"), .moonshot)
         XCTAssertEqual(ModelProvider.resolve(app: .kimi, model: "deepseek/deepseek-v4-pro"), .deepseek)
+        XCTAssertTrue(KimiModelPresentation.isForCodingRoute(
+            model: "kimi-code/kimi-for-coding", apps: [.kimi]
+        ))
+        XCTAssertTrue(KimiModelPresentation.isForCodingRoute(model: "kimi-for-coding", apps: [.kimi]))
+        XCTAssertFalse(KimiModelPresentation.isForCodingRoute(model: "kimi-code/k3", apps: [.kimi]))
+        XCTAssertFalse(KimiModelPresentation.isForCodingRoute(
+            model: "kimi-code/kimi-for-coding", apps: [.codex]
+        ), "当前 K2.8 Preview 只是 Kimi 滚动路由的展示说明，不扩大到其他服务")
+    }
+
+    func testFullyUnpricedKimiModelUsesDashAndExplanationOnlyForKimiRows() {
+        var totals = UsageTotals.zero
+        totals.inputTokens = 100
+        totals.hasUnpricedUsage = true
+        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.kimi], enabled: true), "—")
+        let help = KimiModelPresentation.missingPriceHelp(totals, apps: [.kimi], enabled: true)
+        XCTAssertTrue(help.contains("public reference price") || help.contains("公开参考价格"))
+        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.kimi], enabled: false), "$0.00")
+        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.codex], enabled: true), "$0.00")
+        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.kimi, .codex], enabled: true), "$0.00")
+        XCTAssertEqual(KimiModelPresentation.missingPriceHelp(totals, apps: [.codex], enabled: true), "")
+        totals.costUSD = Decimal(string: "1.25")!
+        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.kimi], enabled: true), "$1.25",
+                       "只有完全无已知金额的 Kimi 模型行使用缺价占位")
     }
 
     func testOldScanStateAndInjectedRootsStayCompatible() throws {
@@ -236,7 +383,7 @@ final class KimiUsageIntegrationTests: XCTestCase {
         service.aggregator.snapshotLocal().filter { $0.app == .kimi }.reduce(0) { $0 + $1.inputTokens + $1.outputTokens + $1.cacheReadTokens + $1.cacheCreationTokens }
     }
 
-    private func usage(time: Int64, input: Int) -> String {
-        "{\"type\":\"usage.record\",\"agentId\":\"main\",\"model\":\"kimi-code/kimi-for-coding\",\"usage\":{\"inputOther\":\(input),\"output\":10,\"inputCacheRead\":20,\"inputCacheCreation\":5},\"usageScope\":\"turn\",\"time\":\(time)}"
+    private func usage(time: Int64, input: Int, model: String = "kimi-code/kimi-for-coding") -> String {
+        "{\"type\":\"usage.record\",\"agentId\":\"main\",\"model\":\"\(model)\",\"usage\":{\"inputOther\":\(input),\"output\":10,\"inputCacheRead\":20,\"inputCacheCreation\":5},\"usageScope\":\"turn\",\"time\":\(time)}"
     }
 }

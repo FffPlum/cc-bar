@@ -710,3 +710,36 @@ struct ProviderModelRow: Identifiable {
     var totals: UsageTotals
     var speed: UsageSpeedBreakdown
 }
+
+/// 仅用于展示的 Kimi 滚动路由识别；不参与模型分组、存储、去重或查价。
+enum KimiModelPresentation {
+    static func isForCodingRoute(model: String, apps: [UsageApp]) -> Bool {
+        guard apps.count == 1, apps.first == .kimi else { return false }
+        let route = model.lowercased()
+        return route == "kimi-code/kimi-for-coding" || route == "kimi-for-coding"
+    }
+
+    static func isFullyUnpricedModel(_ totals: UsageTotals, apps: [UsageApp], enabled: Bool) -> Bool {
+        enabled && apps.count == 1 && apps.first == .kimi
+            && totals.hasUnpricedUsage && totals.costUSD == 0
+    }
+
+    @MainActor
+    static func cost(_ totals: UsageTotals, apps: [UsageApp], enabled: Bool) -> String {
+        guard !isFullyUnpricedModel(totals, apps: apps, enabled: enabled) else { return "—" }
+        return StatsFormatter.tierCost(
+            totals.costUSD,
+            hasUnpricedUsage: totals.hasUnpricedUsage,
+            costIncomplete: totals.costIncomplete
+        )
+    }
+
+    @MainActor
+    static func missingPriceHelp(_ totals: UsageTotals, apps: [UsageApp], enabled: Bool) -> String {
+        guard isFullyUnpricedModel(totals, apps: apps, enabled: enabled) else { return "" }
+        return tr(
+            "No public reference price is available for this Kimi model, so its cost can't be estimated. Token usage is still counted.",
+            "该 Kimi 模型没有公开参考价格，无法估算费用；Token 用量仍会统计。"
+        )
+    }
+}

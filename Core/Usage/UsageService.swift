@@ -247,6 +247,8 @@ final class UsageService {
     /// 之后到达的请求归入下一批；同一批只重扫一次日志。
     private var pendingCycleRebuildReasons: [String] = []
     private var cycleRebuildRequestTask: Task<Void, Never>?
+    /// 最近一次成功完成的常规扫描是否完整读取 Kimi；周期补算据此决定复用状态还是冻结旧桶。
+    private var kimiScanCompleteForCycleRebuild: Bool?
     /// 存在窗口之外、受限重建补不回的周期用量缺口。设置页据此提示用户手动重算；
     /// 手动「重新计算用量」成功后清除。
     private(set) var cycleUsageNeedsManualRecalculation = false
@@ -1117,8 +1119,13 @@ final class UsageService {
         let pi = await piTask
         let opencode = await opencodeTask
         let dsh = await dshTask
+        // drain 已提交本轮增量；直接还原 Kimi 的已归属请求，含已删除文件贡献，不再重读正文。
+        let kimiState = cachedScanState?.kimi
+        let kimiEntries = kimiState.map { KimiSessionScanner.committedEntries(from: $0) } ?? []
         let scanEnded = Date()
         let affectedCycles = cycles.filter { affectedCycleIDs.contains($0.id) }
+        let kimiFailed = affectedCycles.contains { $0.app == .kimi }
+            && (kimiState == nil || kimiScanCompleteForCycleRebuild == false)
         let failedApps = Self.cycleSourceFailedApps(
             Self.cycleRebuildFailedApps(
                 claude: claude,
@@ -1127,7 +1134,8 @@ final class UsageService {
             ),
             opencode: opencode,
             opencodeDatabaseURL: opencodeDatabaseURL,
-            dshFailed: dsh.map { !$0.isComplete } ?? false
+            dshFailed: dsh.map { !$0.isComplete } ?? false,
+            kimiFailed: kimiFailed
         )
         let rebuildableCycleIDs = Self.cycleRebuildableCycleIDs(
             cycles: affectedCycles,
@@ -1135,13 +1143,13 @@ final class UsageService {
             failedApps: failedApps
         )
         await commitCycleAggregation(
-            exactEntries: (claude.entries + codex.entries + pi.entries + opencode.entries + (dsh?.entries ?? []))
+            exactEntries: (claude.entries + codex.entries + pi.entries + opencode.entries + (dsh?.entries ?? []) + kimiEntries)
                 .filter { !failedApps.contains($0.app) },
             cycles: cycles,
             accountSegments: accountSegments,
             failedApps: failedApps,
             rebuildRange: rebuildableCycleIDs,
-            sourceApps: Set<UsageApp>([.claude, .codex])
+            sourceApps: Set<UsageApp>([.claude, .codex, .kimi])
                 .union(CycleUsageAggregator.otherAgentSourceApps)
                 .subtracting(failedApps)
                 .subtracting(dshFrozen ? [.dsh] : [])
@@ -1203,13 +1211,14 @@ final class UsageService {
     }
 
     /// 周期重建的来源失败集合。OpenCode 库从未存在（本机没装）是正常状态，库在却读不全才算失败；
-    /// DSH 由调用方判定（扫描不完整、冻结等），默认目录从未创建时扫描本身就是完整的。
+    /// DSH / Kimi 由调用方判定（扫描不完整、冻结或缺少已提交状态），默认目录从未创建是正常空扫描。
     /// 其他 Agent 只归入 Codex 周期，Codex 周期本轮不能重建时它们也不能算完成。
     nonisolated static func cycleSourceFailedApps(
         _ failedApps: Set<UsageApp>,
         opencode: OpencodeScanner.Result?,
         opencodeDatabaseURL: URL,
-        dshFailed: Bool = false
+        dshFailed: Bool = false,
+        kimiFailed: Bool = false
     ) -> Set<UsageApp> {
         var result = failedApps
         if let opencode, opencode.error != nil || !opencode.isComplete,
@@ -1219,6 +1228,9 @@ final class UsageService {
         if dshFailed {
             result.insert(.dsh)
         }
+        if kimiFailed {
+            result.insert(.kimi)
+        }
         if result.contains(.codex) {
             result.formUnion(CycleUsageAggregator.otherAgentSourceApps)
         }
@@ -1227,7 +1239,7 @@ final class UsageService {
 
     /// 周期统计需要覆盖的来源。有 Codex 周期时，Pi / OpenCode / DSH 里的 Codex 订阅用量也要归集。
     nonisolated static func requiredCycleSourceApps(cycles: [QuotaCycleRecord]) -> Set<UsageApp> {
-        let apps = Set(cycles.map(\.app)).intersection([.codex, .claude])
+        let apps = Set(cycles.map(\.app)).intersection([.codex, .claude, .kimi])
         return apps.contains(.codex) ? apps.union(CycleUsageAggregator.otherAgentSourceApps) : apps
     }
 
@@ -1341,13 +1353,14 @@ final class UsageService {
         await cycleReadyForTesting?()
         #endif
         // Pi 自身不会读取失败，只会随 Codex 一起推迟，不单独列名。
-        let failedProviderNames = [UsageApp.codex, .claude, .opencode, .dsh]
+        let failedProviderNames = [UsageApp.codex, .claude, .opencode, .dsh, .kimi]
             .filter { failedApps.contains($0) }
             .map { app -> String in
                 switch app {
                 case .codex: return "Codex"
                 case .claude: return "Claude Code"
                 case .dsh: return "DSH"
+                case .kimi: return "Kimi Code"
                 default: return "OpenCode"
                 }
             }
@@ -1528,6 +1541,11 @@ final class UsageService {
         let pi = await piTask?.value
         let opencode = await opencodeTask?.value
         let dsh = await dshTask?.value
+        // Kimi 已在 drain 中完成扫描和提交；初始补算同样复用其完整请求账本。
+        let kimiState = pendingApps.contains(.kimi) ? cachedScanState?.kimi : nil
+        let kimiEntries = kimiState.map { KimiSessionScanner.committedEntries(from: $0) } ?? []
+        let kimiFailed = pendingApps.contains(.kimi)
+            && (kimiState == nil || kimiScanCompleteForCycleRebuild == false)
         let pendingCycles = Self.cyclesToRebuild(cycles, for: pendingApps)
         let failedApps = Self.cycleSourceFailedApps(
             Self.cycleRebuildFailedApps(
@@ -1537,7 +1555,8 @@ final class UsageService {
             ),
             opencode: opencode,
             opencodeDatabaseURL: opencodeDatabaseURL,
-            dshFailed: dsh.map { !$0.isComplete } ?? false
+            dshFailed: dsh.map { !$0.isComplete } ?? false,
+            kimiFailed: kimiFailed
         )
         let pendingCycleIDs = Set(pendingCycles.map(\.id))
         let rebuildableCycleIDs = Self.cycleRebuildableCycleIDs(
@@ -1545,8 +1564,9 @@ final class UsageService {
             requestedCycleIDs: pendingCycleIDs,
             failedApps: failedApps
         )
-        let entries: [UsageEntry] = [claude?.entries, codex?.entries, pi?.entries, opencode?.entries, dsh?.entries]
+        var entries: [UsageEntry] = [claude?.entries, codex?.entries, pi?.entries, opencode?.entries, dsh?.entries]
             .compactMap { $0 }.flatMap { $0 }
+        entries.append(contentsOf: kimiEntries)
         await commitCycleAggregation(
             exactEntries: entries.filter { !failedApps.contains($0.app) },
             cycles: cycles,
@@ -1981,9 +2001,9 @@ final class UsageService {
             entries: claude.entries + codex.entries + pi.entries,
             seeds: claude.conversationSeeds + codex.conversationSeeds + pi.conversationSeeds
         )
-        // OpenCode / DSH 从空状态扫描，给出的是现存会话的完整用量；DSH 冻结时不重灌。
+        // OpenCode / DSH / Kimi 给出刷新会话的完整贡献；DSH 冻结时不重灌。
         let cycleEntries = claude.entries + codex.entries + pi.entries + opencode.entries
-            + (dshFrozen ? [] : dsh.entries)
+            + (dshFrozen ? [] : dsh.entries) + kimi.entries
         let freshDshContributions = dshFrozen
             ? dshContributions
             : DshContributionStore.apply(scan: dsh, to: dshContributions).contributions
@@ -2006,16 +2026,19 @@ final class UsageService {
                 cycles: cycles,
                 accountSegments: accountSegments
             )
-            // 与日桶一致：源库中已删除的 OpenCode 会话、日志已删除的 DSH 会话保留原周期桶；
-            // DSH 冻结时整份保留。
+            // 与日桶一致：源库中已删除的 OpenCode / DSH / Kimi 会话保留原周期桶；
+            // DSH 冻结时整份保留，Kimi 读取失败时整个候选已在完整性门槛拒绝。
             let refreshedOpencodeKeys = Set(opencode.refreshedSessionIDs.map { "opencode:\($0)" })
             let refreshedDshKeys = Set(dsh.newState.values.compactMap(\.conversationID).map { "dsh:\($0)" })
+            let refreshedKimiKeys = Set(kimi.refreshedConversationIDs.map { "kimi:\($0)" })
             let preserved = baselineCycles.filter {
                 switch $0.app {
                 case .opencode:
                     return !refreshedOpencodeKeys.contains($0.conversationKey ?? "")
                 case .dsh:
                     return dshFrozen || !refreshedDshKeys.contains($0.conversationKey ?? "")
+                case .kimi:
+                    return !refreshedKimiKeys.contains($0.conversationKey ?? "")
                 default:
                     return false
                 }
@@ -2290,7 +2313,8 @@ final class UsageService {
                 opencode: opencode,
                 opencodeDatabaseURL: opencodeDatabaseURL,
                 // DSH 只有从零完整扫描才能直接灌入；冻结或带旧 watermark 时留给补算。
-                dshFailed: dshFrozen || !dsh.isComplete || !dshPrevious.isEmpty
+                dshFailed: dshFrozen || !dsh.isComplete || !dshPrevious.isEmpty,
+                kimiFailed: initialApps.contains(.kimi) && !kimi.isComplete
             )
             let initialCycleIDs = Set(initialCycles.map(\.id))
             let rebuildableCycleIDs = Self.cycleRebuildableCycleIDs(
@@ -2299,9 +2323,9 @@ final class UsageService {
                 failedApps: failedApps
             )
             dshCycleRebuilt = initialApps.contains(.dsh) && !failedApps.contains(.dsh)
-            // 从零扫描时 OpenCode / DSH 给出的是全部会话的完整用量，可以直接灌入。
+            // 从零扫描时 OpenCode / DSH / Kimi 给出的是全部会话的完整用量，可以直接灌入。
             cycleAggregator.rebuildRange(
-                exactEntries: (cycleEntries + opencode.entries + dsh.entries)
+                exactEntries: (cycleEntries + opencode.entries + dsh.entries + kimi.entries)
                     .filter { !failedApps.contains($0.app) },
                 cycles: cycles,
                 accountSegments: appState?.quotaCycles.accountSegments ?? [],
@@ -2324,7 +2348,8 @@ final class UsageService {
                 cycles: cycles,
                 accountSegments: appState?.quotaCycles.accountSegments ?? []
             )
-            // OpenCode 刷新会话给出的是完整用量，按会话替换，不能累加。
+            // OpenCode / Kimi 刷新会话给出的是完整用量，按会话替换，不能累加。
+            // Kimi 失败会话不进入 refreshed 集合，其旧周期桶与其他成功会话均保留。
             let opencodeReplaced = opencode.isComplete && cycleAggregator.replaceConversations(
                 app: .opencode,
                 conversationKeys: Set(opencode.refreshedSessionIDs.map { "opencode:\($0)" }),
@@ -2332,7 +2357,14 @@ final class UsageService {
                 cycles: cycles,
                 accountSegments: appState?.quotaCycles.accountSegments ?? []
             )
-            cycleChanged = ingested || opencodeReplaced
+            let kimiReplaced = cycleAggregator.replaceConversations(
+                app: .kimi,
+                conversationKeys: Set(kimi.refreshedConversationIDs.map { "kimi:\($0)" }),
+                entries: kimi.entries,
+                cycles: cycles,
+                accountSegments: appState?.quotaCycles.accountSegments ?? []
+            )
+            cycleChanged = ingested || opencodeReplaced || kimiReplaced
         }
 
         // DSH 不像其他扫描器那样靠 seen 集合兜底去重：本轮若不落盘，watermark 会一并压住，
@@ -2472,6 +2504,7 @@ final class UsageService {
         }
         loadedRollupGeneration = generationID
         cachedScanState = newScanState
+        kimiScanCompleteForCycleRebuild = kimi.isComplete
         lastScanAt = Date()
         let unverifiedDshCount = dshContributions.values.filter { $0.needsVerification == true }.count
         if let error = opencode.error {

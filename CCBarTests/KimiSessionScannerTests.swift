@@ -11,6 +11,7 @@ final class KimiSessionScannerTests: XCTestCase {
     private var tempDir: URL!
 
     override func setUpWithError() throws {
+        PricingCatalogStore.shared.resetCatalogForTesting()
         tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("kimi-scan-test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -91,6 +92,40 @@ final class KimiSessionScannerTests: XCTestCase {
         XCTAssertEqual(entry.costBreakdown?.total, cost)
     }
 
+    func testModelSwitchKeepsHistoricalNamesCostsAndCommittedEventsIndependent() throws {
+        let root = try makeRoot("kimi-code")
+        let wire = try makeKimiCodeSession(root, id: "session_model_switch", workspace: "wd_model_switch")
+        try appendLines(wire, [
+            #"{"type":"llm.request","model":"k3","modelAlias":"kimi-code/k3","time":1789430400000}"#,
+            #"{"type":"usage.record","model":"kimi-code/k3","usage":{"inputOther":1000000,"output":1000000,"inputCacheRead":1000000,"inputCacheCreation":1000000},"time":1789430400100}"#,
+            #"{"type":"llm.request","model":"k3.1-pro-highspeed","modelAlias":"kimi-code/k3.1-pro-highspeed","time":1789430401000}"#,
+            #"{"type":"usage.record","model":"kimi-code/k3.1-pro-highspeed","usage":{"inputOther":1000000,"output":1000000,"inputCacheRead":1000000,"inputCacheCreation":1000000},"time":1789430401100}"#,
+            #"{"type":"llm.request","model":"kimi-for-coding","modelAlias":"kimi-code/kimi-for-coding","time":1789430402000}"#,
+            #"{"type":"usage.record","model":"kimi-code/kimi-for-coding","usage":{"inputOther":1000000,"output":1000000,"inputCacheRead":1000000,"inputCacheCreation":1000000},"time":1789430402100}"#,
+        ])
+
+        let result = KimiSessionScanner.scan(previous: nil, roots: [root])
+        XCTAssertEqual(result.entries.count, 3)
+        XCTAssertEqual(Set(result.entries.map(\.model)), [
+            "kimi-code/k3", "kimi-code/k3.1-pro-highspeed", "kimi-code/kimi-for-coding",
+        ])
+        let k3 = try XCTUnwrap(result.entries.first { $0.model == "kimi-code/k3" })
+        let highspeed = try XCTUnwrap(result.entries.first { $0.model == "kimi-code/k3.1-pro-highspeed" })
+        let rolling = try XCTUnwrap(result.entries.first { $0.model == "kimi-code/kimi-for-coding" })
+        XCTAssertEqual(k3.costUSD, Decimal(string: "21.3"))
+        XCTAssertEqual(highspeed.costUSD, Decimal(string: "28.2"))
+        XCTAssertNotEqual(k3.costUSD, highspeed.costUSD, "Highspeed 是独立费率，不能复用 K3 或 Fast")
+        XCTAssertNil(rolling.costUSD, "滚动路由不按当前 K2.8 Preview 猜价")
+
+        let state = try XCTUnwrap(result.newState)
+        let committed = KimiSessionScanner.committedEntries(from: state)
+        XCTAssertEqual(committed, result.entries)
+        XCTAssertEqual(committed.map(\.timestamp), committed.map(\.timestamp).sorted())
+        try FileManager.default.removeItem(at: root)
+        XCTAssertEqual(KimiSessionScanner.committedEntries(from: state), committed,
+                       "周期补算只读 committed state，源日志删除后贡献仍完整且顺序稳定")
+    }
+
     func testKimiCodeSubagentFilesCountedOnce() throws {
         let root = try makeRoot("kimi-code")
         let sessionDir = try makeKimiCodeSessionDirectory(root, id: "session_sub", workspace: "wd_demo_c")
@@ -143,6 +178,9 @@ final class KimiSessionScannerTests: XCTestCase {
         XCTAssertEqual(entriesA.count, 2)
         XCTAssertEqual(entriesB.count, 1)
         XCTAssertEqual(entriesB.first?.inputTokens, 30)
+        let committed = KimiSessionScanner.committedEntries(from: try XCTUnwrap(result.newState))
+        XCTAssertEqual(committed.count, 3, "committed state 还原时同一签名仍只能归属一个会话")
+        XCTAssertEqual(Set(committed.map(\.conversationKey)), ["kimi:session_fork_a", "kimi:session_fork_b"])
     }
 
     func testKimiCodeUnchangedSignatureSkipsReread() throws {

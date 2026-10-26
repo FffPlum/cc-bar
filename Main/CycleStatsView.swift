@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// 额度页「额度用满预估」：Codex / Claude × 5 小时 / 周的周期卡，宽画布一行四张。
+/// 额度页「额度用满预估」：Codex / Claude / Kimi × 5 小时 / 周的周期卡，宽画布最多四列并换行。
 /// 区块自带标题与一句口径说明，便于单独截图分享；卡内不写解释。
 /// 进度条显示服务端返回的额度已用比例，条色与「N%」统一按剩余额度着色。
 struct QuotaCycleCardsSection: View {
     @Environment(AppState.self) private var appState
-    /// 受侧栏服务筛选约束：全部 → Codex + Claude；单选时只含该服务。
+    /// 受侧栏服务筛选约束：全部 → Codex + Claude + Kimi；单选时只含该服务。
     let apps: [UsageApp]
     let isWide: Bool
 
@@ -44,7 +44,7 @@ struct QuotaCycleCardsSection: View {
             LazyVGrid(
                 columns: Array(
                     repeating: GridItem(.flexible(), spacing: 12, alignment: .top),
-                    count: isWide ? max(1, cards.count) : min(2, max(1, cards.count))
+                    count: isWide ? min(4, max(1, cards.count)) : min(2, max(1, cards.count))
                 ),
                 alignment: .leading,
                 spacing: 12
@@ -127,12 +127,13 @@ struct QuotaCycleCardsSection: View {
 
                 HStack(alignment: .firstTextBaseline) {
                     // 只算当前额度段：Claude 周内重置不换周期，重置前的用量不再计入，与进度条对应。
-                    Text("\(tr("Used", "已用")) \(StatsFormatter.compactToken(summary.currentAllowanceTotals.totalTokens)) · \(StatsFormatter.tierCostWhole(summary.currentAllowanceTotals.costUSD, hasUnpricedUsage: summary.currentAllowanceTotals.hasUnpricedUsage))")
+                    Text("\(tr("Used", "已用")) \(StatsFormatter.compactToken(summary.currentAllowanceTotals.totalTokens)) · \(currentAllowanceCost(summary.currentAllowanceTotals, app: app))")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
+                        .help(KimiModelPresentation.missingPriceHelp(summary.currentAllowanceTotals, apps: [app], enabled: app == .kimi))
                     Spacer(minLength: 6)
                     // 剩余状态由数字和进度条颜色表达：≥20% 石墨灰、<20% 橙、=0 红（统一走 statusColor）。
                     Text(String(format: "%.0f%%", usedPercent))
@@ -149,6 +150,11 @@ struct QuotaCycleCardsSection: View {
 
     private func officialColor(remaining: Double) -> Color {
         statusColor(remainingPercent: remaining, tint: .primary)
+    }
+
+    private func currentAllowanceCost(_ totals: UsageTotals, app: UsageApp) -> String {
+        if KimiModelPresentation.isFullyUnpricedModel(totals, apps: [app], enabled: app == .kimi) { return "—" }
+        return StatsFormatter.tierCostWhole(totals.costUSD, hasUnpricedUsage: totals.hasUnpricedUsage)
     }
 
     /// 空态卡：标签行固定在顶部，下方提示内容在剩余空间垂直居中。
@@ -239,15 +245,10 @@ struct QuotaCycleCardsSection: View {
                 email: appState.claudeAccount?.email,
                 accountUuid: appState.claudeAccount?.accountUuid
             )
-        case .cursor:
-            return nil
-        case .pi, .opencode:
-            return nil
-        case .dsh:
-            // DSH 没有额度周期，额度页不出现该服务。
-            return nil
-        case .antigravity, .kimi:
-            // Antigravity 用量不进周期统计。
+        case .kimi:
+            guard let accountKey = appState.kimiAccount?.accountKey else { return nil }
+            return QuotaHistoryAccountKey.kimiPrimary(accountKey: accountKey)
+        case .cursor, .pi, .opencode, .dsh, .antigravity:
             return nil
         }
     }

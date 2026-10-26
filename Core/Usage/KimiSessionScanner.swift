@@ -503,6 +503,30 @@ nonisolated enum KimiSessionScanner {
         return metadata
     }
 
+    /// 从已提交的规范化事件还原全部请求贡献，供周期重建复用，不再读取会话正文。
+    /// `seenByConversation` 是 fork / 复制去重后的所有权账本；文件事件还要经过它过滤，
+    /// 才能保留已删除文件贡献，同时不把继承副本再计一次。
+    static func committedEntries(from state: State) -> [UsageEntry] {
+        guard state.version == State.currentVersion else { return [] }
+        var seen = Set<String>()
+        var committed: [(conversationID: String, event: StoredEvent)] = []
+        for conversationID in state.fileEvents.keys.sorted() {
+            let allowed = Set(state.seenByConversation[conversationID] ?? [])
+            guard let files = state.fileEvents[conversationID] else { continue }
+            for path in files.keys.sorted() {
+                for event in files[path] ?? []
+                where allowed.contains(event.signature) && seen.insert(event.signature).inserted {
+                    committed.append((conversationID, event))
+                }
+            }
+        }
+        return committed.sorted { lhs, rhs in
+            if lhs.event.timestamp != rhs.event.timestamp { return lhs.event.timestamp < rhs.event.timestamp }
+            if lhs.conversationID != rhs.conversationID { return lhs.conversationID < rhs.conversationID }
+            return lhs.event.signature < rhs.event.signature
+        }.map { makeEntry(conversationID: $0.conversationID, event: $0.event) }
+    }
+
     private static func makeEntry(conversationID: String, event: StoredEvent) -> UsageEntry {
         let total = event.input + event.output + event.cacheRead + event.cacheCreation
         let breakdown = Pricing.resolveCostBreakdown(

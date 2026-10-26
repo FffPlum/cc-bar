@@ -831,7 +831,30 @@ final class AppState {
                 )
             }
         }
+        if let record = quotaCache.kimi { recordCachedKimiQuotaObservations(record) }
         // Antigravity 暂无本地用量周期，仅记录额度历史，不参与 cycle 统计
+    }
+
+    /// 缓存、历史和周期独立落盘，重启时缓存可能较旧；它只能补记，不能倒退已记录的时间线。
+    func recordCachedKimiQuotaObservations(_ record: QuotaCacheRecord) {
+        guard let account = kimiAccount, record.snapshot.app == .kimi else { return }
+        let accountKey = QuotaHistoryAccountKey.kimiPrimary(accountKey: account.accountKey)
+        guard record.accountID == accountKey else { return }
+        let lastHistoryAt = quotaHistory.lastSamples.values
+            .filter { $0.app == .kimi && $0.accountKey == accountKey }
+            .map(\.sampledAt).max() ?? .distantPast
+        let lastCycleAt = quotaCycles.records
+            .filter { $0.app == .kimi && $0.accountKey == accountKey }
+            .compactMap(\.lastSampleAt).max() ?? .distantPast
+        guard record.updatedAt >= max(lastHistoryAt, lastCycleAt) else { return }
+        recordKimiQuotaHistory(snapshot: record.snapshot, sampledAt: record.updatedAt)
+        recordQuotaCycles(
+            accountKey: accountKey,
+            app: .kimi,
+            snapshot: record.snapshot,
+            source: .cache,
+            sampledAt: record.updatedAt
+        )
     }
 
     // MARK: - Imported Codex accounts
@@ -1390,6 +1413,16 @@ final class AppState {
             accountKey: QuotaHistoryAccountKey.antigravityPrimary(email: antigravityAccount?.email),
             app: .antigravity,
             kind: .antigravityPrimary,
+            snapshot: snapshot,
+            sampledAt: sampledAt
+        )
+    }
+
+    private func recordKimiQuotaHistory(snapshot: QuotaSnapshot, sampledAt: Date) {
+        recordQuotaHistory(
+            accountKey: QuotaHistoryAccountKey.kimiPrimary(accountKey: kimiAccount?.accountKey),
+            app: .kimi,
+            kind: .kimiPrimary,
             snapshot: snapshot,
             sampledAt: sampledAt
         )
@@ -2874,6 +2907,8 @@ final class AppState {
     }
 
     private func storeKimi(snapshot: QuotaSnapshot, source: QuotaSnapshotSource) {
+        guard let stableAccountKey = kimiAccount?.accountKey else { return }
+        let accountKey = QuotaHistoryAccountKey.kimiPrimary(accountKey: stableAccountKey)
         let updatedAt = Date()
         let mergedSnapshot = snapshot.preservingFutureResetDates(from: kimiQuota, now: updatedAt)
         kimiQuota = mergedSnapshot
@@ -2888,9 +2923,17 @@ final class AppState {
             snapshot: mergedSnapshot,
             source: source,
             updatedAt: updatedAt,
-            accountID: kimiAccount?.accountKey
+            accountID: accountKey
         )
         saveQuotaCache()
+        recordKimiQuotaHistory(snapshot: mergedSnapshot, sampledAt: updatedAt)
+        recordQuotaCycles(
+            accountKey: accountKey,
+            app: .kimi,
+            snapshot: mergedSnapshot,
+            source: source,
+            sampledAt: updatedAt
+        )
     }
 
     private func markCodexFailure(_ message: String, error: QuotaError? = nil) {

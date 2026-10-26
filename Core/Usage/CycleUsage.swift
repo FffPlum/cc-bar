@@ -274,7 +274,9 @@ final class CycleUsageAggregator {
             return model.lowercased().hasPrefix("openai-codex/") ? .codex : nil
         case .opencode:
             return model.lowercased().hasPrefix("openai/") ? .codex : nil
-        case .cursor, .antigravity, .kimi:
+        case .kimi:
+            return isKimiSubscriptionModel(model) ? .kimi : nil
+        case .cursor, .antigravity:
             return nil
         }
     }
@@ -282,7 +284,8 @@ final class CycleUsageAggregator {
     /// Codex / Claude 自己日志里的请求是否计入订阅消耗，按模型名近似判断。
     /// Claude 只认 `claude-*`；Codex 只认 OpenAI 自家模型（可带 `openai/`、`openai-codex/` 前缀），
     /// 其他渠道前缀（如 `commandcode/...`）和其他厂商模型不算。第三方渠道转发的同名模型、
-    /// API Key 调用在日志里分不出来，仍算订阅。其他 Agent 的归属由 `cycleApp` 决定，这里一律放行。
+    /// API Key 调用在日志里分不出来，仍算订阅。Kimi 只认官方 `kimi-code/` 渠道的已知订阅型号；
+    /// 其他 Agent 的归属由 `cycleApp` 决定，这里一律放行。
     /// 只在展示层使用：周期桶与日桶仍保存全部用量，规则调整无需重建。
     nonisolated static func isSubscriptionUsage(app: UsageApp, model: String) -> Bool {
         let name = model.lowercased()
@@ -295,9 +298,19 @@ final class CycleUsageAggregator {
                 .map { String(name.dropFirst($0.count)) } ?? name
             guard !bare.contains("/") else { return false }
             return ["gpt-", "codex-", "chatgpt-", "o1", "o3", "o4"].contains { bare.hasPrefix($0) }
-        case .pi, .opencode, .dsh, .cursor, .antigravity, .kimi:
+        case .kimi:
+            return isKimiSubscriptionModel(model)
+        case .pi, .opencode, .dsh, .cursor, .antigravity:
             return true
         }
+    }
+
+    private nonisolated static func isKimiSubscriptionModel(_ model: String) -> Bool {
+        let name = model.lowercased()
+        guard name.hasPrefix("kimi-code/") else { return false }
+        let route = String(name.dropFirst("kimi-code/".count))
+        return ["k3", "k3-256k", "k3.1-pro", "k3.1-pro-highspeed",
+                "kimi-for-coding", "kimi-for-coding-highspeed"].contains(route)
     }
 
     func load(from snapshot: [CycleUsageBucket]) {

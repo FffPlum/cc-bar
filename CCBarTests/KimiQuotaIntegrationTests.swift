@@ -53,6 +53,9 @@ final class KimiQuotaIntegrationTests: XCTestCase {
         XCTAssertEqual(calls.withLock { $0 }, 1)
         XCTAssertEqual(state.kimiQuota, previous)
         XCTAssertFalse(state.kimiRefreshState.inFlight)
+        XCTAssertTrue(state.quotaHistory.lastSamples.isEmpty, "429 与退避不能写入伪样本")
+        XCTAssertTrue(state.quotaHistory.events.isEmpty)
+        XCTAssertTrue(state.quotaCycles.records.isEmpty)
     }
 
     func test401RenewsOnceAndSuccessfulRetryStoresQuota() async {
@@ -79,6 +82,66 @@ final class KimiQuotaIntegrationTests: XCTestCase {
         XCTAssertFalse(state.kimiRefreshState.inFlight)
     }
 
+    func testSuccessfulRefreshRecordsStandardHistoryAndCyclesOnly() async {
+        let state = AppState()
+        let auth = account()
+        state.kimiAccount = auth
+        let expected = standardSnapshot(fiveHourUsed: 20, weeklyUsed: 40)
+        await state.loadKimiQuota(reason: .userInitiated, fetch: { _ in .success(expected) }, refresh: { a, _ in .success(a) })
+
+        let key = QuotaHistoryAccountKey.kimiPrimary(accountKey: auth.accountKey)
+        XCTAssertEqual(key, auth.accountKey, "历史身份直接复用凭据稳定 accountKey")
+        XCTAssertEqual(state.kimiQuota, expected)
+        let samples = state.quotaHistory.lastSamples.values.filter { $0.accountKey == key }
+        XCTAssertEqual(samples.count, 2)
+        XCTAssertEqual(Set(samples.map(\.limitKind)), [.fiveHour, .weekly])
+        XCTAssertTrue(samples.allSatisfy { $0.app == .kimi && $0.kind.rawValue == "kimiPrimary" })
+        XCTAssertEqual(state.quotaCycles.records.count, 2, "月窗口不伪造标准周期")
+        XCTAssertEqual(Set(state.quotaCycles.records.map(\.limitKind)), [.fiveHour, .weekly])
+        XCTAssertTrue(state.quotaCycles.records.allSatisfy {
+            $0.accountKey == key && $0.app == .kimi && $0.source == .api
+        })
+        XCTAssertEqual(state.quotaCycles.accountSegments.count, 1)
+        XCTAssertEqual(state.quotaCycles.accountSegments.first?.accountKey, key)
+    }
+
+    func testSuccessfulSamplesAndCyclesAreSeparatedByAccountSwitch() async {
+        let state = AppState()
+        let first = account(user: "fixture-first")
+        let second = account(user: "fixture-second")
+        let firstSnapshot = standardSnapshot(fiveHourUsed: 20, weeklyUsed: 40)
+        let secondSnapshot = standardSnapshot(fiveHourUsed: 60, weeklyUsed: 70)
+        state.kimiAccount = first
+        await state.loadKimiQuota(
+            reason: .userInitiated,
+            fetch: { _ in .success(firstSnapshot) },
+            refresh: { a, _ in .success(a) }
+        )
+        let firstKey = QuotaHistoryAccountKey.kimiPrimary(accountKey: first.accountKey)
+
+        state.kimiAccount = second
+        state.kimiQuota = nil
+        await state.loadKimiQuota(
+            reason: .userInitiated,
+            fetch: { _ in .success(secondSnapshot) },
+            refresh: { a, _ in .success(a) }
+        )
+        let secondKey = QuotaHistoryAccountKey.kimiPrimary(accountKey: second.accountKey)
+        XCTAssertNotEqual(firstKey, secondKey)
+        XCTAssertEqual(Set(state.quotaHistory.lastSamples.values.map(\.accountKey)), [firstKey, secondKey])
+        XCTAssertEqual(state.quotaHistory.lastSamples.values.filter {
+            $0.accountKey == firstKey && $0.limitKind == .fiveHour
+        }.first?.remainingPercent, 80)
+        XCTAssertEqual(state.quotaHistory.lastSamples.values.filter {
+            $0.accountKey == secondKey && $0.limitKind == .fiveHour
+        }.first?.remainingPercent, 40)
+        XCTAssertTrue(state.quotaHistory.events.isEmpty, "切号不能制造额度变化事件")
+        XCTAssertEqual(Set(state.quotaCycles.records.map(\.accountKey)), [firstKey, secondKey])
+        XCTAssertEqual(state.quotaCycles.records.count, 4)
+        XCTAssertEqual(state.quotaCycles.accountSegments.last?.accountKey, secondKey)
+        XCTAssertNotNil(state.quotaCycles.accountSegments.first?.endAt)
+    }
+
     func testResponseForReplacedAccountIsDiscarded() async {
         let state = AppState()
         state.kimiAccount = account()
@@ -90,6 +153,8 @@ final class KimiQuotaIntegrationTests: XCTestCase {
         }, refresh: { auth, _ in .success(auth) })
         XCTAssertNil(state.kimiQuota)
         XCTAssertEqual(state.kimiAccount?.accountKey, replacement.accountKey)
+        XCTAssertTrue(state.quotaHistory.lastSamples.isEmpty)
+        XCTAssertTrue(state.quotaCycles.records.isEmpty)
     }
 
     func testCachedKimiWindowsRoundTripAndMonthlyAlertsRemainDistinct() throws {
@@ -105,6 +170,50 @@ final class KimiQuotaIntegrationTests: XCTestCase {
         XCTAssertEqual(Set(limits.map(\.id)).count, 4)
         XCTAssertNotEqual(QuotaAlertPolicy.windowKey(limits[2], app: .kimi),
                           QuotaAlertPolicy.windowKey(limits[3], app: .kimi))
+    }
+
+    func testCachedObservationsKeepSampleTimeAndRejectStaleOrMismatchedAccount() {
+        let state = AppState()
+        let auth = account()
+        state.kimiAccount = auth
+        let sampledAt = Date().addingTimeInterval(-60)
+        let original = standardSnapshot(fiveHourUsed: 20, weeklyUsed: 40, now: sampledAt)
+        let cached = QuotaCacheRecord(snapshot: original, source: .api, updatedAt: sampledAt, accountID: auth.accountKey)
+        state.recordCachedKimiQuotaObservations(cached)
+        XCTAssertEqual(state.quotaHistory.lastSamples.count, 2)
+        XCTAssertTrue(state.quotaHistory.lastSamples.values.allSatisfy { $0.sampledAt == sampledAt })
+        XCTAssertEqual(state.quotaCycles.records.count, 2)
+        XCTAssertTrue(state.quotaCycles.records.allSatisfy { $0.lastSampleAt == sampledAt && $0.source == .cache })
+
+        let history = state.quotaHistory
+        let cycles = state.quotaCycles
+        var wrongAccount = cached
+        wrongAccount.accountID = "other-account"
+        wrongAccount.updatedAt = sampledAt.addingTimeInterval(60)
+        state.recordCachedKimiQuotaObservations(wrongAccount)
+        XCTAssertEqual(state.quotaHistory, history)
+        XCTAssertEqual(state.quotaCycles, cycles)
+
+        let newerAt = sampledAt.addingTimeInterval(30)
+        let newer = standardSnapshot(fiveHourUsed: 60, weeklyUsed: 70, now: sampledAt)
+        state.quotaHistory = QuotaHistoryStore.record(
+            payload: history, accountKey: auth.accountKey, app: .kimi, kind: .kimiPrimary,
+            snapshot: newer, sampledAt: newerAt
+        )
+        let newerHistory = state.quotaHistory
+        state.recordCachedKimiQuotaObservations(cached)
+        XCTAssertEqual(state.quotaHistory, newerHistory, "旧缓存不能让历史样本倒退或制造额度回升")
+        XCTAssertEqual(state.quotaCycles, cycles)
+
+        state.quotaHistory = history
+        state.quotaCycles = QuotaCycleStore.record(
+            payload: cycles, accountKey: auth.accountKey, app: .kimi,
+            snapshot: newer, source: .api, sampledAt: newerAt
+        )
+        let newerCycles = state.quotaCycles
+        state.recordCachedKimiQuotaObservations(cached)
+        XCTAssertEqual(state.quotaHistory, history)
+        XCTAssertEqual(state.quotaCycles, newerCycles, "较新的周期也不能被旧缓存覆盖")
     }
 
     func testOfficialFaviconCanBecomeTransparentMenuBarTemplate() throws {
@@ -255,6 +364,40 @@ final class KimiQuotaIntegrationTests: XCTestCase {
 
     private func snapshot(used: Double) -> QuotaSnapshot {
         KimiQuotaClient.parse(root: ["usages": ["limit_5h": ["used_ratio": used]]])!
+    }
+
+    private func standardSnapshot(
+        fiveHourUsed: Double,
+        weeklyUsed: Double,
+        now: Date = Date()
+    ) -> QuotaSnapshot {
+        func limit(id: String, kind: QuotaLimitKind, name: String, used: Double, seconds: Int) -> QuotaLimit {
+            QuotaLimit(
+                id: id,
+                kind: kind,
+                displayName: name,
+                window: QuotaWindow(
+                    usedPercent: used,
+                    resetsAt: now.addingTimeInterval(TimeInterval(seconds)),
+                    windowSeconds: seconds
+                ),
+                isActive: true
+            )
+        }
+        return QuotaSnapshot(
+            app: .kimi,
+            primaryLimit: limit(id: "kimi-five-hour", kind: .fiveHour, name: "5HOUR", used: fiveHourUsed, seconds: 18_000),
+            secondaryLimit: limit(id: "kimi-weekly", kind: .weekly, name: "WEEKLY", used: weeklyUsed, seconds: 604_800),
+            auxiliaryLimits: [QuotaLimit(
+                id: "kimi-monthly-total",
+                kind: .unknown,
+                displayName: "MONTHLY",
+                window: QuotaWindow(usedPercent: 90, resetsAt: now.addingTimeInterval(30 * 86_400), windowSeconds: nil),
+                isActive: nil
+            )],
+            planType: nil,
+            fetchedAt: now
+        )
     }
 
     private func token(user: String, suffix: String) throws -> String {

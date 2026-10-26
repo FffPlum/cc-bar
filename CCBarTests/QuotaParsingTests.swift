@@ -3225,6 +3225,61 @@ final class QuotaParsingTests: XCTestCase {
         )
     }
 
+    func testKimiInitialCycleRebuildMetadataAndFailureIsolation() {
+        let start = Date(timeIntervalSince1970: 10_000)
+        let kimiCycle = cycleRecord(
+            id: "kimi",
+            accountKey: "stable-kimi-account",
+            app: .kimi,
+            start: start,
+            end: start.addingTimeInterval(18_000)
+        )
+        let codexCycle = cycleRecord(
+            id: "codex",
+            accountKey: "codex:primary:a",
+            app: .codex,
+            start: start,
+            end: start.addingTimeInterval(18_000)
+        )
+        var legacy = CycleUsageRollupPayload()
+        legacy.initialRebuildCompletedAt = Date()
+        legacy.initialRebuildCompletedApps = nil
+        XCTAssertEqual(legacy.effectiveInitialRebuildCompletedApps, [.codex, .claude])
+        XCTAssertEqual(
+            UsageService.pendingInitialCycleRebuildApps(
+                cycles: [kimiCycle],
+                completedApps: legacy.effectiveInitialRebuildCompletedApps
+            ),
+            [.kimi],
+            "旧完成时间不能把新增 Kimi 误判为已补算"
+        )
+        XCTAssertEqual(
+            UsageService.updatedInitialCycleRebuildApps(
+                completedApps: legacy.effectiveInitialRebuildCompletedApps,
+                requestedApps: [.kimi],
+                failedApps: [.kimi]
+            ),
+            [.codex, .claude],
+            "Kimi 失败时不能写入完成标记"
+        )
+        let failed = UsageService.cycleSourceFailedApps(
+            [],
+            opencode: nil,
+            opencodeDatabaseURL: URL(fileURLWithPath: "/tmp/ccbar-missing-opencode-fixture"),
+            kimiFailed: true
+        )
+        XCTAssertEqual(failed, [.kimi])
+        XCTAssertEqual(
+            UsageService.cycleRebuildableCycleIDs(
+                cycles: [kimiCycle, codexCycle],
+                requestedCycleIDs: [kimiCycle.id, codexCycle.id],
+                failedApps: failed
+            ),
+            [codexCycle.id],
+            "Kimi 失败冻结旧桶，不影响 Codex 重建"
+        )
+    }
+
     func testCycleAxisCostUsesCompactTieredPrecision() {
         XCTAssertEqual(StatsFormatter.axisCost(120), "$120")
         XCTAssertEqual(StatsFormatter.axisCost(12.6), "$13")
@@ -3793,6 +3848,47 @@ final class QuotaParsingTests: XCTestCase {
             Pricing.pricingKey(model: "deepseek-official/commandcode/deepseek/deepseek-v4.1-flash"),
             "deepseek-v4.1-flash"
         )
+    }
+
+    func testKimiPublicAPIPricingAliasesAndOfflineRates() throws {
+        let cases: [(route: String, key: String, input: Decimal, output: Decimal, cacheRead: Decimal, cacheCreation: Decimal, total: Decimal)] = [
+            ("kimi-code/k3", "kimi-k3", 3, 15, 0.30, 3, 21.3),
+            ("kimi-code/k3-256k", "kimi-k3", 3, 15, 0.30, 3, 21.3),
+            ("kimi-code/k3.1-pro", "kimi-k3.1-pro", 2, 10, 0.20, 2, 14.2),
+            ("kimi-code/k3.1-pro-highspeed", "kimi-k3.1-pro-highspeed", 4, 20, 0.20, 4, 28.2),
+        ]
+        for item in cases {
+            XCTAssertEqual(Pricing.pricingKey(model: item.route), item.key, item.route)
+            let cost = try XCTUnwrap(Pricing.costBreakdown(
+                app: .kimi,
+                model: item.route,
+                speed: .standard,
+                input: 1_000_000,
+                output: 1_000_000,
+                cacheRead: 1_000_000,
+                cacheCreation: 1_000_000,
+                at: Date(timeIntervalSince1970: 1_793_000_000)
+            ), item.route)
+            XCTAssertEqual(cost.input, item.input, item.route)
+            XCTAssertEqual(cost.output, item.output, item.route)
+            XCTAssertEqual(cost.cacheRead, item.cacheRead, item.route)
+            XCTAssertEqual(cost.cacheCreation, item.cacheCreation, item.route)
+            XCTAssertEqual(cost.total, item.total, item.route)
+        }
+        XCTAssertEqual(Pricing.normalize(model: "kimi-code/k3"), "kimi-code/k3",
+                       "查价映射不能改存储身份")
+        XCTAssertEqual(Pricing.pricingKey(model: "kimi-code/k3.1-pro-highspeed-experimental"),
+                       "k3.1-pro-highspeed-experimental", "只允许精确白名单，不做前缀猜价")
+        XCTAssertNil(Pricing.costBreakdown(
+            app: .kimi,
+            model: "kimi-code/kimi-for-coding",
+            speed: .standard,
+            input: 1_000_000,
+            output: 1_000_000,
+            cacheRead: 1_000_000,
+            cacheCreation: 1_000_000,
+            at: Date()
+        ), "K2.8 Preview 滚动路由没有核实的公开 API 价格")
     }
 
     func testGPT55StandardLongContextProAndFastRates() throws {

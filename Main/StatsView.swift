@@ -586,21 +586,17 @@ struct StatsView: View {
 
     // MARK: Quota
 
-    /// 额度页随侧栏服务筛选：全部 → 按 Provider 自定义顺序的 Codex / Claude；
-    /// 单选只看该服务；其他服务没有额度周期与额度历史，整页显示空态。
+    /// 额度页随侧栏服务筛选：全部 → 按用户排序且可见的 Codex / Claude / Kimi；
+    /// 单选只看该服务；其他服务没有标准 5 小时 / 周周期与额度历史，整页显示空态。
     private var quotaApps: [UsageApp] {
-        let ordered: [UsageApp] = SettingsStore.shared.orderedProviders.compactMap { provider in
-            switch provider.app {
-            case .codex: return .codex
-            case .claude: return .claude
-            case .antigravity, .cursor, .commandCode, .opencodeGo, .kimi: return nil
-            }
-        }
+        let supported: Set<UsageApp> = [.codex, .claude, .kimi]
+        let ordered = SettingsStore.shared.visibleUsageApps.filter { supported.contains($0) }
         switch serviceFilter {
         case .all: return ordered
         case .codex: return ordered.contains(.codex) ? [.codex] : []
         case .claude: return ordered.contains(.claude) ? [.claude] : []
-        case .cursor, .pi, .opencode, .dsh, .antigravity, .kimi: return []
+        case .kimi: return ordered.contains(.kimi) ? [.kimi] : []
+        case .cursor, .pi, .opencode, .dsh, .antigravity: return []
         }
     }
 
@@ -614,8 +610,8 @@ struct StatsView: View {
                     Text(tr("No quota data", "暂无额度数据"))
                         .font(.system(size: 13, weight: .medium))
                     Text(tr(
-                        "Only Codex and Claude Code report quota cycles.",
-                        "只有 Codex 与 Claude Code 提供额度周期。"
+                        "Only Codex, Claude Code and Kimi Code report standard quota cycles.",
+                        "只有 Codex、Claude Code 与 Kimi Code 提供标准额度周期。"
                     ))
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
@@ -974,7 +970,18 @@ struct StatsView: View {
                         isLoading: appState.refreshState(for: .claude).inFlight
                     ))
                 }
-            case .cursor, .pi, .opencode, .dsh, .antigravity, .kimi:
+            case .kimi:
+                let key = QuotaHistoryAccountKey.kimiPrimary(accountKey: appState.kimiAccount?.accountKey)
+                if shouldShowTimelineSection(accountKey: key, snapshot: appState.kimiQuota, accountExists: appState.kimiAccount != nil) {
+                    sections.append(timelineSection(
+                        accountKey: key,
+                        title: "Kimi Code",
+                        app: .kimi,
+                        snapshot: appState.kimiQuota,
+                        isLoading: appState.refreshState(for: .kimi).inFlight
+                    ))
+                }
+            case .cursor, .pi, .opencode, .dsh, .antigravity:
                 break
             }
         }
@@ -1860,12 +1867,14 @@ private struct OverviewCompositionPanel: View {
                     .foregroundStyle(isSecondary ? Color.secondary : Color.primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .help(dimension == .model ? title(for: row) : "")
                 if !subtitle(for: row).isEmpty {
                     PrivacySensitiveText(text: subtitle(for: row), sensitive: row.projectStatus?.isPathBased == true)
                         .font(.system(size: 10.5))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .help(dimension == .model ? subtitle(for: row) : "")
                 }
             }
             // 名称优先于 Spacer 取宽：长模型名先吃掉空白再截断。
@@ -1877,14 +1886,11 @@ private struct OverviewCompositionPanel: View {
                 .font(.system(size: 13, weight: .semibold))
                 .monospacedDigit()
                 .frame(width: 86, alignment: .trailing)
-            Text(StatsFormatter.tierCost(
-                row.totals.costUSD,
-                hasUnpricedUsage: row.totals.hasUnpricedUsage,
-                costIncomplete: row.totals.costIncomplete
-            ))
+            Text(modelCost(row.totals, apps: row.apps, enabled: dimension == .model))
             .font(.system(size: 13, weight: .semibold))
             .monospacedDigit()
             .frame(width: 86, alignment: .trailing)
+            .help(missingKimiPriceHelp(row.totals, apps: row.apps, enabled: dimension == .model))
             Text(StatsFormatter.percent(model.share(of: row.totals)))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -1922,10 +1928,11 @@ private struct OverviewCompositionPanel: View {
     private func providerModelRow(_ row: ProviderModelRow) -> some View {
         HStack(spacing: 6) {
             ServiceTile(app: row.app, size: 12)
-            Text(row.model)
+            Text(providerModelTitle(row))
                 .font(.system(size: 11.5, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .help("\(row.model)\n\(tr("Source", "来源")): \(row.app.displayName)")
             Spacer(minLength: 8)
             // 数值列与父行的 Tokens / 费用 / 输出速度列对齐（同样 8pt 间距），占比、命中率、箭头位留空。
             HStack(spacing: 8) {
@@ -1934,14 +1941,11 @@ private struct OverviewCompositionPanel: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                     .frame(width: 86, alignment: .trailing)
-                Text(StatsFormatter.tierCost(
-                    row.totals.costUSD,
-                    hasUnpricedUsage: row.totals.hasUnpricedUsage,
-                    costIncomplete: row.totals.costIncomplete
-                ))
+                Text(modelCost(row.totals, apps: [row.app], enabled: true))
                 .font(.system(size: 11.5, weight: .semibold))
                 .monospacedDigit()
                 .frame(width: 86, alignment: .trailing)
+                .help(missingKimiPriceHelp(row.totals, apps: [row.app], enabled: true))
                 Color.clear.frame(width: 46, height: 1)
                 Text(StatsFormatter.outputSpeed(row.totals.timing))
                     .font(.system(size: 11))
@@ -1953,6 +1957,24 @@ private struct OverviewCompositionPanel: View {
                 Color.clear.frame(width: 10, height: 1)
             }
         }
+    }
+
+    private func providerModelTitle(_ row: ProviderModelRow) -> String {
+        guard let detail = currentKimiRouteDetail(model: row.model, apps: [row.app]) else { return row.model }
+        return "\(row.model) · \(detail)"
+    }
+
+    private func currentKimiRouteDetail(model: String, apps: [UsageApp]) -> String? {
+        guard KimiModelPresentation.isForCodingRoute(model: model, apps: apps) else { return nil }
+        return tr("currently K2.8 Preview", "当前 K2.8 Preview")
+    }
+
+    private func modelCost(_ totals: UsageTotals, apps: [UsageApp], enabled: Bool) -> String {
+        KimiModelPresentation.cost(totals, apps: apps, enabled: enabled)
+    }
+
+    private func missingKimiPriceHelp(_ totals: UsageTotals, apps: [UsageApp], enabled: Bool) -> String {
+        KimiModelPresentation.missingPriceHelp(totals, apps: apps, enabled: enabled)
     }
 
     private func title(for row: CompositionRow) -> String {
@@ -1979,11 +2001,17 @@ private struct OverviewCompositionPanel: View {
         case .system: return tr("Usage created by CCBar background tasks", "CCBar 后台任务产生的用量")
         default: break
         }
-        guard row.kind == .unattributed else { return row.subtitle }
-        return tr(
-            "Cursor remote, backfilled and early history have no project info",
-            "Cursor 远端用量、补录和早期历史，没有项目信息"
-        )
+        guard row.kind != .unattributed else {
+            return tr(
+                "Cursor remote, backfilled and early history have no project info",
+                "Cursor 远端用量、补录和早期历史，没有项目信息"
+            )
+        }
+        if dimension == .model,
+           let detail = currentKimiRouteDetail(model: row.title, apps: row.apps) {
+            return row.subtitle.isEmpty ? detail : "\(row.subtitle) · \(detail)"
+        }
+        return row.subtitle
     }
 
     private func perform(_ action: CompositionAction) {
