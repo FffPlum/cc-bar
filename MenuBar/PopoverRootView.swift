@@ -345,12 +345,16 @@ struct PopoverRootView: View {
         case .codex: appState.codexServiceStatus
         case .claude: appState.claudeServiceStatus
         case .cursor: appState.cursorServiceStatus
-        case .antigravity, .commandCode, .opencodeGo, .kimi: nil
+        case .kimi: appState.kimiServiceStatus
+        case .antigravity, .commandCode, .opencodeGo: nil
         }
         guard let status else { return nil }
-        // 本机连不上 statuspage 时旧快照仍被保留(刻意的,别的信息还能用),
+        let unreachable = app == .kimi
+            ? appState.kimiServiceStatusUnreachable
+            : appState.serviceStatusUnreachable
+        // 获取失败时旧快照仍被保留(刻意的,别的信息还能用),
         // 但它已经不代表"现在"的服务状态了,不能继续拿一个陈旧的绿点说"服务正常"。
-        guard !appState.serviceStatusUnreachable else {
+        guard !unreachable else {
             return ServiceStatus(
                 indicator: .unknown,
                 description: nil,

@@ -131,7 +131,7 @@ final class OpencodeScannerTests: XCTestCase {
 
     func testFullScanParsesModelTokensAndCost() throws {
         let db = try createSchema()
-        insertSession(db, id: "ses-1", title: "ccbar 对 OpenCode 用量监测探讨", directory: "/Users/nanvon/Code/cc-bar")
+        insertSession(db, id: "ses-1", title: "ccbar 对 OpenCode 用量监测探讨", directory: "/Volumes/ccbar-fixture/cc-bar")
         insertMessage(db, id: "msg-u1", sessionID: "ses-1", timeCreated: 1_786_075_932_000, data: userMessageData())
         insertMessage(db, id: "msg-a1", sessionID: "ses-1", timeCreated: 1_786_075_934_000, data: assistantMessageData())
         insertMessage(db, id: "msg-a2", sessionID: "ses-1", timeCreated: 1_786_075_936_000,
@@ -172,8 +172,9 @@ final class OpencodeScannerTests: XCTestCase {
         XCTAssertEqual(seed.key, "opencode:ses-1")
         XCTAssertEqual(seed.app, .opencode)
         XCTAssertEqual(seed.title, "ccbar 对 OpenCode 用量监测探讨")
-        XCTAssertEqual(seed.project.path, "/Users/nanvon/Code/cc-bar")
-        XCTAssertEqual(seed.project.status, .available)
+        XCTAssertEqual(seed.project.path, "/Volumes/ccbar-fixture/cc-bar")
+        // 可移动卷不允许文件系统检查，按隐私规则只按路径归组，不依赖真实机器目录。
+        XCTAssertEqual(seed.project.status, .unverified)
     }
 
     func testZeroOrMissingCostFallsBackToSharedPricing() throws {

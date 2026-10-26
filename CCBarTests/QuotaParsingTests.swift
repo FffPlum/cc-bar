@@ -19,6 +19,132 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertEqual(fetched.snapshot.primaryWindow?.remainingPercent, 68)
     }
 
+    // MARK: - Kimi Code 官方状态分组
+
+    func testKimiStatusMapsChildComponentsAndExcludesOtherServices() throws {
+        let cases: [(String, ServiceStatusIndicator)] = [
+            ("operational", .none),
+            ("degraded_performance", .minor),
+            ("partial_outage", .major),
+            ("major_outage", .critical),
+            ("under_maintenance", .maintenance),
+            ("future_status", .unknown),
+        ]
+        let fetchedAt = Date(timeIntervalSince1970: 1_750_000_000)
+
+        for (rawStatus, expected) in cases {
+            let data = try kimiComponentsData(
+                declaredIDs: ["future-code-service"],
+                children: [
+                    kimiStatusChild(id: "future-code-service", name: "Future Code Service", status: rawStatus),
+                    kimiStatusChild(id: "kimi-web", name: "Kimi Web", status: "major_outage", groupID: "web-group"),
+                    kimiStatusChild(id: "open-api", name: "SaaS / Open API", status: "major_outage", groupID: "api-group"),
+                ]
+            )
+            let status = try ServiceStatusClient.parseKimiComponents(from: data, fetchedAt: fetchedAt)
+            XCTAssertEqual(status.indicator, expected, rawStatus)
+            XCTAssertEqual(status.fetchedAt, fetchedAt)
+        }
+    }
+
+    func testKimiStatusAggregatesMostSevereChild() throws {
+        let data = try kimiComponentsData(
+            declaredIDs: ["one", "two", "three"],
+            children: [
+                kimiStatusChild(id: "one", name: "One", status: "under_maintenance"),
+                kimiStatusChild(id: "two", name: "Two", status: "degraded_performance"),
+                kimiStatusChild(id: "three", name: "Three", status: "partial_outage"),
+            ]
+        )
+        XCTAssertEqual(try ServiceStatusClient.parseKimiComponents(from: data).indicator, .major)
+    }
+
+    func testKimiStatusUnknownChildPreventsOperationalAggregate() throws {
+        let data = try kimiComponentsData(
+            declaredIDs: ["known", "unknown"],
+            children: [
+                kimiStatusChild(id: "known", name: "Known", status: "operational"),
+                kimiStatusChild(id: "unknown", name: "Unknown", status: "unrecognized"),
+            ]
+        )
+        XCTAssertEqual(try ServiceStatusClient.parseKimiComponents(from: data).indicator, .unknown)
+    }
+
+    func testKimiStatusIncludesGroupStatus() throws {
+        let cases: [(String, ServiceStatusIndicator)] = [
+            ("major_outage", .critical),
+            ("under_maintenance", .maintenance),
+            ("future_status", .unknown),
+        ]
+        for (groupStatus, expected) in cases {
+            let data = try kimiComponentsData(
+                declaredIDs: ["code"],
+                children: [kimiStatusChild(id: "code", name: "Code", status: "operational")],
+                groupStatus: groupStatus
+            )
+            XCTAssertEqual(try ServiceStatusClient.parseKimiComponents(from: data).indicator, expected)
+        }
+    }
+
+    func testKimiStatusRejectsMissingOrIncompleteGroup() throws {
+        let child = kimiStatusChild(id: "code", name: "Code", status: "operational")
+        let withoutGroup = try JSONSerialization.data(withJSONObject: ["components": [child]])
+        XCTAssertThrowsError(try ServiceStatusClient.parseKimiComponents(from: withoutGroup))
+
+        let empty = try kimiComponentsData(declaredIDs: [], children: [])
+        XCTAssertThrowsError(try ServiceStatusClient.parseKimiComponents(from: empty))
+
+        let missingComponents = try kimiComponentsData(declaredIDs: nil, children: [child])
+        XCTAssertThrowsError(try ServiceStatusClient.parseKimiComponents(from: missingComponents))
+
+        let missingChild = try kimiComponentsData(declaredIDs: ["code", "missing"], children: [child])
+        XCTAssertThrowsError(try ServiceStatusClient.parseKimiComponents(from: missingChild))
+
+        let wrongRelation = try kimiComponentsData(
+            declaredIDs: ["code"],
+            children: [kimiStatusChild(id: "code", name: "Code", status: "operational", groupID: "other-group")]
+        )
+        XCTAssertThrowsError(try ServiceStatusClient.parseKimiComponents(from: wrongRelation))
+
+        let undeclaredChild = try kimiComponentsData(
+            declaredIDs: ["code"],
+            children: [child, kimiStatusChild(id: "extra", name: "Extra", status: "operational")]
+        )
+        XCTAssertThrowsError(try ServiceStatusClient.parseKimiComponents(from: undeclaredChild))
+    }
+
+    private func kimiComponentsData(
+        declaredIDs: [String]?,
+        children: [[String: Any]],
+        groupStatus: String = "operational"
+    ) throws -> Data {
+        var group: [String: Any] = [
+            "id": "cyrtlddz0q8c",
+            "name": "Kimi Code",
+            "status": groupStatus,
+            "group": true,
+        ]
+        if let declaredIDs {
+            group["components"] = declaredIDs
+        }
+        return try JSONSerialization.data(withJSONObject: ["components": [group] + children])
+    }
+
+    private func kimiStatusChild(
+        id: String,
+        name: String,
+        status: String,
+        groupID: String = "cyrtlddz0q8c"
+    ) -> [String: Any] {
+        [
+            "id": id,
+            "name": name,
+            "status": status,
+            "group": false,
+            "group_id": groupID,
+        ]
+    }
+
     // MARK: - Antigravity retrieveUserQuota buckets
 
     private func antigravityBucket(

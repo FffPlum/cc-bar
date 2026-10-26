@@ -282,14 +282,17 @@ final class AppState {
     var codexTodayCost: Decimal?
     var claudeTodayCost: Decimal?
 
-    /// OpenAI / Anthropic / Cursor statuspage.io 最新快照,失败时保留上一份。
+    /// OpenAI / Anthropic / Cursor / Kimi Code 官方状态最新快照,失败时保留上一份。
     var codexServiceStatus: ServiceStatus?
     var claudeServiceStatus: ServiceStatus?
     var cursorServiceStatus: ServiceStatus?
-    /// 三家 statuspage 同时抓不到 = 本机出不去网(断网 / 代理挡着),不是三家同时挂了。
+    var kimiServiceStatus: ServiceStatus?
+    /// 原三家 statuspage 同时抓不到 = 本机出不去网(断网 / 代理挡着),不是三家同时挂了。
     /// 失败时旧快照会被保留,UI 必须据此把状态点降级成"未知",
     /// 否则断网期间 Popover 会一直用一个陈旧的绿点声称"服务正常"。
     var serviceStatusUnreachable = false
+    /// Kimi 单独记录失败,不参与原三家的全失败判定。
+    var kimiServiceStatusUnreachable = false
 
     let usageService = UsageService()
     private let scheduler = Scheduler()
@@ -614,23 +617,27 @@ final class AppState {
         scheduleQuotaPersistenceFlush()
     }
 
-    /// 拉取 OpenAI / Anthropic / Cursor statuspage 状态。失败保留旧快照,不清空。
-    /// 三个请求并发,任意一个失败不影响其他;三个全失败则置 `serviceStatusUnreachable`,
-    /// 让 UI 把保留下来的旧状态点降级成"未知"而不是继续显示"服务正常"。
+    /// 拉取 OpenAI / Anthropic / Cursor / Kimi Code 官方状态。失败保留旧快照,不清空。
+    /// 四个请求并发,任意一个失败不影响其他;原三家全失败仍单独置 `serviceStatusUnreachable`,
+    /// Kimi 使用自己的失败标记,避免互相覆盖成功的状态。
     func refreshServiceStatus() async {
         guard beginStateOperation() else { return }
         defer { activeStateOperations -= 1 }
         async let codex = Self.fetchServiceStatus(url: ServiceStatusClient.openAIStatusURL, tag: "openai")
         async let claude = Self.fetchServiceStatus(url: ServiceStatusClient.anthropicStatusURL, tag: "anthropic")
         async let cursor = Self.fetchServiceStatus(url: ServiceStatusClient.cursorStatusURL, tag: "cursor")
+        async let kimi = Self.fetchKimiServiceStatus()
         let codexResult = await codex
         let claudeResult = await claude
         let cursorResult = await cursor
+        let kimiResult = await kimi
         if let codexResult { codexServiceStatus = codexResult }
         if let claudeResult { claudeServiceStatus = claudeResult }
         if let cursorResult { cursorServiceStatus = cursorResult }
+        if let kimiResult { kimiServiceStatus = kimiResult }
         serviceStatusUnreachable =
             codexResult == nil && claudeResult == nil && cursorResult == nil
+        kimiServiceStatusUnreachable = kimiResult == nil
     }
 
     private static func fetchServiceStatus(url: URL, tag: String) async -> ServiceStatus? {
@@ -638,6 +645,15 @@ final class AppState {
             return try await ServiceStatusClient.fetch(from: url)
         } catch {
             AppLog.warn(.app, "service status \(tag) fetch failed: \(Redact.error(error))")
+            return nil
+        }
+    }
+
+    private static func fetchKimiServiceStatus() async -> ServiceStatus? {
+        do {
+            return try await ServiceStatusClient.fetchKimiCode()
+        } catch {
+            AppLog.warn(.app, "service status kimi fetch failed: \(Redact.error(error))")
             return nil
         }
     }
