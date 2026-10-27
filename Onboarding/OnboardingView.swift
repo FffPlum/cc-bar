@@ -148,6 +148,7 @@ private struct AppIconBlock: View {
 
 private struct DetectAccountsStep: View {
     @Environment(AppState.self) private var appState
+    @State private var hasMoreAccountsBelow = false
     let onBack: () -> Void
     let onContinue: () -> Void
 
@@ -159,84 +160,143 @@ private struct DetectAccountsStep: View {
                 .font(.system(size: 18, weight: .bold))
                 .kerning(-0.3)
 
-            // 5 行账号要在 520 高的窗口里放下：行间距 8、行内边距 10 / 14、tile 28、邮箱与凭据来源合一行。
-            VStack(spacing: 8) {
-                DetectedAccountRow(
-                    app: .codex,
-                    title: "Codex",
-                    subtitle: "OpenAI",
-                    plan: appState.codexPlanName,
-                    email: appState.codexAccount?.email,
-                    source: codexSource,
-                    tint: .codexAccent,
-                    logoName: "codex",
-                    fallback: "C",
-                    isDetected: appState.codexAccount != nil
-                )
-                DetectedAccountRow(
-                    app: .claude,
-                    title: "Claude Code",
-                    subtitle: "Anthropic",
-                    plan: appState.claudePlanName,
-                    email: appState.claudeDisplayEmail,
-                    source: claudeSource,
-                    tint: .claudeAccent,
-                    logoName: "claude",
-                    fallback: "K",
-                    isDetected: appState.claudeAccount != nil
-                )
-                DetectedAccountRow(
-                    app: .antigravity,
-                    title: "Antigravity",
-                    subtitle: "Google",
-                    plan: appState.antigravityQuota?.planType ?? appState.antigravityAccount?.planType,
-                    email: appState.antigravityAccount?.email,
-                    source: "~/.gemini/jetski-standalone-oauth-token",
-                    tint: .antigravityAccent,
-                    logoName: "antigravity",
-                    fallback: "A",
-                    isDetected: appState.antigravityAccount != nil
-                )
-                DetectedAccountRow(
-                    app: .cursor,
-                    title: "Cursor",
-                    subtitle: "Cursor",
-                    plan: appState.cursorQuota?.planType,
-                    email: appState.cursorAccount?.email,
-                    source: "~/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
-                    tint: .cursorAccent,
-                    logoName: "cursor",
-                    fallback: "C",
-                    isDetected: appState.cursorAccount != nil || appState.cursorKeychainAccessRequired
-                )
-                DetectedAccountRow(
-                    app: .commandCode,
-                    title: "Command Code",
-                    subtitle: "Command Code",
-                    plan: appState.commandCodeQuota?.planType ?? appState.commandCodeAccount?.planType,
-                    email: appState.commandCodeAccount?.login ?? appState.commandCodeAccount?.email,
-                    source: commandCodeSource,
-                    tint: QuotaApp.commandCode.tintColor,
-                    logoName: "commandcode",
-                    fallback: "⌘",
-                    isDetected: appState.commandCodeAccount != nil
-                )
+            // 账号列表可滚动，固定高度窗口中仍保留凭据说明和底部操作。
+            VStack(spacing: 6) {
+                accountList
+
+                ScrollDownHint(isVisible: hasMoreAccountsBelow)
             }
             .padding(.top, 18)
 
             CredentialInfoCard()
                 .padding(.top, 18)
 
-            Spacer()
-
             HStack(spacing: 8) {
                 SecondaryButton(label: tr("Back", "上一步"), action: onBack)
                 Spacer()
                 PrimaryButton(label: tr("Continue", "继续"), action: onContinue)
             }
+            .padding(.top, 18)
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 28)
+    }
+
+    @ViewBuilder
+    private var accountList: some View {
+        if #available(macOS 15.0, *) {
+            ScrollView {
+                accountListContent
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentSize.height > geometry.visibleRect.maxY + 1
+            } action: { _, hasMore in
+                hasMoreAccountsBelow = hasMore
+            }
+        } else {
+            GeometryReader { viewport in
+                let viewportHeight = viewport.size.height
+                ScrollView {
+                    accountListContent
+                        .onGeometryChange(for: Bool.self) { content in
+                            content.frame(in: .named("onboardingAccounts")).maxY > viewportHeight + 1
+                        } action: { hasMore in
+                            hasMoreAccountsBelow = hasMore
+                        }
+                }
+                .coordinateSpace(name: "onboardingAccounts")
+            }
+        }
+    }
+
+    private var accountListContent: some View {
+        VStack(spacing: 8) {
+            ForEach(orderedAccountRows, id: \.app) { row in
+                row
+            }
+        }
+    }
+
+    private var accountRows: [DetectedAccountRow] {
+        [
+            DetectedAccountRow(
+                app: .codex,
+                title: "Codex",
+                subtitle: "OpenAI",
+                plan: appState.codexPlanName,
+                email: appState.codexAccount?.email,
+                source: codexSource,
+                tint: .codexAccent,
+                logoName: "codex",
+                fallback: "C",
+                isDetected: appState.codexAccount != nil
+            ),
+            DetectedAccountRow(
+                app: .claude,
+                title: "Claude Code",
+                subtitle: "Anthropic",
+                plan: appState.claudePlanName,
+                email: appState.claudeDisplayEmail,
+                source: claudeSource,
+                tint: .claudeAccent,
+                logoName: "claude",
+                fallback: "K",
+                isDetected: appState.claudeAccount != nil
+            ),
+            DetectedAccountRow(
+                app: .antigravity,
+                title: "Antigravity",
+                subtitle: "Google",
+                plan: appState.antigravityQuota?.planType ?? appState.antigravityAccount?.planType,
+                email: appState.antigravityAccount?.email,
+                source: "~/.gemini/jetski-standalone-oauth-token",
+                tint: .antigravityAccent,
+                logoName: "antigravity",
+                fallback: "A",
+                isDetected: appState.antigravityAccount != nil
+            ),
+            DetectedAccountRow(
+                app: .cursor,
+                title: "Cursor",
+                subtitle: "Cursor",
+                plan: appState.cursorQuota?.planType,
+                email: appState.cursorAccount?.email,
+                source: "~/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+                tint: .cursorAccent,
+                logoName: "cursor",
+                fallback: "C",
+                isDetected: appState.cursorAccount != nil || appState.cursorKeychainAccessRequired
+            ),
+            DetectedAccountRow(
+                app: .commandCode,
+                title: "Command Code",
+                subtitle: "Command Code",
+                plan: appState.commandCodeQuota?.planType ?? appState.commandCodeAccount?.planType,
+                email: appState.commandCodeAccount?.login ?? appState.commandCodeAccount?.email,
+                source: commandCodeSource,
+                tint: QuotaApp.commandCode.tintColor,
+                logoName: "commandcode",
+                fallback: "⌘",
+                isDetected: appState.commandCodeAccount != nil
+            ),
+            DetectedAccountRow(
+                app: .kimi,
+                title: "Kimi Code",
+                subtitle: "Moonshot AI",
+                plan: kimiPlan,
+                email: kimiIdentity,
+                source: kimiSource,
+                tint: QuotaApp.kimi.tintColor,
+                logoName: "kimi",
+                fallback: "K",
+                isDetected: appState.hasKimiSubscriptionAccount
+            )
+        ]
+    }
+
+    private var orderedAccountRows: [DetectedAccountRow] {
+        let rows = accountRows
+        return rows.filter { $0.isDetected } + rows.filter { !$0.isDetected }
     }
 
     private var codexSource: String {
@@ -263,13 +323,69 @@ private struct DetectAccountsStep: View {
         }
     }
 
+    private var kimiPlan: String? {
+        if appState.kimiAccount != nil {
+            return appState.kimiPlanName ?? appState.kimiQuota?.planType
+        }
+        return appState.kimiManagedAccounts.first?.userLevelName
+    }
+
+    private var kimiIdentity: String? {
+        if appState.kimiAccount != nil {
+            return appState.kimiNickname ?? appState.kimiEmail
+        }
+        let account = appState.kimiManagedAccounts.first
+        return account?.nickname ?? account?.email
+    }
+
+    private var kimiSource: String {
+        if let account = appState.kimiAccount {
+            if let url = account.credentialURL {
+                return (url.path as NSString).abbreviatingWithTildeInPath
+            }
+            return account.source.displayName
+        }
+        return appState.hasKimiSubscriptionAccount ? "CCBar" : "—"
+    }
+
     private var anyDetected: Bool {
-        appState.codexAccount != nil
-            || appState.claudeAccount != nil
-            || appState.antigravityAccount != nil
-            || appState.cursorAccount != nil
-            || appState.cursorKeychainAccessRequired
-            || appState.commandCodeAccount != nil
+        accountRows.contains { $0.isDetected }
+    }
+}
+
+private struct ScrollDownHint: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let isVisible: Bool
+
+    var body: some View {
+        Group {
+            if isVisible && !reduceMotion {
+                hintContent
+                    .phaseAnimator([false, true]) { hint, lowered in
+                        hint.offset(y: lowered ? 4 : 0)
+                    } animation: { lowered in
+                        .smooth(duration: lowered ? 0.7 : 0.45, extraBounce: 0)
+                            .delay(lowered ? 0.6 : 0.15)
+                    }
+            } else {
+                hintContent
+            }
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
+        .frame(height: 20)
+        .opacity(isVisible ? 1 : 0)
+        .accessibilityElement(children: .combine)
+        .accessibilityHidden(!isVisible)
+    }
+
+    private var hintContent: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "chevron.down")
+                .accessibilityHidden(true)
+            Text(tr("Scroll down to see more", "向下滚动查看更多"))
+        }
     }
 }
 
@@ -300,7 +416,8 @@ private struct DetectedAccountRow: View {
                 }
                 // 邮箱优先完整显示；凭据来源（Cursor 的路径很长）只占一行，放不下从中间截断。
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    Text(email.map { PrivacyDisplay.isEnabled ? PrivacyDisplay.account("primary:\(app.rawValue)") : $0 } ?? tr("Not detected", "未检测到"))
+                    Text(email.map { PrivacyDisplay.isEnabled ? PrivacyDisplay.account("primary:\(app.rawValue)") : $0 }
+                         ?? (isDetected ? tr("Detected", "已检测到") : tr("Not detected", "未检测到")))
                         .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
