@@ -223,7 +223,7 @@ struct SettingsRootView: View {
         let others = entries.filter { !$0.isDetected }
 
         ServiceGroup(title: tr("In Use", "正在使用"), desc: nil) {
-            if inUse.isEmpty && appState.kimiManagedAccounts.isEmpty && appState.moonshotAccounts.isEmpty {
+            if inUse.isEmpty {
                 Text(tr("No services found on this Mac yet", "暂未在这台 Mac 上检测到服务"))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -232,8 +232,6 @@ struct SettingsRootView: View {
             } else {
                 serviceRows(inUse, floatingHUDGloballyEnabled: settings.floatingEnabled)
             }
-            KimiManagedAccountsSettingsView()
-            MoonshotAccountsSettingsView()
         }
 
         if !others.isEmpty {
@@ -282,7 +280,7 @@ struct SettingsRootView: View {
     }
 
     /// 每一行整行可拖（手柄只做提示）。
-    /// Codex 行和它下面的其他 Codex 账号是一块，一起抬起、一起移动。
+    /// 同一厂商的服务行、账户行与添加入口作为一块抬起和移动，视觉上仍同级对齐。
     @ViewBuilder
     private func serviceBlock(
         _ entry: ServiceEntry,
@@ -299,6 +297,10 @@ struct SettingsRootView: View {
 
             if entry.id == .quota(.codex) {
                 ImportedCodexAccountsView()
+            }
+            if entry.id == .quota(.kimi) {
+                KimiManagedAccountsSettingsView()
+                MoonshotAccountsSettingsView()
             }
         }
     }
@@ -1210,7 +1212,8 @@ struct SettingsRootView: View {
             sourceLines.append(tr("\(provider.title) does not provide usage data.", "\(provider.title) 不提供用量数据。"))
             isDetected = info.signedIn
         case .kimi:
-            isDetected = appState.hasKimiSubscriptionAccount || localRecordState(for: .kimi) != .missing
+            isDetected = appState.hasKimiSubscriptionAccount || !appState.moonshotAccounts.isEmpty
+                || localRecordState(for: .kimi) != .missing
             sourceLines.append(tr("Usage: reads local Kimi Code CLI conversation records and estimates token costs on this Mac.",
                                   "用量：读取本机 Kimi Code CLI 对话记录，统计 Token 并估算参考费用。"))
         case .opencodeGo:
