@@ -17,7 +17,7 @@ import Foundation
 
 nonisolated enum UpdateChecker {
     /// 仓库大小写与 README 中徽章一致;如日后换仓库只需改这两处。
-    static let repoOwner = "nanvon"
+    static let repoOwner = "FffPlum"
     static let repoName = "cc-bar"
 
     /// 由 GitHub 重定向到最新 release 的下载页。
