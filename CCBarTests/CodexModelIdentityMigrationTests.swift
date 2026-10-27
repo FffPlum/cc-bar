@@ -127,12 +127,119 @@ final class CodexModelIdentityMigrationTests: XCTestCase {
         XCTAssertEqual(CodexJSONLScanner.storageModel("GPT-5-20260928"), "gpt-5")
         XCTAssertEqual(CodexJSONLScanner.storageModel("commandcode/openai/gpt-5-20260928"), "commandcode/openai/gpt-5")
         XCTAssertEqual(CodexJSONLScanner.storageModel("command-code/anthropic/claude-sonnet-4@20260928"), "command-code/anthropic/claude-sonnet-4")
+        XCTAssertEqual(CodexJSONLScanner.storageModel("magpie/cursor/grok-4.7@256k:fast"),
+                       "magpie/cursor/grok-4.7@256k:fast")
+        XCTAssertEqual(Pricing.normalize(model: "magpie/cursor/grok-4.7@256k:fast"),
+                       "magpie/cursor/grok-4.7")
         XCTAssertEqual(Pricing.normalize(model: model), bare)
         XCTAssertEqual(ModelProvider.resolve(app: .codex, model: model), .commandCode)
         XCTAssertEqual(Pricing.cost(app: .codex, model: model, speed: .standard, input: 100, output: 10,
                                    cacheRead: 20, cacheCreation: 0, at: start),
                        Pricing.cost(app: .codex, model: bare, speed: .standard, input: 100, output: 10,
                                     cacheRead: 20, cacheCreation: 0, at: start))
+    }
+
+    func testCursorIdentityRebuildRequiresMatchingHistoryAndCycleAttribution() async throws {
+        let fullModel = "magpie/cursor/grok-4.7@256k:fast"
+        try write(firstID, [Call(model: fullModel)])
+        var old = await baseline()
+        let pricedOld = old
+        for index in old.usageRollup.buckets.indices {
+            old.usageRollup.buckets[index].costUSD = 0
+            old.usageRollup.buckets[index].hasUnpricedUsage = true
+        }
+        for index in old.conversationRollup.buckets.indices {
+            old.conversationRollup.buckets[index].costUSD = 0
+            old.conversationRollup.buckets[index].hasUnpricedUsage = true
+            old.conversationRollup.buckets[index].inputCostUSD = 0
+            old.conversationRollup.buckets[index].outputCostUSD = 0
+            old.conversationRollup.buckets[index].cacheReadCostUSD = 0
+            old.conversationRollup.buckets[index].cacheCreationCostUSD = 0
+        }
+        let scanResult = await scan()
+        let daily = UsageAggregator(), conversations = ConversationAggregator()
+        daily.ingestLocal(scanResult.entries)
+        conversations.ingest(entries: scanResult.entries, seeds: scanResult.conversationSeeds)
+        let candidateDay = daily.snapshotLocal()
+        let candidateConversations = conversations.snapshot().buckets
+        func safe(_ days: [UsageBucket], _ conversation: [ConversationUsageBucket],
+                  oldCycles: [CycleUsageBucket] = [], newCycles: [CycleUsageBucket] = []) -> Bool {
+            UsageHistoryConsistency.cursorIdentityRebuildIsSafe(
+                baselineDay: old.usageRollup.buckets, candidateDay: days,
+                baselineConversation: old.conversationRollup.buckets, candidateConversation: conversation,
+                baselineCycle: oldCycles, candidateCycle: newCycles
+            )
+        }
+        XCTAssertTrue(safe(candidateDay, candidateConversations))
+        var changed = candidateConversations
+        changed[0].inputTokens += 1
+        XCTAssertFalse(safe(candidateDay, changed))
+        XCTAssertFalse(safe(candidateDay, []))
+        XCTAssertFalse(safe([], []), "旧标识的源日志全部缺失时不能跳过对账")
+        XCTAssertFalse(UsageHistoryConsistency.cursorIdentityRebuildIsSafe(
+            baselineDay: pricedOld.usageRollup.buckets, candidateDay: candidateDay,
+            baselineConversation: pricedOld.conversationRollup.buckets, candidateConversation: candidateConversations,
+            baselineCycle: [], candidateCycle: []
+        ), "已有金额改变时不能把普通重算当作可信身份迁移")
+        var sameIdentityDay = candidateDay
+        var sameIdentityConversations = candidateConversations
+        for index in sameIdentityDay.indices { sameIdentityDay[index].model = "magpie/cursor/grok-4.7" }
+        for index in sameIdentityConversations.indices { sameIdentityConversations[index].model = "magpie/cursor/grok-4.7" }
+        XCTAssertTrue(UsageHistoryConsistency.cursorIdentityRebuildIsSafe(
+            baselineDay: pricedOld.usageRollup.buckets, candidateDay: sameIdentityDay,
+            baselineConversation: pricedOld.conversationRollup.buckets, candidateConversation: sameIdentityConversations,
+            baselineCycle: [], candidateCycle: []
+        ), "身份未拆分时允许正常更新价格")
+        sameIdentityDay[0].inputTokens += 1
+        sameIdentityConversations[0].inputTokens += 1
+        XCTAssertTrue(UsageHistoryConsistency.cursorIdentityRebuildIsSafe(
+            baselineDay: pricedOld.usageRollup.buckets, candidateDay: sameIdentityDay,
+            baselineConversation: pricedOld.conversationRollup.buckets, candidateConversation: sameIdentityConversations,
+            baselineCycle: [], candidateCycle: []
+        ), "身份未拆分时，新日志不应阻止普通重算")
+        var knownZero = old
+        for index in knownZero.usageRollup.buckets.indices { knownZero.usageRollup.buckets[index].hasUnpricedUsage = false }
+        for index in knownZero.conversationRollup.buckets.indices { knownZero.conversationRollup.buckets[index].hasUnpricedUsage = false }
+        XCTAssertFalse(UsageHistoryConsistency.cursorIdentityRebuildIsSafe(
+            baselineDay: knownZero.usageRollup.buckets, candidateDay: candidateDay,
+            baselineConversation: knownZero.conversationRollup.buckets, candidateConversation: candidateConversations,
+            baselineCycle: [], candidateCycle: []
+        ), "已知零价不能当成缺价补算")
+
+        let oldCycle = CycleUsageBucket(cycleID: "cycle", allowanceSegmentID: nil, app: .codex,
+            model: "magpie/cursor/grok-4.7", speed: .standard, inputTokens: 80, outputTokens: 10,
+            cacheReadTokens: 20, cacheCreationTokens: 0, costUSD: 0, requestCount: 1,
+            hasUnpricedUsage: true, quality: .exact, conversationKey: nil)
+        var newCycle = oldCycle
+        newCycle.model = fullModel
+        newCycle.conversationKey = "codex:fixture"
+        XCTAssertFalse(safe(candidateDay, candidateConversations, oldCycles: [oldCycle], newCycles: [newCycle]))
+        newCycle.conversationKey = nil
+        XCTAssertTrue(safe(candidateDay, candidateConversations, oldCycles: [oldCycle], newCycles: [newCycle]))
+    }
+
+    func testRebuildKeepsLegacyCursorIdentityWhenPriceChangesAndRepricesOtherModels() async throws {
+        let fullModel = "magpie/cursor/grok-4.7@256k:fast"
+        let legacyModel = "magpie/cursor/grok-4.7"
+        let otherModel = "ccbar-reprice-fixture"
+        try write(firstID, [Call(model: fullModel)])
+        try write(secondID, [Call(model: otherModel)])
+        var old = await baseline()
+        old.codexModelIdentityMigration = CodexModelIdentityMigrationState()
+        try env.store.commit(old)
+        env.installPricing(model: otherModel, input: 10, output: 20)
+        let service = env.makeService()
+        await env.bootstrap(service)
+        await service.forceRescan()
+        guard case .replaced = service.lastRebuildOutcome else {
+            return XCTFail("无法安全拆分旧身份时应保留旧身份并完成重算")
+        }
+        let buckets = service.aggregator.snapshotLocal()
+        XCTAssertEqual(buckets.first { $0.model == legacyModel }?.requestCount, 1)
+        XCTAssertFalse(buckets.contains { $0.model == fullModel })
+        let other = try XCTUnwrap(buckets.first { $0.model == otherModel })
+        XCTAssertEqual(other.costUSD, Decimal(string: "0.001")!)
+        XCTAssertEqual(buckets.reduce(0) { $0 + $1.requestCount }, 2)
     }
 
     func testFourRequestsPreserveHistoricalMoneyInAllProjections() async throws {

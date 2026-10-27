@@ -1766,7 +1766,7 @@ final class UsageService {
             return .commitFailed("usage history store is read-only")
         }
         // 标识迁移尚未提交时（含没有可信进度的旧快照）按旧 Codex 身份严格核对。
-        let candidate = await buildRebuildCandidate(
+        var candidate = await buildRebuildCandidate(
             useLegacyCodexModels: usesLegacyCodexModels,
             preserveDeletedConversations: purpose != .restrictedRecovery
         )
@@ -1777,6 +1777,48 @@ final class UsageService {
             lastRebuildDiagnostic = "sources=(\(incomplete))"
             AppLog.warn(.usage, "usage rebuild rejected sources=\(incomplete)")
             return .rejectedIncompleteSources(incomplete)
+        }
+        // 旧 Cursor 身份在重算时可能被拆为带上下文 / 速度的新身份；没有逐桶对账不能覆盖历史。
+        let baselineConversations = conversationAggregator.snapshot()
+        var cursorSafe = UsageHistoryConsistency.cursorIdentityRebuildIsSafe(
+            baselineDay: aggregator.snapshotLocal(), candidateDay: candidate.dayBuckets,
+            baselineConversation: baselineConversations.buckets, candidateConversation: candidate.conversationBuckets,
+            baselineCycle: cycleAggregator.snapshot(), candidateCycle: candidate.cycleBuckets
+        )
+        if !cursorSafe, purpose != .restrictedRecovery, !usesLegacyCodexModels {
+            let baselineModels = Set(aggregator.snapshotLocal().filter { $0.app == .codex }.map(\.model))
+                .union(baselineConversations.buckets.filter { $0.app == .codex }.map(\.model))
+                .union(cycleAggregator.snapshot().filter { $0.app == .codex }.map(\.model))
+            let origins = Set(baselineModels.filter {
+                let lower = $0.lowercased()
+                return (lower.hasPrefix("cursor/") || lower.hasPrefix("magpie/cursor/"))
+                    && !$0.contains("@") && !$0.contains(":")
+            })
+            // 已有完整新身份时无法区分其请求与旧桶，不能折回并抹掉已保存的身份。
+            let hasExistingSplit = baselineModels.contains {
+                let old = CodexJSONLScanner.legacyStorageModel($0)
+                return old != $0 && origins.contains(old)
+            }
+            if !origins.isEmpty, !hasExistingSplit {
+                candidate = await buildRebuildCandidate(
+                    preserveDeletedConversations: true, cursorLegacyOrigins: origins
+                )
+                if let incomplete = candidate.incompleteSources {
+                    lastRebuildDiagnostic = "sources=(\(incomplete))"
+                    AppLog.warn(.usage, "usage rebuild rejected sources=\(incomplete)")
+                    return .rejectedIncompleteSources(incomplete)
+                }
+                cursorSafe = UsageHistoryConsistency.cursorIdentityRebuildIsSafe(
+                    baselineDay: aggregator.snapshotLocal(), candidateDay: candidate.dayBuckets,
+                    baselineConversation: baselineConversations.buckets, candidateConversation: candidate.conversationBuckets,
+                    baselineCycle: cycleAggregator.snapshot(), candidateCycle: candidate.cycleBuckets
+                )
+            }
+        }
+        if !cursorSafe {
+            lastRebuildDiagnostic = "cursor_identity_unverified"
+            AppLog.warn(.usage, "usage rebuild rejected cursor identity mismatch")
+            return .rejectedUsageChanged
         }
         // 只有受限恢复要求逐项相等：它的作用是证明旧历史与日志一致，才能采纳新进度。
         // 手动重建以现有日志为准、保留日志已删除的对话，差异是预期结果，只记录不拒绝。
@@ -1862,7 +1904,8 @@ final class UsageService {
     ///   受限恢复的核对传 false，候选只来自现有日志，才能和基准逐项比对。
     private func buildRebuildCandidate(
         useLegacyCodexModels: Bool = false,
-        preserveDeletedConversations: Bool
+        preserveDeletedConversations: Bool,
+        cursorLegacyOrigins: Set<String> = []
     ) async -> RebuildCandidate {
         let progress: ScanProgressCallback? = { [weak self] progress in
             DispatchQueue.main.async { self?.scanProgress = progress }
@@ -1950,6 +1993,14 @@ final class UsageService {
         if claude.hasDeferredMessages { UsageLogWatcher.shared.requestRescan() }
         var codex = await codexTask
         if useLegacyCodexModels { codex = Self.legacyCodexResult(codex) }
+        if !cursorLegacyOrigins.isEmpty {
+            codex.entries = codex.entries.map { entry in
+                var folded = entry
+                let old = CodexJSONLScanner.legacyStorageModel(entry.model)
+                if cursorLegacyOrigins.contains(old) { folded.model = old }
+                return folded
+            }
+        }
         let pi = await piTask
         let opencode = await opencodeTask
         let dsh = await dshTask

@@ -342,7 +342,7 @@ final class QuotaNotificationService {
         let period: String
         switch limit.kind {
         case .fiveHour:
-            period = app == .claude ? translate("Current session", "当前会话") : translate("5-hour quota", "5 小时额度")
+            period = translate("5-hour quota", "5 小时额度")
         case .weekly, .modelWeekly: period = translate("Weekly quota", "周额度")
         case .unknown: period = translate("Quota", "额度")
         }
