@@ -21,8 +21,8 @@ nonisolated enum UsageApp: String, Sendable, Codable, Hashable, CaseIterable {
     /// Pi 装了计时插件时日志带首字时间，对话详情按实际数据补显首字。
     var supportsGenerationTiming: Bool {
         switch self {
-        case .claude, .codex, .opencode, .dsh: return true
-        case .pi, .cursor, .antigravity, .kimi: return false
+        case .claude, .codex, .opencode, .dsh, .kimi: return true
+        case .pi, .cursor, .antigravity: return false
         }
     }
 

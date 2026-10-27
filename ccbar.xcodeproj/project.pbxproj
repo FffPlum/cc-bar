@@ -152,6 +152,7 @@
 		49C1B31000000000000FAABB /* PiJSONLScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B31000000000000FAAAA /* PiJSONLScannerTests.swift */; };
 		B71C3000000000000000AABB /* KimiUsageIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71C3000000000000000AAAA /* KimiUsageIntegrationTests.swift */; };
 		B71C2000000000000000AABB /* KimiSessionScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71C2000000000000000AAAA /* KimiSessionScannerTests.swift */; };
+		B71F0100000000000000AABB /* KimiTimingAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71F0100000000000000AAAA /* KimiTimingAuditTests.swift */; };
 		49C1B91000000000000FAABB /* OpencodeScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B91000000000000FAAAA /* OpencodeScannerTests.swift */; };
 		A6A1B90000000000000FBABB /* AntigravityScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A1B90000000000000FBAAA /* AntigravityScannerTests.swift */; };
 		49C1BF0A000000000001AABB /* ConversationProjectResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF0A000000000001AAAA /* ConversationProjectResolverTests.swift */; };
@@ -338,6 +339,7 @@
 		49C1B31000000000000FAAAA /* PiJSONLScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiJSONLScannerTests.swift; sourceTree = "<group>"; };
 		B71C3000000000000000AAAA /* KimiUsageIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiUsageIntegrationTests.swift; sourceTree = "<group>"; };
 		B71C2000000000000000AAAA /* KimiSessionScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiSessionScannerTests.swift; sourceTree = "<group>"; };
+		B71F0100000000000000AAAA /* KimiTimingAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiTimingAuditTests.swift; sourceTree = "<group>"; };
 		49C1B91000000000000FAAAA /* OpencodeScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpencodeScannerTests.swift; sourceTree = "<group>"; };
 		A6A1B90000000000000FBAAA /* AntigravityScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityScannerTests.swift; sourceTree = "<group>"; };
 		49C1BF0A000000000001AAAA /* ConversationProjectResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationProjectResolverTests.swift; sourceTree = "<group>"; };
@@ -678,6 +680,7 @@
 				49C1B31000000000000FAAAA /* PiJSONLScannerTests.swift */,
 				B71C3000000000000000AAAA /* KimiUsageIntegrationTests.swift */,
 				B71C2000000000000000AAAA /* KimiSessionScannerTests.swift */,
+				B71F0100000000000000AAAA /* KimiTimingAuditTests.swift */,
 				49C1B91000000000000FAAAA /* OpencodeScannerTests.swift */,
 				A6A1B90000000000000FBAAA /* AntigravityScannerTests.swift */,
 				49C1BE08000000000001AAAA /* DshZstdFrameScannerTests.swift */,
@@ -997,6 +1000,7 @@
 				49C1B31000000000000FAABB /* PiJSONLScannerTests.swift in Sources */,
 				B71C3000000000000000AABB /* KimiUsageIntegrationTests.swift in Sources */,
 				B71C2000000000000000AABB /* KimiSessionScannerTests.swift in Sources */,
+				B71F0100000000000000AABB /* KimiTimingAuditTests.swift in Sources */,
 				49C1B91000000000000FAABB /* OpencodeScannerTests.swift in Sources */,
 				A6A1B90000000000000FBABB /* AntigravityScannerTests.swift in Sources */,
 				49C1BE0B000000000001AAAA /* DshZstdFrameScannerTests.swift in Sources */,

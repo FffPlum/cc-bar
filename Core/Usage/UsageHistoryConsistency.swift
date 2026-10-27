@@ -359,6 +359,7 @@ nonisolated struct UsageMessageLedgerPayload: Sendable, Codable, Equatable {
 /// v3（Pi）：计时插件的精确计时与请求总耗时分开累计，重建一次把已采集的总耗时标为近似值。
 /// v3（Claude）：跨轮扫描的消息补上计时，识别桌面端续接对话；重建一次补齐现存日志。
 /// v3（Codex）：子智能体消息打断的请求重新计时，读取 `cache_write_input_tokens`；重建一次修正现存日志。
+/// v2（Kimi）：关联原生 step.end 计时；重读现存日志，保留已删除文件的用量与去重归属。
 nonisolated enum UsageStatsRules {
     static let versions: [UsageApp: Int] = [
         .claude: 3,
@@ -367,7 +368,7 @@ nonisolated enum UsageStatsRules {
         .opencode: 2,
         .dsh: 2,
         .antigravity: 2,
-        .kimi: 1,
+        .kimi: 2,
     ]
 
     static var persisted: [String: Int] {
