@@ -126,6 +126,10 @@ nonisolated enum UsageHistoryConsistency {
             baselineConversation.contains { $0.app == .codex && matches($0.model)
                 && CodexJSONLScanner.legacyStorageModel($0.model) == origin }
         }) else { return false }
+        // 没有发生身份拆分时按普通重算处理；但原模型必须仍存在，避免缺失来源被当作安全重算。
+        if splitOrigins.isEmpty {
+            return origins.isSubset(of: candidateModels)
+        }
         let oldDays = baselineDay.filter { $0.app == .codex && matches($0.model) }.map { bucket in
             var b = bucket; b.model = CodexJSONLScanner.legacyStorageModel(b.model); return b
         }

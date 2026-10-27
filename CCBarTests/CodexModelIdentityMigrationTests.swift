@@ -190,6 +190,13 @@ final class CodexModelIdentityMigrationTests: XCTestCase {
             baselineConversation: pricedOld.conversationRollup.buckets, candidateConversation: sameIdentityConversations,
             baselineCycle: [], candidateCycle: []
         ), "身份未拆分时允许正常更新价格")
+        sameIdentityDay[0].inputTokens += 1
+        sameIdentityConversations[0].inputTokens += 1
+        XCTAssertTrue(UsageHistoryConsistency.cursorIdentityRebuildIsSafe(
+            baselineDay: pricedOld.usageRollup.buckets, candidateDay: sameIdentityDay,
+            baselineConversation: pricedOld.conversationRollup.buckets, candidateConversation: sameIdentityConversations,
+            baselineCycle: [], candidateCycle: []
+        ), "身份未拆分时，新日志不应阻止普通重算")
         var knownZero = old
         for index in knownZero.usageRollup.buckets.indices { knownZero.usageRollup.buckets[index].hasUnpricedUsage = false }
         for index in knownZero.conversationRollup.buckets.indices { knownZero.conversationRollup.buckets[index].hasUnpricedUsage = false }
@@ -209,6 +216,30 @@ final class CodexModelIdentityMigrationTests: XCTestCase {
         XCTAssertFalse(safe(candidateDay, candidateConversations, oldCycles: [oldCycle], newCycles: [newCycle]))
         newCycle.conversationKey = nil
         XCTAssertTrue(safe(candidateDay, candidateConversations, oldCycles: [oldCycle], newCycles: [newCycle]))
+    }
+
+    func testRebuildKeepsLegacyCursorIdentityWhenPriceChangesAndRepricesOtherModels() async throws {
+        let fullModel = "magpie/cursor/grok-4.7@256k:fast"
+        let legacyModel = "magpie/cursor/grok-4.7"
+        let otherModel = "ccbar-reprice-fixture"
+        try write(firstID, [Call(model: fullModel)])
+        try write(secondID, [Call(model: otherModel)])
+        var old = await baseline()
+        old.codexModelIdentityMigration = CodexModelIdentityMigrationState()
+        try env.store.commit(old)
+        env.installPricing(model: otherModel, input: 10, output: 20)
+        let service = env.makeService()
+        await env.bootstrap(service)
+        await service.forceRescan()
+        guard case .replaced = service.lastRebuildOutcome else {
+            return XCTFail("无法安全拆分旧身份时应保留旧身份并完成重算")
+        }
+        let buckets = service.aggregator.snapshotLocal()
+        XCTAssertEqual(buckets.first { $0.model == legacyModel }?.requestCount, 1)
+        XCTAssertFalse(buckets.contains { $0.model == fullModel })
+        let other = try XCTUnwrap(buckets.first { $0.model == otherModel })
+        XCTAssertEqual(other.costUSD, Decimal(string: "0.001")!)
+        XCTAssertEqual(buckets.reduce(0) { $0 + $1.requestCount }, 2)
     }
 
     func testFourRequestsPreserveHistoricalMoneyInAllProjections() async throws {
