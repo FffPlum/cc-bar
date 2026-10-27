@@ -11,7 +11,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    # ARM hosted runner 容量不足时会在编译前失败；Intel runner 交叉编译 arm64。
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +28,7 @@ jobs:
         env:
           SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
           CCBAR_SIGN_IDENTITY: '-'
+          CCBAR_BUILD_ARCH: arm64
         run: ./scripts/build.sh
 
       - name: 保存验证产物
