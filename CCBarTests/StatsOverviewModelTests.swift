@@ -8,6 +8,35 @@ import XCTest
 final class StatsOverviewModelTests: XCTestCase {
     private let calendar = Calendar.current
 
+    func testModelCompositionMergesKnownIdentitiesButKeepsSourcesAndTotals() throws {
+        let date = day(2026, 3, 1)
+        let buckets = [
+            bucket(.pi, "cursor/composer-2.5:slow", date, tokens: 100, cost: 1),
+            bucket(.pi, "cursor/composer-2.5:fast", date, tokens: 200, cost: 2),
+            bucket(.codex, "magpie/cursor/composer-2.5:fast", date, tokens: 300, cost: 3),
+            bucket(.pi, "cursor/composer-2.5:unknown", date, tokens: 400, cost: 4)
+        ]
+        let all = interval(.distantPast, .distantFuture)
+        let overview = StatsOverviewModel.build(buckets: buckets, input: StatsOverviewInput(
+            revision: 1, current: all, previous: nil, chart: all,
+            granularity: .day, serviceApp: nil, visibleApps: [.pi, .codex], highlightedPeriodStart: nil
+        ))
+        let rows = try XCTUnwrap(overview.composition[.model])
+        let merged = try XCTUnwrap(rows.first { $0.title == "composer-2.5" })
+        XCTAssertEqual(merged.totals.inputTokens, 600)
+        XCTAssertEqual(merged.totals.costUSD, 6)
+        XCTAssertEqual(Set(merged.modelSources.map(\.model)), Set(buckets.prefix(3).map(\.model)))
+        XCTAssertEqual(merged.action, .expandModel("composer-2.5"))
+        XCTAssertTrue(rows.contains { $0.title == "cursor/composer-2.5:unknown" })
+        XCTAssertEqual(rows.reduce(0) { $0 + $1.totals.inputTokens }, overview.totalsAll.inputTokens)
+        XCTAssertEqual(rows.reduce(Decimal(0)) { $0 + $1.totals.costUSD }, overview.totalsAll.costUSD)
+        XCTAssertEqual(ModelIdentity.parse("magpie/codex/gpt-6-astra").model, "gpt-6-astra")
+        XCTAssertEqual(ModelIdentity.parse("openai-codex/gpt-6-astra").model, "gpt-6-astra")
+        XCTAssertEqual(ModelIdentity.parse("magpie/opencode-zen-free/deepseek-v4.1-flash-free").model,
+                       "deepseek-v4.1-flash-free")
+        XCTAssertEqual(ModelIdentity.parse("unknown/codex/gpt-6-astra").model, "unknown/codex/gpt-6-astra")
+    }
+
     // MARK: - 等价对照
 
     func testBuildMatchesNaiveReferenceAcrossScopes() {

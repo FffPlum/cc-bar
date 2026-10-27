@@ -97,6 +97,115 @@ nonisolated struct UsageRebuildMismatch: Sendable, Equatable {
 /// 手动重建不走这道门槛（见 `UsageRebuildMerge`），比较结果只作诊断记录。
 /// 不接受「总量不减少」「键集合是超集」「没有报错」这类弱证明。
 nonisolated enum UsageHistoryConsistency {
+    /// 完整重算若要把已保存的旧 Cursor 身份拆回 @上下文 / :速度，须先按旧身份逐桶对账。
+    /// 对话或周期归属无法证明时拒绝候选，不用重算覆盖旧历史。
+    nonisolated static func cursorIdentityRebuildIsSafe(
+        baselineDay: [UsageBucket], candidateDay: [UsageBucket],
+        baselineConversation: [ConversationUsageBucket], candidateConversation: [ConversationUsageBucket],
+        baselineCycle: [CycleUsageBucket], candidateCycle: [CycleUsageBucket]
+    ) -> Bool {
+        func isCursor(_ model: String) -> Bool {
+            let lower = model.lowercased()
+            return lower.hasPrefix("cursor/") || lower.hasPrefix("magpie/cursor/")
+        }
+        let baselineModels = Set(baselineDay.filter { $0.app == .codex && isCursor($0.model) }.map(\.model))
+            .union(baselineConversation.filter { $0.app == .codex && isCursor($0.model) }.map(\.model))
+            .union(baselineCycle.filter { $0.app == .codex && isCursor($0.model) }.map(\.model))
+        // 旧键没有 @ / : 时无法判断它是原始裸名还是被截断的档位；即使源日志已消失也必须核对。
+        let origins = Set(baselineModels.filter { !$0.contains("@") && !$0.contains(":") })
+        guard !origins.isEmpty else { return true }
+        let candidateModels = Set(candidateDay.filter { $0.app == .codex && isCursor($0.model) }.map(\.model))
+            .union(candidateConversation.filter { $0.app == .codex && isCursor($0.model) }.map(\.model))
+            .union(candidateCycle.filter { $0.app == .codex && isCursor($0.model) }.map(\.model))
+        let splitOrigins = Set(candidateModels.compactMap { model -> String? in
+            let old = CodexJSONLScanner.legacyStorageModel(model)
+            return old != model && origins.contains(old) ? old : nil
+        })
+        func matches(_ model: String) -> Bool { origins.contains(CodexJSONLScanner.legacyStorageModel(model)) }
+        guard origins.allSatisfy({ origin in
+            baselineConversation.contains { $0.app == .codex && matches($0.model)
+                && CodexJSONLScanner.legacyStorageModel($0.model) == origin }
+        }) else { return false }
+        let oldDays = baselineDay.filter { $0.app == .codex && matches($0.model) }.map { bucket in
+            var b = bucket; b.model = CodexJSONLScanner.legacyStorageModel(b.model); return b
+        }
+        let newDays = candidateDay.filter { $0.app == .codex && matches($0.model) }.map { bucket in
+            var b = bucket; b.model = CodexJSONLScanner.legacyStorageModel(b.model); return b
+        }
+        let oldConversations = baselineConversation.filter { $0.app == .codex && matches($0.model) }.map { bucket in
+            var b = bucket; b.model = CodexJSONLScanner.legacyStorageModel(b.model); return b
+        }
+        let newConversations = candidateConversation.filter { $0.app == .codex && matches($0.model) }.map { bucket in
+            var b = bucket; b.model = CodexJSONLScanner.legacyStorageModel(b.model); return b
+        }
+        func preservesKnownCosts<B, K: Hashable>(
+            _ old: [B], _ new: [B], key: (B) -> K, cost: (B) -> Decimal, unpriced: (B) -> Bool
+        ) -> Bool {
+            var oldCosts: [K: Decimal] = [:]
+            var newCosts: [K: Decimal] = [:]
+            var oldUnpriced: [K: Bool] = [:]
+            for bucket in old {
+                let k = key(bucket)
+                oldCosts[k, default: 0] += cost(bucket)
+                oldUnpriced[k] = (oldUnpriced[k] ?? false) || unpriced(bucket)
+            }
+            for bucket in new { newCosts[key(bucket), default: 0] += cost(bucket) }
+            return oldCosts.allSatisfy { item in
+                newCosts[item.key] == item.value || (item.value == 0 && oldUnpriced[item.key] == true)
+            }
+        }
+        func dayKey(_ b: UsageBucket) -> UsageVectorKey {
+            UsageVectorKey(app: b.app, day: b.day, model: b.model, speed: b.speed)
+        }
+        func conversationKey(_ b: ConversationUsageBucket) -> ConversationVectorKey {
+            ConversationVectorKey(conversationKey: b.conversationKey, day: b.day, model: b.model, speed: b.speed)
+        }
+        func conversationCosts(_ buckets: [ConversationUsageBucket]) -> [ConversationVectorKey: CostBreakdown] {
+            var result: [ConversationVectorKey: CostBreakdown] = [:]
+            for b in buckets {
+                let key = conversationKey(b)
+                let previous = result[key] ?? CostBreakdown(input: 0, output: 0, cacheRead: 0, cacheCreation: 0)
+                result[key] = CostBreakdown(input: previous.input + b.inputCostUSD,
+                                            output: previous.output + b.outputCostUSD,
+                                            cacheRead: previous.cacheRead + b.cacheReadCostUSD,
+                                            cacheCreation: previous.cacheCreation + b.cacheCreationCostUSD)
+            }
+            return result
+        }
+        let oldBreakdown = conversationCosts(oldConversations.filter { splitOrigins.contains($0.model) })
+        let newBreakdown = conversationCosts(newConversations.filter { splitOrigins.contains($0.model) })
+        guard dayVector(oldDays) == dayVector(newDays),
+              conversationVector(oldConversations) == conversationVector(newConversations),
+              preservesKnownCosts(oldDays.filter { splitOrigins.contains($0.model) },
+                                  newDays.filter { splitOrigins.contains($0.model) },
+                                  key: dayKey, cost: { $0.costUSD }, unpriced: { $0.hasUnpricedUsage }),
+              preservesKnownCosts(oldConversations.filter { splitOrigins.contains($0.model) },
+                                  newConversations.filter { splitOrigins.contains($0.model) },
+                                  key: conversationKey, cost: { $0.costUSD }, unpriced: { $0.hasUnpricedUsage }),
+              oldBreakdown.allSatisfy({ item in item.value.total == 0 || newBreakdown[item.key] == item.value })
+        else { return false }
+        let oldCycles = baselineCycle.filter { $0.app == .codex && matches($0.model) }.map { bucket in
+            var b = bucket; b.model = CodexJSONLScanner.legacyStorageModel(b.model); return b
+        }
+        let newCycles = candidateCycle.filter { $0.app == .codex && matches($0.model) }.map { bucket in
+            var b = bucket; b.model = CodexJSONLScanner.legacyStorageModel(b.model); return b
+        }
+        let oldByConversation = Dictionary(grouping: oldCycles, by: \.conversationKey)
+        let newByConversation = Dictionary(grouping: newCycles, by: \.conversationKey)
+        guard Set(oldByConversation.keys) == Set(newByConversation.keys) else { return false }
+        func cycleKey(_ b: CycleUsageBucket) -> CycleVectorKey {
+            CycleVectorKey(cycleID: b.cycleID, allowanceSegmentID: b.allowanceSegmentID,
+                           app: b.app, model: b.model, speed: b.speed, quality: b.quality)
+        }
+        return oldByConversation.allSatisfy { item in
+            let next = newByConversation[item.key] ?? []
+            return cycleVector(item.value) == cycleVector(next)
+                && preservesKnownCosts(item.value.filter { splitOrigins.contains($0.model) },
+                                       next.filter { splitOrigins.contains($0.model) },
+                                       key: cycleKey, cost: { $0.costUSD }, unpriced: { $0.hasUnpricedUsage })
+        }
+    }
+
     nonisolated static func dayVector(_ buckets: [UsageBucket]) -> [UsageVectorKey: UsageVectorCounts] {
         var result: [UsageVectorKey: UsageVectorCounts] = [:]
         for bucket in buckets where bucket.app != .cursor {

@@ -18,6 +18,14 @@ import Foundation
 enum CodexJSONLScanner {
     /// 存储身份与定价键分开：保留整个渠道链，裸模型和末段仍沿用日期 / 大小写规则。
     nonisolated static func storageModel(_ model: String) -> String {
+        // Cursor SDK 的 @上下文 / :速度是模型身份的一部分，不能按 Vertex 日期截断。
+        let lower = model.lowercased()
+        if lower.hasPrefix("cursor/") || lower.hasPrefix("magpie/cursor/") { return model }
+        return legacyStorageModel(model)
+    }
+
+    /// 用于核对已按旧规则保存的 Cursor 模型，不改变旧迁移的归一化语义。
+    nonisolated static func legacyStorageModel(_ model: String) -> String {
         guard let slash = model.lastIndex(of: "/") else { return Pricing.normalize(model: model) }
         let end = model.index(after: slash)
         return String(model[..<end]) + Pricing.normalize(model: String(model[end...]))

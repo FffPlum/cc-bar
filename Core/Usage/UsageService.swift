@@ -1755,6 +1755,17 @@ final class UsageService {
             AppLog.warn(.usage, "usage rebuild rejected sources=\(incomplete)")
             return .rejectedIncompleteSources(incomplete)
         }
+        // 旧 Cursor 身份在重算时可能被拆为带上下文 / 速度的新身份；没有逐桶对账不能覆盖历史。
+        let baselineConversations = conversationAggregator.snapshot()
+        if !UsageHistoryConsistency.cursorIdentityRebuildIsSafe(
+            baselineDay: aggregator.snapshotLocal(), candidateDay: candidate.dayBuckets,
+            baselineConversation: baselineConversations.buckets, candidateConversation: candidate.conversationBuckets,
+            baselineCycle: cycleAggregator.snapshot(), candidateCycle: candidate.cycleBuckets
+        ) {
+            lastRebuildDiagnostic = "cursor_identity_unverified"
+            AppLog.warn(.usage, "usage rebuild rejected cursor identity mismatch")
+            return .rejectedUsageChanged
+        }
         // 只有受限恢复要求逐项相等：它的作用是证明旧历史与日志一致，才能采纳新进度。
         // 手动重建以现有日志为准、保留日志已删除的对话，差异是预期结果，只记录不拒绝。
         if purpose == .restrictedRecovery, candidate.mismatch.hasUsageDifference {

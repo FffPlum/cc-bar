@@ -3795,6 +3795,52 @@ final class QuotaParsingTests: XCTestCase {
         )
     }
 
+    func testPiCursorAliasesKeepChannelSpeedAndContextPrices() throws {
+        func price(_ model: String) -> CostBreakdown? {
+            Pricing.costBreakdown(
+                app: .pi, model: model, speed: .standard,
+                input: 1_000_000, output: 1_000_000,
+                cacheRead: 1_000_000, cacheCreation: 0,
+                at: Date(timeIntervalSince1970: 0)
+            )
+        }
+        XCTAssertEqual(price("cursor/composer-2.5:slow"),
+                       CostBreakdown(input: 0.5, output: 2.5, cacheRead: 0.2, cacheCreation: 0))
+        XCTAssertEqual(price("magpie/cursor/composer-2.5:fast"),
+                       CostBreakdown(input: 3, output: 15, cacheRead: 0.5, cacheCreation: 0))
+        XCTAssertEqual(price("cursor/grok-4.7@256k:fast"),
+                       CostBreakdown(input: 4, output: 12, cacheRead: 1, cacheCreation: 0))
+        XCTAssertEqual(price("magpie/cursor/grok-4.7@500k:fast"),
+                       CostBreakdown(input: 6, output: 18, cacheRead: 1.5, cacheCreation: 0))
+        XCTAssertNil(price("cursor/composer-2.5"))
+        XCTAssertNil(price("magpie/cursor/composer-2.5"))
+        XCTAssertNil(price("magpie/cursor/grok-4.7@500k:unknown"))
+        XCTAssertNil(price("cursor/grok-4.7-256k:fast"))
+        XCTAssertNil(Pricing.costBreakdown(
+            app: .codex, model: "cursor/composer-2.5:fast", speed: .fast,
+            input: 1, output: 1, cacheRead: 0, cacheCreation: 0, at: Date()
+        ))
+    }
+
+    func testModelIdentityParsesCursorRoutesAndPreservesUnknownIdentifiers() {
+        let identity = ModelIdentity.parse("magpie/cursor/grok-4.7@256k:fast")
+        XCTAssertEqual(identity.raw, "magpie/cursor/grok-4.7@256k:fast")
+        XCTAssertEqual(identity.entry, "magpie")
+        XCTAssertEqual(identity.channel, .cursor)
+        XCTAssertEqual(identity.model, "grok-4.7")
+        XCTAssertEqual(identity.context, "256k")
+        XCTAssertEqual(identity.speed, .fast)
+        XCTAssertEqual(identity.cursorPricingKey, "cursor-sdk:grok-4.7:256k:fast")
+        XCTAssertEqual(ModelIdentity.parse("cursor/new-model@1m:slow").model, "new-model")
+        XCTAssertEqual(ModelIdentity.parse("cursor/composer-2.5").speed, .unspecified)
+        for value in ["cursor/model@20261027:fast", "cursor/model@0k:fast", "cursor/model:unknown", "unknown/cursor/model:fast"] {
+            let parsed = ModelIdentity.parse(value)
+            XCTAssertEqual(parsed.channel, .unknown)
+            XCTAssertEqual(parsed.model, value)
+            XCTAssertNil(parsed.cursorPricingKey)
+        }
+    }
+
     func testGPT55StandardLongContextProAndFastRates() throws {
         let standardShort = try XCTUnwrap(Pricing.costBreakdown(
             app: .codex,

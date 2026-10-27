@@ -1708,6 +1708,7 @@ private struct OverviewCompositionPanel: View {
 
     @State private var dimension: CompositionDimension = .service
     @State private var expandedProvider: ModelProvider?
+    @State private var expandedModel: String?
 
     var body: some View {
         let rows = model.composition[dimension] ?? []
@@ -1766,9 +1767,11 @@ private struct OverviewCompositionPanel: View {
         }
         .onChange(of: scope) { _, _ in
             expandedProvider = nil
+            expandedModel = nil
         }
         .onChange(of: dimension) { _, _ in
             expandedProvider = nil
+            expandedModel = nil
         }
     }
 
@@ -1816,6 +1819,7 @@ private struct OverviewCompositionPanel: View {
     private func rowView(_ row: CompositionRow) -> some View {
         let isExpanded: Bool = {
             if case .expandProvider(let provider) = row.action { return expandedProvider == provider }
+            if case .expandModel(let model) = row.action { return expandedModel == model }
             return false
         }()
         VStack(alignment: .leading, spacing: 0) {
@@ -1834,6 +1838,9 @@ private struct OverviewCompositionPanel: View {
             if isExpanded {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(row.providerModels) { item in
+                        providerModelRow(item)
+                    }
+                    ForEach(row.modelSources) { item in
                         providerModelRow(item)
                     }
                 }
@@ -1898,7 +1905,7 @@ private struct OverviewCompositionPanel: View {
                 .frame(width: 64, alignment: .trailing)
             Group {
                 switch row.action {
-                case .expandProvider:
+                case .expandProvider, .expandModel:
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                 case .openProject, .openUnattributed:
                     Image(systemName: "chevron.right")
@@ -1990,6 +1997,10 @@ private struct OverviewCompositionPanel: View {
         case .expandProvider(let provider):
             withAnimation(.easeOut(duration: 0.18)) {
                 expandedProvider = expandedProvider == provider ? nil : provider
+            }
+        case .expandModel(let model):
+            withAnimation(.easeOut(duration: 0.18)) {
+                expandedModel = expandedModel == model ? nil : model
             }
         case .openProject(let key):
             navigate(.project(key))
