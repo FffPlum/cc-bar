@@ -56,14 +56,14 @@ cc-bar 是一个原生 macOS 菜单栏 App，用 Swift / SwiftUI 实现。
 
 ## Git Flow 开发流程
 
-仓库采用 Git Flow。`main` 和 `develop` 是长期分支；具体的功能与发布分支是临时分支，完成合并后删除。仓库保留 `feature` 和 `release` 作为对应类型的初始分支，实际开发使用带名称或版本号的分支。
+仓库采用 Git Flow。`main` 和 `develop` 是长期分支；具体的功能与发布分支是临时分支，完成合并后删除。初始参考分支保留为 `templates/feature` 和 `templates/release`，实际开发使用 `feature/…` 与 `release/…`；不要创建名为 `feature` 或 `release` 的独立分支，避免 Git 分支前缀冲突。
 
 - `main`：存放正式发布的历史版本，只接受来自 `release/<版本号>` 的合并。每次正式发布后都在 `main` 上创建对应的 `vX.Y.Z` 标签，不直接在 `main` 上开发功能。
 - `develop`：日常开发的集成主干，接收已完成的功能分支，以及发布分支合并回来的修补与发布准备改动。
 - `feature/<功能名>`：从最新的 `develop` 切出，用于开发新功能；完成后通过代码审查合并回 `develop`，不直接合并到 `main`，合并后删除功能分支。
 - `release/<版本号>`：准备发布时从 `develop` 切出，只进行发布前测试、问题修补、版本号和更新说明等发布准备工作，不加入新功能；完成后先合并到 `main` 并创建版本标签，再合并回 `develop`，最后删除发布分支。
 
-常规流程为：`feature/<功能名>` → `develop` → `release/<版本号>` → `main` + `develop`。发布操作同时遵循下方「标准发布流程」。
+常规流程为：`feature/<功能名>` → `develop` → `release/<版本号>` → `main` + `develop`。例如 `feature/kimi-code-integration`、`release/v1.1.32`。发布操作同时遵循下方「标准发布流程」。
 
 ## 实现约束
 
