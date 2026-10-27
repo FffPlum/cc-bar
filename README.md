@@ -9,19 +9,21 @@
   在菜单栏实时监控 Codex、Claude Code、Cursor、Antigravity 配额与重置时间，本地离线分析 Tokens、费用与对话。
 </p>
 
+本项目基于 [nanvon/cc-bar](https://github.com/nanvon/cc-bar) 独立维护；下载、更新与问题反馈均以当前仓库为准。
+
 <p align="center">
-  <a href="https://github.com/nanvon/cc-bar/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/v/release/nanvon/cc-bar?color=brightgreen"></a>
-  <img alt="Downloads" src="https://img.shields.io/github/downloads/nanvon/cc-bar/total?color=blue">
-  <a href="https://github.com/nanvon/cc-bar/releases/latest"><img alt="Latest Downloads" src="https://img.shields.io/github/downloads/nanvon/cc-bar/latest/total?label=latest%20downloads&color=blue"></a>
+  <a href="https://github.com/FffPlum/cc-bar/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/v/release/FffPlum/cc-bar?color=brightgreen"></a>
+  <img alt="Downloads" src="https://img.shields.io/github/downloads/FffPlum/cc-bar/total?color=blue">
+  <a href="https://github.com/FffPlum/cc-bar/releases/latest"><img alt="Latest Downloads" src="https://img.shields.io/github/downloads/FffPlum/cc-bar/latest/total?label=latest%20downloads&color=blue"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/nanvon/cc-bar/releases/latest">下载安装</a> ·
+  <a href="https://github.com/FffPlum/cc-bar/releases/latest">下载安装</a> ·
   <a href="#-服务支持矩阵">服务支持</a> ·
   <a href="#-核心特性">核心特性</a> ·
   <a href="#-数据与隐私安全">安全说明</a> ·
   <a href="#-从源码构建">从源码构建</a> ·
-  <a href="https://github.com/nanvon/cc-bar/issues">问题反馈</a> ·
+  <a href="https://github.com/FffPlum/cc-bar/issues">问题反馈</a> ·
   <a href="README_EN.md">English</a>
 </p>
 
@@ -97,7 +99,7 @@ cc-bar 展示两类数据：**订阅额度**直连各服务官方接口获取剩
 > **运行环境**：macOS 14 (Sonoma) 或更新版本。<br>
 > **前置条件**：相关 AI 编程工具需已在终端或桌面端完成至少一次登录。
 
-1. 进入 [Releases 页面](https://github.com/nanvon/cc-bar/releases/latest) 下载最新的 `CCBar.dmg`（或 `CCBar.app.zip`）。
+1. 进入 [Releases 页面](https://github.com/FffPlum/cc-bar/releases/latest) 下载最新的 `CCBar.dmg`（或 `CCBar.app.zip`）。
 2. 打开 DMG，将 `CCBar.app` 拖入 `/Applications` 文件夹即可。
 
 首次升级到含应用内更新器的版本，需要按上述步骤手动安装一次。此后可在「设置 → 通用 → 检查更新」查看更新内容，点击「下载并安装」后自动完成安装并重新启动。
@@ -141,7 +143,7 @@ cc-bar 展示两类数据：**订阅额度**直连各服务官方接口获取剩
 > 如果你对预编译二进制包有所顾虑，欢迎审阅完整源码并[从源码自主构建](#-从源码构建)。
 
 > [!NOTE]
-> **遇到问题怎么反馈**：打开「设置 → 通用 → 诊断 → 导出诊断日志」，确认提示后会生成一个 zip 并在 Finder 中选中，把它附在 [Issue](https://github.com/nanvon/cc-bar/issues) 里即可。包内的 `summary.txt` 是纯文本，发送前可以自己先打开看一眼。
+> **遇到问题怎么反馈**：打开「设置 → 通用 → 诊断 → 导出诊断日志」，确认提示后会生成一个 zip 并在 Finder 中选中，把它附在 [Issue](https://github.com/FffPlum/cc-bar/issues) 里即可。包内的 `summary.txt` 是纯文本，发送前可以自己先打开看一眼。
 
 ---
 
@@ -170,7 +172,7 @@ SPARKLE_PUBLIC_ED_KEY="你的更新公钥" ./scripts/build.sh
 
 ## 🔗 相关项目
 
-同作者系列工具，共享同一套配额口径与设计语言：
+上游作者的相关项目：
 
 | 项目 | 平台形态 | 技术栈 |
 | :--- | :--- | :--- |

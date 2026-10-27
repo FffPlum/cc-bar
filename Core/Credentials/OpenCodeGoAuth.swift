@@ -32,7 +32,7 @@ nonisolated struct OpenCodeGoAuthSession: Sendable, Equatable {
 /// OpenCode Go 的 API key 与 OpenCode / Pi 里 `opencode-go` provider 用的是同一个，
 /// 只读这些文件，不写回。手动填写的 key 存在 cc-bar 自己的钥匙串项。
 nonisolated enum OpenCodeGoAuth {
-    private static let keychainService = "com.nanvon.ccbar.opencode-go"
+    private static let keychainService = "com.fffplum.ccbar.opencode-go"
     private static let keychainAccount = "primary"
     private static let providerKey = "opencode-go"
 
