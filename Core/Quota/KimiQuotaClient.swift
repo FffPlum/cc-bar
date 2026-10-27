@@ -1,11 +1,14 @@
 import Foundation
 
 /// Kimi Code 订阅额度：`GET {baseURL}/usages`，Bearer 为 CLI 的 OAuth access token
-/// 或官方 API key。两种已知响应形态：
+/// 或官方 API key。已知响应形态：
 /// - 原始计量 `{usages:{limit_5h:{used_ratio,reset_time},limit_7d,limit_month_total,limit_month_code}}`，
 ///   `used_ratio` 是 0～1 的已用比例（0.2 = 已用 20%）；
 /// - 官方规范化 `{kind:"ok",quota:{usages:{limit5h:{usedRatio,resetAt},limit7d,monthTotal,monthCode}}}`；
 ///   也兼容明确的 `code/data` 包装。`boosterWallet` 是余额不是百分比，不参与窗口解析。
+/// - 旧版绝对计数：顶层 `usage` 是周额度，`limits[]` 里 `window.duration=300` 且
+///   `window.timeUnit=TIME_UNIT_MINUTE` 的 `detail` 是 5 小时额度，含 `limit/used/remaining/resetTime`。
+/// - Free 账号可成功返回 `{}`：表示本次没有额度数据，不是解析失败，也不代表剩余 0%。
 nonisolated enum KimiQuotaClient {
     private static let timeout: TimeInterval = 10
 
@@ -49,19 +52,24 @@ nonisolated enum KimiQuotaClient {
 
     /// 主条按 5h → weekly → monthlyTotal → monthlyCode 取第一个可靠窗口，
     /// 剩余窗口按同序填 secondary 与 auxiliary，不重复、不伪造 0%。
-    /// 全部窗口都不可靠时返回 nil，由调用方保留旧快照。
+    /// 新版比例窗口优先，旧版绝对计数窗口只补缺；明确的空响应保留为空快照，
+    /// 有窗口字段却无法解析时返回 nil，由调用方保留旧快照。
     static func parse(root: [String: Any], fetchedAt: Date = Date()) -> QuotaSnapshot? {
+        // kind/code 错误包装先拒绝，不能借旧版 usage/limits 字段成功。
+        if let kind = root["kind"] as? String, kind != "ok" { return nil }
+        if let code = root["code"] as? NSNumber, code.intValue != 0, code.intValue != 200 { return nil }
+
         let usages = extractUsages(from: root)
 
         // 同一窗口接受 snake_case（原始计量）与 camelCase（规范化）两种键名。
-        let fiveHour = parseWindow(
+        var fiveHour = parseWindow(
             usages?["limit_5h"] ?? usages?["limit5h"],
             id: "kimi-five-hour",
             displayName: "5HOUR",
             kind: .fiveHour,
             windowSeconds: 18_000
         )
-        let weekly = parseWindow(
+        var weekly = parseWindow(
             usages?["limit_7d"] ?? usages?["limit7d"],
             id: "kimi-weekly",
             displayName: "WEEKLY",
@@ -83,8 +91,13 @@ nonisolated enum KimiQuotaClient {
             windowSeconds: nil
         )
 
+        // 旧版绝对计数只补缺：新版已有有效窗口时不被覆盖。
+        let legacy = parseLegacy(root: root)
+        if fiveHour == nil { fiveHour = legacy.fiveHour }
+        if weekly == nil { weekly = legacy.weekly }
+
         let ordered = [fiveHour, weekly, monthlyTotal, monthlyCode]
-        guard ordered.contains(where: { $0 != nil }) else { return nil }
+        guard ordered.contains(where: { $0 != nil }) || isExplicitEmptyQuota(root) else { return nil }
 
         // 主条 = 第一个可靠窗口；其余按原序补齐，单个窗口不可靠不影响其他窗口。
         let parsed = ordered.compactMap { $0 }
@@ -111,6 +124,30 @@ nonisolated enum KimiQuotaClient {
     }
 
     // MARK: - 响应形态
+
+    /// 只接受明确的空对象或空 usages 及其既有成功包装。未知字段、钱包余额和
+    /// 损坏的窗口不能伪装成空额度，否则会覆盖上一次可靠快照。
+    private static func isExplicitEmptyQuota(_ root: [String: Any]) -> Bool {
+        if root.isEmpty { return true }
+        if root.count == 1, let usages = root["usages"] as? [String: Any] {
+            return usages.isEmpty
+        }
+        if Set(root.keys) == ["code", "data"],
+           let code = root["code"] as? NSNumber,
+           CFGetTypeID(code) != CFBooleanGetTypeID(),
+           code.doubleValue == 0 || code.doubleValue == 200,
+           let data = root["data"] as? [String: Any] {
+            return isExplicitEmptyQuota(data)
+        }
+        if Set(root.keys) == ["kind", "quota"], root["kind"] as? String == "ok",
+           let quota = root["quota"] as? [String: Any],
+           Set(quota.keys).isSubset(of: ["usages", "extraUsage"]),
+           quota["extraUsage"] == nil || quota["extraUsage"] is NSNull,
+           let usages = quota["usages"] as? [String: Any] {
+            return usages.isEmpty
+        }
+        return false
+    }
 
     /// 从三种形态里取 `usages` 字典：原始 `{usages:...}`、明确 `code/data` 包装、
     /// 规范化 `{kind:"ok",quota:{usages:...}}`。只认这几种，不泛猜其他字段。
@@ -172,6 +209,101 @@ nonisolated enum KimiQuotaClient {
         return nil
     }
 
+    // MARK: - 旧版绝对计数
+
+    /// 旧版响应：顶层 `usage` 是周额度；`limits[]` 里
+    /// `window.duration = 300` 且 `window.timeUnit = TIME_UNIT_MINUTE` 的那条是 5 小时额度。
+    private struct LegacyWindows {
+        var weekly: QuotaLimit?
+        var fiveHour: QuotaLimit?
+    }
+
+    private static func parseLegacy(root: [String: Any]) -> LegacyWindows {
+        var result = LegacyWindows()
+        result.weekly = parseAbsoluteWindow(
+            root["usage"],
+            id: "kimi-weekly",
+            displayName: "WEEKLY",
+            kind: .weekly,
+            windowSeconds: 604_800
+        )
+        guard let limits = root["limits"] as? [[String: Any]] else { return result }
+        for entry in limits {
+            guard isFiveHourWindow(entry["window"]) else { continue }
+            if let window = parseAbsoluteWindow(
+                entry["detail"],
+                id: "kimi-five-hour",
+                displayName: "5HOUR",
+                kind: .fiveHour,
+                windowSeconds: 18_000
+            ) {
+                result.fiveHour = window
+                break
+            }
+        }
+        return result
+    }
+
+    /// 只认 `window.duration == 300` 且 `window.timeUnit == "TIME_UNIT_MINUTE"` 的 5 小时窗口。
+    private static func isFiveHourWindow(_ value: Any?) -> Bool {
+        guard let window = value as? [String: Any] else { return false }
+        guard let timeUnit = window["timeUnit"] as? String, timeUnit == "TIME_UNIT_MINUTE" else { return false }
+        guard let duration = parseCount(window["duration"]), duration == 300 else { return false }
+        return true
+    }
+
+    /// 用 `limit` 与 `used` 计算已用比例；缺 `used` 时用 `remaining` 反推。
+    /// 计数必须是数字或数值字符串，拒绝 bool、非有限、负数，`limit` 必须 > 0。
+    /// `used > limit` 视为超额，比例钳到 100%（剩余为 0）。
+    private static func parseAbsoluteWindow(
+        _ value: Any?,
+        id: String,
+        displayName: String,
+        kind: QuotaLimitKind,
+        windowSeconds: Int?
+    ) -> QuotaLimit? {
+        guard let dict = value as? [String: Any] else { return nil }
+        guard let limit = parseCount(dict["limit"]), limit > 0 else { return nil }
+
+        let used: Double
+        if dict["used"] != nil {
+            guard let parsed = parseCount(dict["used"]) else { return nil }
+            used = parsed
+        } else if let remaining = parseCount(dict["remaining"]) {
+            let derived = limit - remaining
+            guard derived >= 0 else { return nil }
+            used = derived
+        } else {
+            return nil
+        }
+
+        let ratio = min(used / limit, 1)
+        return QuotaLimit(
+            id: id,
+            kind: kind,
+            displayName: displayName,
+            window: QuotaWindow(
+                usedPercent: ratio * 100,
+                resetsAt: parseDate(dict["resetTime"]),
+                windowSeconds: windowSeconds
+            )
+        )
+    }
+
+    /// 绝对计数：JSON number 或数值字符串；拒绝 bool、非有限值和负数。
+    private static func parseCount(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+            let count = number.doubleValue
+            guard count.isFinite, count >= 0 else { return nil }
+            return count
+        }
+        if let string = value as? String, let count = Double(string) {
+            guard count.isFinite, count >= 0 else { return nil }
+            return count
+        }
+        return nil
+    }
+
     private static func parseDate(_ value: Any?) -> Date? {
         guard let string = value as? String, !string.isEmpty else { return nil }
         let formatter = ISO8601DateFormatter()
@@ -180,6 +312,11 @@ nonisolated enum KimiQuotaClient {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: string)
     }
+}
+
+extension QuotaSnapshot {
+    /// Kimi 的成功空响应：保留身份与刷新状态，不展示百分比或触发低额度提醒。
+    var isEmptyKimiQuota: Bool { app == .kimi && allLimits.isEmpty }
 }
 
 // MARK: - 用户信息

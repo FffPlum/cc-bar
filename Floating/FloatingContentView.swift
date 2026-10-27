@@ -14,7 +14,12 @@ struct FloatingContentView: View {
     var body: some View {
         let providers = settings.orderedFloatingProviders.filter {
             settings.effectiveFloatingVisibility(for: $0.app)
+                && ($0.app != .kimi || appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty)
         }
+
+        let managed = settings.isProviderEnabled(.kimi)
+            ? appState.kimiManagedAccounts.filter { $0.showInFloatingHUD && !(appState.kimiManagedMirrorsCLI($0) && settings.effectiveFloatingVisibility(for: .kimi)) }
+            : []
 
         VStack(alignment: .leading, spacing: 7) {
             ForEach(providers) { provider in
@@ -25,7 +30,27 @@ struct FloatingContentView: View {
                     snapshot: appState.quotaSnapshot(for: provider.app)
                 )
             }
-            if providers.isEmpty {
+            ForEach(managed) { account in
+                FloatingRow(logoName: "kimi", fallback: "K", tint: .purple,
+                            snapshot: appState.kimiManagedQuotas[account.id])
+                    .help("\(account.region.displayName) · \(appState.kimiManagedSubtitle(account))")
+            }
+            ForEach(appState.moonshotAccounts.filter(\.showInFloatingHUD)) { account in
+                HStack(spacing: 8) {
+                    Image(systemName: "key.fill").font(.system(size: 12)).foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                    Spacer(minLength: 56)
+                    if let balance = appState.moonshotBalances[account.id] {
+                        Text(MoonshotBalanceFormatter.amount(balance.available, currencyCode: balance.currencyCode))
+                            .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    } else {
+                        Text("—").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if providers.isEmpty
+                && managed.isEmpty
+                && !appState.moonshotAccounts.contains(where: \.showInFloatingHUD) {
                 Text(tr("No services", "未启用任何服务"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -77,7 +102,14 @@ private struct FloatingRow: View {
 
             // Unlimited 没有可填充的比例；留空 bar 位保持各行 tile / 数值三段对齐，
             // 右侧只用一个 ∞ 表达，不再另起一行文字重复同一件事。
-            if isUnlimited {
+            if snapshot?.isEmptyKimiQuota == true {
+                Spacer(minLength: 56)
+                Text("—")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: Self.percentWidth, alignment: .trailing)
+                    .help(tr("No quota data available", "暂无额度数据"))
+            } else if isUnlimited {
                 Spacer(minLength: 56)
 
                 Text("∞")

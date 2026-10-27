@@ -379,6 +379,101 @@ final class KimiUsageIntegrationTests: XCTestCase {
         XCTAssertEqual(renamed.entries.count, 1)
     }
 
+    func testNativeTimingUpgradeRestartRebuildAndDeletedHistoryPreserveUsage() async throws {
+        let env = try UsageTestEnvironment(name: "kimi-native-timing-integration")
+        let share = env.root.appendingPathComponent("kimi-code", isDirectory: true)
+        let session = share.appendingPathComponent("sessions/workspace/session_native_timing", isDirectory: true)
+        let wire = session.appendingPathComponent("agents/main/wire.jsonl")
+        for line in [
+            #"{"type":"context.append_loop_event","agentId":"main","event":{"type":"step.begin","uuid":"step-one","turnId":"turn-one","step":1}}"#,
+            #"{"type":"context.append_loop_event","agentId":"main","event":{"type":"llm.request","kind":"loop","model":"kimi-for-coding","modelAlias":"kimi-code/kimi-for-coding","turnStep":"turn-one.1","time":1792000000000}}"#,
+            #"{"type":"context.append_loop_event","agentId":"main","event":{"type":"usage.record","model":"kimi-code/kimi-for-coding","usage":{"inputOther":100,"output":120,"inputCacheRead":20,"inputCacheCreation":5},"usageScope":"turn","time":1792000000100}}"#,
+            #"{"type":"context.append_loop_event","agentId":"main","event":{"type":"step.end","uuid":"step-one","turnId":"turn-one","step":1,"usage":{"inputOther":100,"output":120,"inputCacheRead":20,"inputCacheCreation":5},"llmFirstTokenLatencyMs":250,"llmStreamDurationMs":2000}}"#,
+        ] {
+            try env.append(line, to: wire)
+        }
+        var roots = env.scanRoots
+        roots.kimiRoots = [share]
+        func service() -> UsageService {
+            UsageService(historyStore: env.store, roots: roots, legacyLocations: env.legacyLocations,
+                         backfillURL: env.backfillURL, cursorCacheDirectory: env.cursorCacheDirectory)
+        }
+        let seeded = service()
+        await env.bootstrap(seeded)
+        await seeded.scanNow()
+
+        var old = try XCTUnwrap(env.store.loadCurrent().snapshot)
+        if var kimi = old.scanState.kimi {
+            kimi.version = 1
+            for conversation in Array(kimi.fileEvents.keys) {
+                for path in Array(kimi.fileEvents[conversation]?.keys ?? [:].keys) {
+                    for index in (kimi.fileEvents[conversation]?[path] ?? []).indices {
+                        kimi.fileEvents[conversation]?[path]?[index].timing = nil
+                    }
+                }
+            }
+            old.scanState.kimi = kimi
+        }
+        for index in old.usageRollup.buckets.indices where old.usageRollup.buckets[index].app == .kimi {
+            old.usageRollup.buckets[index].timing = .zero
+        }
+        for index in old.conversationRollup.buckets.indices where old.conversationRollup.buckets[index].app == .kimi {
+            old.conversationRollup.buckets[index].timing = .zero
+        }
+        old.rebuildBasis?.statsRules[UsageApp.kimi.rawValue] = 1
+        for (app, version) in UsageStatsRules.persisted where app != UsageApp.kimi.rawValue {
+            XCTAssertEqual(old.rebuildBasis?.statsRules[app], version)
+        }
+        XCTAssertEqual(old.rebuildBasis?.statsRules[UsageApp.kimi.rawValue], 1)
+        XCTAssertTrue(old.usageRollup.buckets.filter { $0.app == .kimi }.allSatisfy(\.timing.isEmpty))
+        try env.store.commit(old)
+
+        func assertUpgraded(_ service: UsageService) {
+            let days = service.aggregator.snapshotLocal().filter { $0.app == .kimi }
+            let conversations = service.conversationAggregator.snapshot().buckets.filter { $0.app == .kimi }
+            XCTAssertEqual(days.count, 1)
+            XCTAssertEqual(conversations.count, 1)
+            XCTAssertEqual(days.reduce(0) { $0 + $1.inputTokens + $1.outputTokens + $1.cacheReadTokens + $1.cacheCreationTokens }, 245)
+            XCTAssertEqual(conversations.reduce(0) { $0 + $1.inputTokens + $1.outputTokens + $1.cacheReadTokens + $1.cacheCreationTokens }, 245)
+            XCTAssertEqual(days.reduce(0) { $0 + $1.requestCount }, 1)
+            XCTAssertEqual(conversations.reduce(0) { $0 + $1.requestCount }, 1)
+            for timing in [days.first?.timing, conversations.first?.timing] {
+                XCTAssertEqual(timing?.firstTokenCount, 1)
+                XCTAssertEqual(timing?.firstTokenMs, 250)
+                XCTAssertEqual(timing?.timedOutputTokens, 120)
+                XCTAssertEqual(timing?.generationMs, 2_000)
+                XCTAssertEqual(timing?.estimatedGenerationMs, 0)
+            }
+        }
+
+        let upgraded = service()
+        upgraded.automaticRebuildEnabled = true
+        await env.bootstrap(upgraded)
+        await upgraded.scanNow()
+        assertUpgraded(upgraded)
+        let expectedDays = env.dayVector(upgraded.aggregator.snapshotLocal())
+        let expectedConversations = env.conversationVector(upgraded.conversationAggregator.snapshot().buckets)
+        let committed = try XCTUnwrap(env.store.loadCurrent().snapshot)
+        XCTAssertEqual(committed.scanState.kimi?.version, 2)
+        XCTAssertEqual(committed.rebuildBasis?.statsRules[UsageApp.kimi.rawValue], UsageStatsRules.versions[.kimi])
+
+        let restarted = service()
+        restarted.automaticRebuildEnabled = true
+        await env.bootstrap(restarted)
+        await restarted.scanNow()
+        assertUpgraded(restarted)
+        await restarted.forceRescan()
+        assertUpgraded(restarted)
+        XCTAssertEqual(env.dayVector(restarted.aggregator.snapshotLocal()), expectedDays)
+        XCTAssertEqual(env.conversationVector(restarted.conversationAggregator.snapshot().buckets), expectedConversations)
+
+        try FileManager.default.removeItem(at: session)
+        await restarted.forceRescan()
+        assertUpgraded(restarted)
+        XCTAssertEqual(env.dayVector(restarted.aggregator.snapshotLocal()), expectedDays)
+        XCTAssertEqual(env.conversationVector(restarted.conversationAggregator.snapshot().buckets), expectedConversations)
+    }
+
     private func tokens(_ service: UsageService) -> Int {
         service.aggregator.snapshotLocal().filter { $0.app == .kimi }.reduce(0) { $0 + $1.inputTokens + $1.outputTokens + $1.cacheReadTokens + $1.cacheCreationTokens }
     }

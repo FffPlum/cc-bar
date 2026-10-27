@@ -124,7 +124,17 @@ final class AppState {
     }
     var kimiError: String?
     var kimiEmail: String?
+    var kimiNickname: String?
     var kimiPlanName: String?
+    var kimiDisplaySubtitle: String {
+        guard kimiAccount != nil else { return tr("Not signed in", "未登录") }
+        var parts: [String] = []
+        if !SettingsStore.shared.privacyMode, let nickname = kimiNickname, !nickname.isEmpty {
+            parts.append(nickname)
+        }
+        if let plan = kimiPlanName ?? kimiQuota?.planType, !plan.isEmpty { parts.append(plan) }
+        return parts.isEmpty ? tr("Signed in", "已登录") : parts.joined(separator: " · ")
+    }
     @ObservationIgnored private var kimiRefreshID: UUID?
     @ObservationIgnored private var kimiProfileAttempt: (accountKey: String, at: Date)?
 
@@ -155,6 +165,32 @@ final class AppState {
     var importedCodexSources: [String: QuotaSnapshotSource] = [:]
     var importedCodexErrors: [String: String] = [:]
     var importedCodexRefreshStates: [String: QuotaRefreshState] = [:]
+
+    var kimiManagedAccounts: [KimiManagedAccount] = []
+    var kimiManagedQuotas: [String: QuotaSnapshot] = [:]
+    var kimiManagedSources: [String: QuotaSnapshotSource] = [:]
+    var kimiManagedErrors: [String: String] = [:]
+    var kimiManagedRefreshStates: [String: QuotaRefreshState] = [:]
+    var kimiDeviceAuthorization: KimiDeviceAuthorization?
+    var kimiDeviceLoginError: String?
+    var kimiDeviceLoginInProgress = false
+    @ObservationIgnored var kimiManagedRequestIDs: [String: UUID] = [:]
+    @ObservationIgnored var kimiDeviceLoginTask: Task<Void, Never>?
+    @ObservationIgnored var kimiDeviceLoginID: UUID?
+    @ObservationIgnored var kimiTokenStore: any KimiTokenStore = KimiKeychainStore()
+    @ObservationIgnored var moonshotAPIKeyStore: any MoonshotAPIKeyStore = MoonshotKeychainStore()
+    @ObservationIgnored var accountPersistenceDirectory: URL?
+    var kimiManagedOperationError: String?
+    var moonshotOperationError: String?
+    @ObservationIgnored var kimiDeviceLoginBackoffUntil: Date?
+    @ObservationIgnored var kimiManagedQuotaCacheRecords: [String: QuotaCacheRecord] = [:]
+    @ObservationIgnored var kimiManagedProfileAttempts: [String: Date] = [:]
+
+    var moonshotAccounts: [MoonshotAccount] = []
+    var moonshotBalances: [String: MoonshotBalance] = [:]
+    var moonshotErrors: [String: String] = [:]
+    var moonshotRefreshStates: [String: QuotaRefreshState] = [:]
+    @ObservationIgnored var moonshotRequestIDs: [String: UUID] = [:]
 
     /// 主窗口当前 tab,允许 ⌘1 / ⌘, 等命令从外部驱动切换
     var mainTab: MainTab = .stats
@@ -282,14 +318,17 @@ final class AppState {
     var codexTodayCost: Decimal?
     var claudeTodayCost: Decimal?
 
-    /// OpenAI / Anthropic / Cursor statuspage.io 最新快照,失败时保留上一份。
+    /// OpenAI / Anthropic / Cursor / Kimi Code 官方状态最新快照,失败时保留上一份。
     var codexServiceStatus: ServiceStatus?
     var claudeServiceStatus: ServiceStatus?
     var cursorServiceStatus: ServiceStatus?
-    /// 三家 statuspage 同时抓不到 = 本机出不去网(断网 / 代理挡着),不是三家同时挂了。
+    var kimiServiceStatus: ServiceStatus?
+    /// 原三家 statuspage 同时抓不到 = 本机出不去网(断网 / 代理挡着),不是三家同时挂了。
     /// 失败时旧快照会被保留,UI 必须据此把状态点降级成"未知",
     /// 否则断网期间 Popover 会一直用一个陈旧的绿点声称"服务正常"。
     var serviceStatusUnreachable = false
+    /// Kimi 单独记录失败,不参与原三家的全失败判定。
+    var kimiServiceStatusUnreachable = false
 
     let usageService = UsageService()
     private let scheduler = Scheduler()
@@ -454,6 +493,8 @@ final class AppState {
         loadQuotaHistory()
         loadQuotaCycles()
         reloadImportedCodexAccounts()
+        loadKimiManagedAccounts()
+        loadMoonshotAccounts()
         await usageService.bootstrap(appState: self)
         await loadCodex()
         maybeShowKeychainPrompt()
@@ -600,8 +641,11 @@ final class AppState {
         }
         if plan.refreshKimi {
             await loadKimi()
-            await loadKimiQuota(reason: reason)
-            await loadKimiProfileIfNeeded()
+            if kimiAccount != nil || kimiManagedAccounts.isEmpty {
+                await loadKimiQuota(reason: reason)
+                await loadKimiProfileIfNeeded()
+            }
+            await loadAllKimiManagedQuotas(reason: reason)
         }
         if plan.refreshImported {
             await loadAllImportedCodexQuotas(
@@ -609,28 +653,33 @@ final class AppState {
                 canMirrorPrimary: plan.canMirrorPrimary
             )
         }
+        await loadAllMoonshotBalances(reason: reason)
         logQuotaSummary()
         // 批次 C：本轮标脏的额度文件统一落盘（每文件每轮最多写一次）
         scheduleQuotaPersistenceFlush()
     }
 
-    /// 拉取 OpenAI / Anthropic / Cursor statuspage 状态。失败保留旧快照,不清空。
-    /// 三个请求并发,任意一个失败不影响其他;三个全失败则置 `serviceStatusUnreachable`,
-    /// 让 UI 把保留下来的旧状态点降级成"未知"而不是继续显示"服务正常"。
+    /// 拉取 OpenAI / Anthropic / Cursor / Kimi Code 官方状态。失败保留旧快照,不清空。
+    /// 四个请求并发,任意一个失败不影响其他;原三家全失败仍单独置 `serviceStatusUnreachable`,
+    /// Kimi 使用自己的失败标记,避免互相覆盖成功的状态。
     func refreshServiceStatus() async {
         guard beginStateOperation() else { return }
         defer { activeStateOperations -= 1 }
         async let codex = Self.fetchServiceStatus(url: ServiceStatusClient.openAIStatusURL, tag: "openai")
         async let claude = Self.fetchServiceStatus(url: ServiceStatusClient.anthropicStatusURL, tag: "anthropic")
         async let cursor = Self.fetchServiceStatus(url: ServiceStatusClient.cursorStatusURL, tag: "cursor")
+        async let kimi = Self.fetchKimiServiceStatus()
         let codexResult = await codex
         let claudeResult = await claude
         let cursorResult = await cursor
+        let kimiResult = await kimi
         if let codexResult { codexServiceStatus = codexResult }
         if let claudeResult { claudeServiceStatus = claudeResult }
         if let cursorResult { cursorServiceStatus = cursorResult }
+        if let kimiResult { kimiServiceStatus = kimiResult }
         serviceStatusUnreachable =
             codexResult == nil && claudeResult == nil && cursorResult == nil
+        kimiServiceStatusUnreachable = kimiResult == nil
     }
 
     private static func fetchServiceStatus(url: URL, tag: String) async -> ServiceStatus? {
@@ -638,6 +687,15 @@ final class AppState {
             return try await ServiceStatusClient.fetch(from: url)
         } catch {
             AppLog.warn(.app, "service status \(tag) fetch failed: \(Redact.error(error))")
+            return nil
+        }
+    }
+
+    private static func fetchKimiServiceStatus() async -> ServiceStatus? {
+        do {
+            return try await ServiceStatusClient.fetchKimiCode()
+        } catch {
+            AppLog.warn(.app, "service status kimi fetch failed: \(Redact.error(error))")
             return nil
         }
     }
@@ -655,6 +713,7 @@ final class AppState {
     func prepareForTermination() async throws {
         guard !isPreparingForTermination else { throw AppTerminationError.busy }
         terminationRequested = true
+        cancelKimiDeviceLogin()
         quotaNotifications.suspendForTermination()
         scheduler.suspendForTermination()
         UsageLogWatcher.shared.suspendForTermination()
@@ -1418,9 +1477,9 @@ final class AppState {
         )
     }
 
-    private func recordKimiQuotaHistory(snapshot: QuotaSnapshot, sampledAt: Date) {
+    func recordKimiQuotaHistory(snapshot: QuotaSnapshot, sampledAt: Date, managedAccountKey: String? = nil) {
         recordQuotaHistory(
-            accountKey: QuotaHistoryAccountKey.kimiPrimary(accountKey: kimiAccount?.accountKey),
+            accountKey: QuotaHistoryAccountKey.kimiPrimary(accountKey: managedAccountKey ?? kimiAccount?.accountKey),
             app: .kimi,
             kind: .kimiPrimary,
             snapshot: snapshot,
@@ -1438,7 +1497,7 @@ final class AppState {
         )
     }
 
-    private func recordQuotaHistory(
+    func recordQuotaHistory(
         accountKey: String,
         app: QuotaApp,
         kind: QuotaHistoryAccountKind,
@@ -2011,6 +2070,7 @@ final class AppState {
         guard let next else {
             kimiAccount = nil
             kimiEmail = nil
+            kimiNickname = nil
             kimiPlanName = nil
             kimiError = tr("Sign in with Kimi Code CLI first", "请先在 Kimi Code CLI 中登录")
             return
@@ -2028,6 +2088,7 @@ final class AppState {
             kimiRefreshState = QuotaRefreshState()
             quotaCache.kimi = nil
             kimiEmail = nil
+            kimiNickname = nil
             kimiPlanName = nil
             kimiProfileAttempt = nil
             saveQuotaCache()
@@ -2128,6 +2189,7 @@ final class AppState {
            kimiAccount?.accountKey == auth.accountKey, kimiAccount?.accessToken == auth.accessToken,
            auth.userID == nil || profile.userID == auth.userID {
             kimiEmail = profile.email
+            kimiNickname = profile.nickname
             kimiPlanName = profile.userLevelName
             if var snapshot = kimiQuota, let plan = profile.userLevelName {
                 snapshot.planType = plan
@@ -2990,7 +3052,7 @@ final class AppState {
         }
     }
 
-    private func backoffMessage(until: Date) -> String {
+    func backoffMessage(until: Date) -> String {
         let remaining = relativeAge(until: until)
         // 不说"限流":那是服务端视角的词。用户看到的事实是请求太频繁、正在等。
         return tr(

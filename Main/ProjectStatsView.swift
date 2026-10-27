@@ -757,11 +757,12 @@ private struct ProjectDetailView: View {
                         ) { app in
                             ServiceTile(app: app, size: 12)
                         }
-                        Text(model.model)
+                        Text(ModelDisplayName.text(model.model))
                             .font(.system(size: 11.5, design: .monospaced))
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .layoutPriority(1)
+                            .nativeHover(ModelDisplayName.text(model.model))
                         Spacer(minLength: 6)
                         Text(metric == .tokens ? StatsFormatter.cost(model.totals.costUSD) : StatsFormatter.compactToken(model.totals.totalTokens))
                             .font(.system(size: 10.5))

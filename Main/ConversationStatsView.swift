@@ -394,7 +394,9 @@ private struct ConversationListRow: View {
                     .fixedSize()
                     .help(projectHelp)
                 Text("·")
-                Text(summary.models.joined(separator: ", ")).lineLimit(1)
+                Text(ModelDisplayName.list(summary.models).joined(separator: ", "))
+                    .lineLimit(1)
+                    .nativeHover(ModelDisplayName.list(summary.models).joined(separator: ", "))
                 UsageSpeedBadge(summary: summary.speed.summary)
             }
             .font(.system(size: 10.5))
@@ -678,10 +680,11 @@ private struct ConversationDetailView: View {
                 ForEach(detail.models) { item in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
-                            Text(item.model)
+                            Text(ModelDisplayName.text(item.model))
                                 .font(.system(size: 11.5, design: .monospaced))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
+                                .nativeHover(ModelDisplayName.text(item.model))
                             UsageSpeedBadge(summary: item.speed.summary)
                             Spacer(minLength: 6)
                             Text(StatsFormatter.compactToken(item.totals.totalTokens))

@@ -339,6 +339,7 @@ enum CompositionAction: Equatable {
     case none
     case selectService(UsageApp)
     case expandProvider(ModelProvider)
+    case expandModel(String)
     case openProject(String)
     case openUnattributed
 }
@@ -356,13 +357,15 @@ struct CompositionRow: Identifiable {
     let action: CompositionAction
     /// 提供商行就地展开的模型明细。
     var providerModels: [ProviderModelRow] = []
+    /// 模型归并行下保留每个服务的原始模型标签。
+    var modelSources: [ProviderModelRow] = []
     /// 模型行的来源服务 / 提供商行的来源服务。
     var apps: [UsageApp] = []
     /// 项目行的归属状态；特殊项目（无明确项目 / 系统任务）的名称与副标由视图本地化。
     var projectStatus: ConversationProjectStatus?
 }
 
-/// 四个维度都全部列出、不合并（需求 §3.1），行多时由视图在列表区内滚动。
+/// 四个维度均列出全部行；模型维度归并已确认的同一型号并保留来源，行多时在列表区内滚动。
 /// 都按排行口径降序，同值按名称；「其他」提供商、特殊项目与未归属不参与排名，固定在最后。
 enum CompositionBuilder {
     static func serviceRows(
@@ -429,16 +432,19 @@ enum CompositionBuilder {
             var speed = UsageSpeedBreakdown()
             var apps: Set<UsageApp> = []
             var providers: Set<ModelProvider> = []
+            var sources: [ProviderModelRow] = []
         }
         var merged: [String: Merged] = [:]
         for (app, models) in modelsByApp {
             for (model, item) in models {
-                var value = merged[model] ?? Merged()
+                let identity = ModelIdentity.parse(model).model
+                var value = merged[identity] ?? Merged()
                 value.totals.add(item.totals)
                 value.speed.merge(item.speed)
                 value.apps.insert(app)
                 value.providers.insert(ModelProvider.resolve(app: app, model: model))
-                merged[model] = value
+                value.sources.append(ProviderModelRow(model: model, app: app, totals: item.totals, speed: item.speed))
+                merged[identity] = value
             }
         }
         let sorted = merged.sorted { lhs, rhs in
@@ -457,7 +463,11 @@ enum CompositionBuilder {
                 color: .rank(index),
                 totals: element.value.totals,
                 speed: element.value.speed,
-                action: .none,
+                action: .expandModel(element.key),
+                modelSources: element.value.sources.sorted {
+                    if $0.app != $1.app { return $0.app.rawValue < $1.app.rawValue }
+                    return $0.model < $1.model
+                },
                 apps: apps
             )
         }

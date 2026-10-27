@@ -25,8 +25,9 @@ final class OpenCodeGoQuotaTests: XCTestCase {
         XCTAssertEqual(desc?.supportsFloatingHUD, true)
 
         let order = QuotaProviderDescriptor.allProviders.map(\.app)
-        XCTAssertEqual(order.last, .opencodeGo)
+        XCTAssertEqual(order.last, .kimi)
         XCTAssertEqual(order.firstIndex(of: .opencodeGo), order.firstIndex(of: .commandCode).map { $0 + 1 })
+        XCTAssertEqual(order.firstIndex(of: .kimi), order.firstIndex(of: .opencodeGo).map { $0 + 1 })
     }
 
     func testDefaultsMatchCommandCode() {

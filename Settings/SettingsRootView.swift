@@ -280,7 +280,7 @@ struct SettingsRootView: View {
     }
 
     /// 每一行整行可拖（手柄只做提示）。
-    /// Codex 行和它下面的其他 Codex 账号是一块，一起抬起、一起移动。
+    /// 同一厂商的服务行、账户行与添加入口作为一块抬起和移动，视觉上仍同级对齐。
     @ViewBuilder
     private func serviceBlock(
         _ entry: ServiceEntry,
@@ -297,6 +297,10 @@ struct SettingsRootView: View {
 
             if entry.id == .quota(.codex) {
                 ImportedCodexAccountsView()
+            }
+            if entry.id == .quota(.kimi) {
+                KimiManagedAccountsSettingsView()
+                MoonshotAccountsSettingsView()
             }
         }
     }
@@ -1096,7 +1100,7 @@ struct SettingsRootView: View {
                 signedIn: appState.commandCodeAccount != nil
             )
         case .kimi:
-            return (email: appState.kimiEmail, plan: appState.kimiPlanName, signedIn: appState.kimiAccount != nil)
+            return (email: appState.kimiNickname, plan: appState.kimiPlanName, signedIn: appState.kimiAccount != nil)
         case .opencodeGo:
             // Go 没有可读的账号信息，检测到 key 即视为已登录，副标题显示「已登录」。
             return (email: nil, plan: nil, signedIn: appState.opencodeGoAccount != nil)
@@ -1208,7 +1212,8 @@ struct SettingsRootView: View {
             sourceLines.append(tr("\(provider.title) does not provide usage data.", "\(provider.title) 不提供用量数据。"))
             isDetected = info.signedIn
         case .kimi:
-            isDetected = info.signedIn || localRecordState(for: .kimi) != .missing
+            isDetected = appState.hasKimiSubscriptionAccount || !appState.moonshotAccounts.isEmpty
+                || localRecordState(for: .kimi) != .missing
             sourceLines.append(tr("Usage: reads local Kimi Code CLI conversation records and estimates token costs on this Mac.",
                                   "用量：读取本机 Kimi Code CLI 对话记录，统计 Token 并估算参考费用。"))
         case .opencodeGo:
@@ -1919,6 +1924,7 @@ private enum LocalRecordState: Equatable {
 }
 
 private struct ServiceRow: View {
+    @Environment(AppState.self) private var appState
     let entry: ServiceEntry
     let floatingHUDGloballyEnabled: Bool
     /// 左侧重排抓手的抬起态；拖动手势由列表挂在整行上。
@@ -1944,10 +1950,15 @@ private struct ServiceRow: View {
             .padding(.trailing, ServiceRowMetrics.tileGap)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(entry.title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(entry.isDetected ? Color.primary : Color.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(entry.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(entry.isDetected ? Color.primary : Color.secondary)
+                        .lineLimit(1)
+                    if entry.id == .quota(.kimi), appState.kimiAccount != nil {
+                        KimiCurrentAccountBadge()
+                    }
+                }
                 subtitleLine
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1997,6 +2008,12 @@ private struct ServiceRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .help(entry.subtitle)
+            if entry.id == .quota(.kimi), let region = appState.kimiCLIRegion {
+                Text("· \(region.displayName)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
             if let errorDetail = entry.errorDetail {
                 Text("· \(tr("Refresh failed", "刷新失败"))")
                     .font(.system(size: 11))
@@ -2109,7 +2126,7 @@ private struct ServiceInfoButton: View {
 
 /// 矩阵单元格里的 13pt 复选框，没有文字标签（列头说明含义），`title` 只作无障碍标签。
 /// 整个单元格可点，不只是 13pt 的框。
-private struct DisplayDestinationCheckbox: View {
+struct DisplayDestinationCheckbox: View {
     let title: String
     @Binding var isOn: Bool
     var disabled: Bool = false

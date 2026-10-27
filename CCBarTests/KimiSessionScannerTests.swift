@@ -321,6 +321,307 @@ final class KimiSessionScannerTests: XCTestCase {
         XCTAssertEqual(result.refreshedConversationIDs, [])
     }
 
+    // MARK: - 新版原生请求计时
+
+    func testNativeStepTimingRoundTripsWithoutChangingUsage() throws {
+        let root = try makeRoot("kimi-code")
+        let wire = try makeKimiCodeSession(root, id: "session_timing", workspace: "wd_timing")
+        try appendLines(wire, nativeStep(output: 120, firstTokenMs: 250, generationMs: 2_000))
+
+        let result = KimiSessionScanner.scan(previous: nil, roots: [root])
+        XCTAssertEqual(result.entries.count, 1)
+        let entry = try XCTUnwrap(result.entries.first)
+        XCTAssertEqual(entry.requestCount, 1)
+        XCTAssertEqual(entry.inputTokens, 100)
+        XCTAssertEqual(entry.outputTokens, 120)
+        XCTAssertEqual(entry.cacheReadTokens, 20)
+        XCTAssertEqual(entry.cacheCreationTokens, 5)
+        XCTAssertEqual(entry.timing, RequestTiming(measuredFirstTokenMs: 250, generationMs: 2_000))
+        XCTAssertEqual(entry.timing?.isEstimated, false)
+        XCTAssertTrue(UsageApp.kimi.supportsGenerationTiming)
+        XCTAssertTrue(UsageApp.kimi.supportsOutputSpeed)
+
+        let aggregator = UsageAggregator()
+        aggregator.ingestLocal(result.entries)
+        let timing = try XCTUnwrap(aggregator.snapshotLocal().first?.timing)
+        XCTAssertEqual(timing.averageFirstTokenSeconds, 0.25)
+        XCTAssertEqual(timing.outputTokensPerSecond, 60)
+        XCTAssertEqual(timing.estimatedGenerationMs, 0)
+
+        let state = try XCTUnwrap(result.newState)
+        XCTAssertEqual(state.version, 2)
+        let restored = try JSONDecoder().decode(
+            KimiSessionScanner.State.self, from: JSONEncoder().encode(state)
+        )
+        XCTAssertEqual(KimiSessionScanner.committedEntries(from: restored), result.entries)
+        let unchanged = KimiSessionScanner.scan(previous: restored, roots: [root])
+        XCTAssertTrue(unchanged.entries.isEmpty)
+        XCTAssertEqual(unchanged.newState, restored)
+    }
+
+    func testSameTokensInDifferentStepsKeepTheirOwnTimingAndReplayDoesNotDuplicate() throws {
+        let root = try makeRoot("kimi-code")
+        let wire = try makeKimiCodeSession(root, id: "session_steps", workspace: "wd_steps")
+        let first = nativeStep(step: 1, uuid: "step-one", time: 1_789_430_400_000,
+                               firstTokenMs: 100, generationMs: 1_000)
+        let second = nativeStep(step: 2, uuid: "step-two", time: 1_789_430_401_000,
+                                firstTokenMs: 300, generationMs: 3_000)
+        try appendLines(wire, first + second + [second[3]])
+
+        let result = KimiSessionScanner.scan(previous: nil, roots: [root])
+        XCTAssertEqual(result.entries.count, 2)
+        XCTAssertEqual(result.entries.map(\.requestCount), [1, 1])
+        XCTAssertEqual(result.entries[0].timing, RequestTiming(measuredFirstTokenMs: 100, generationMs: 1_000))
+        XCTAssertEqual(result.entries[1].timing, RequestTiming(measuredFirstTokenMs: 300, generationMs: 3_000))
+        XCTAssertEqual(KimiSessionScanner.committedEntries(from: try XCTUnwrap(result.newState)).count, 2)
+    }
+
+    func testRetryOtherKindMismatchAmbiguityAndInvalidTimingKeepUsageOnly() throws {
+        let root = try makeRoot("kimi-code")
+        let wire = try makeKimiCodeSession(root, id: "session_reject", workspace: "wd_reject")
+        var lines: [String] = []
+        let retry = nativeStep(step: 1, uuid: "retry", time: 1_789_430_400_000)
+        lines += retry[0...1] + [retry[1]] + retry[2...3]
+        lines += nativeStep(step: 2, uuid: "other-kind", time: 1_789_430_401_000, requestKind: "title")
+        lines += nativeStep(step: 3, uuid: "mismatch", time: 1_789_430_402_000, endInput: 101)
+        lines += nativeStep(step: 4, uuid: "invalid", time: 1_789_430_403_000, firstTokenMs: -1)
+        lines += nativeStep(step: 5, uuid: "missing", time: 1_789_430_404_000, generationMs: nil)
+        let ambiguous = nativeStep(step: 6, uuid: "ambiguous", time: 1_789_430_405_000)
+        let secondUsage = ambiguous[2].replacingOccurrences(of: #""output":120"#, with: #""output":121"#)
+        lines += ambiguous[0...2] + [secondUsage] + [ambiguous[3]]
+        try appendLines(wire, lines)
+
+        let result = KimiSessionScanner.scan(previous: nil, roots: [root])
+        XCTAssertEqual(result.entries.count, 7)
+        XCTAssertEqual(result.entries.reduce(0) { $0 + $1.requestCount }, 7)
+        XCTAssertTrue(result.entries.allSatisfy { $0.timing == nil })
+    }
+
+    func testLenientUsageAccountingIsIndependentOfStrictTimingValidation() throws {
+        let root = try makeRoot("kimi-code")
+        let wire = try makeKimiCodeSession(root, id: "session_lenient_usage", workspace: "wd_lenient_usage")
+        var missingInput = nativeStep(step: 1, uuid: "missing-input", time: 1_789_430_400_000,
+                                      cacheRead: 0, cacheCreation: 0)
+        missingInput[2] = missingInput[2].replacingOccurrences(of: #""inputOther":100,"#, with: "")
+        var negativeCache = nativeStep(step: 2, uuid: "negative-cache", time: 1_789_430_401_000,
+                                       cacheCreation: 0)
+        negativeCache[2] = negativeCache[2].replacingOccurrences(
+            of: #""inputCacheRead":20"#, with: #""inputCacheRead":-20"#
+        )
+        try appendLines(wire, missingInput + negativeCache)
+
+        let result = KimiSessionScanner.scan(previous: nil, roots: [root])
+        XCTAssertEqual(result.entries.count, 2)
+        XCTAssertEqual(result.entries.map { $0.inputTokens + $0.outputTokens + $0.cacheReadTokens + $0.cacheCreationTokens }, [120, 220])
+        XCTAssertEqual(result.entries.map(\.requestCount), [1, 1])
+        XCTAssertTrue(result.entries.allSatisfy { $0.timing == nil })
+    }
+
+    func testMalformedNativeNumbersKeepUsageAndMissingEndCacheStaysCompatible() throws {
+        let root = try makeRoot("kimi-code")
+        let wire = try makeKimiCodeSession(root, id: "session_numbers", workspace: "wd_numbers")
+        var lines: [String] = []
+
+        var boolTiming = nativeStep(step: 1, uuid: "bool-timing", time: 1_789_430_400_000)
+        boolTiming[3] = boolTiming[3].replacingOccurrences(
+            of: #""llmFirstTokenLatencyMs":100"#, with: #""llmFirstTokenLatencyMs":true"#
+        )
+        lines += boolTiming
+
+        var fractionalStep = nativeStep(step: 2, uuid: "fractional-step", time: 1_789_430_401_000)
+        for index in [0, 3] {
+            fractionalStep[index] = fractionalStep[index].replacingOccurrences(of: #""step":2"#, with: #""step":2.5"#)
+        }
+        lines += fractionalStep
+
+        var boolToken = nativeStep(step: 3, uuid: "bool-token", time: 1_789_430_402_000, output: 0)
+        boolToken[3] = boolToken[3].replacingOccurrences(of: #""output":0"#, with: #""output":false"#)
+        lines += boolToken
+
+        var fractionalToken = nativeStep(step: 4, uuid: "fractional-token", time: 1_789_430_403_000)
+        fractionalToken[3] = fractionalToken[3].replacingOccurrences(of: #""output":120"#, with: #""output":120.5"#)
+        lines += fractionalToken
+
+        var negativeToken = nativeStep(step: 5, uuid: "negative-token", time: 1_789_430_404_000, output: 0)
+        negativeToken[3] = negativeToken[3].replacingOccurrences(of: #""output":0"#, with: #""output":-1"#)
+        lines += negativeToken
+
+        var missingCache = nativeStep(step: 6, uuid: "missing-cache", time: 1_789_430_405_000,
+                                      cacheRead: 0, cacheCreation: 0, generationMs: 6_000)
+        missingCache[3] = missingCache[3]
+            .replacingOccurrences(of: #","inputCacheRead":0"#, with: "")
+            .replacingOccurrences(of: #","inputCacheCreation":0"#, with: "")
+        lines += missingCache
+        try appendLines(wire, lines)
+
+        let result = KimiSessionScanner.scan(previous: nil, roots: [root])
+        XCTAssertEqual(result.entries.count, 6)
+        XCTAssertEqual(result.entries.compactMap(\.timing), [
+            RequestTiming(measuredFirstTokenMs: 100, generationMs: 6_000),
+        ])
+    }
+
+    func testNativeTimingIsIsolatedByFileAndAgent() throws {
+        let root = try makeRoot("kimi-code")
+        let directory = try makeKimiCodeSessionDirectory(root, id: "session_agents", workspace: "wd_agents")
+        let main = directory.appendingPathComponent("agents/main/wire.jsonl")
+        let child = directory.appendingPathComponent("agents/child/wire.jsonl")
+        let valid = nativeStep(agent: "main", step: 1, uuid: "main-step", time: 1_789_430_400_000,
+                               firstTokenMs: 100, generationMs: 1_000)
+        var wrongAgentEnd = nativeStep(agent: "main", step: 2, uuid: "wrong-agent", time: 1_789_430_401_000)
+        wrongAgentEnd[3] = wrongAgentEnd[3].replacingOccurrences(
+                of: #""agentId":"main""#,
+                with: #""agentId":"child""#
+        )
+        try appendLines(main, valid + wrongAgentEnd)
+        try appendLines(child, nativeStep(agent: "child", step: 1, uuid: "child-step",
+                                          time: 1_789_430_402_000, firstTokenMs: 300, generationMs: 3_000))
+
+        let result = KimiSessionScanner.scan(previous: nil, roots: [root])
+        XCTAssertEqual(result.entries.count, 3)
+        let timed = result.entries.compactMap(\.timing)
+        XCTAssertEqual(timed.count, 2)
+        XCTAssertEqual(Set(timed.map(\.generationMs)), [1_000, 3_000])
+    }
+
+    func testInterleavedAgentsWithSameTurnStepKeepIndependentTiming() throws {
+        let root = try makeRoot("kimi-code")
+        let wire = try makeKimiCodeSession(root, id: "session_interleaved", workspace: "wd_interleaved")
+        let main = nativeStep(agent: "main", step: 1, uuid: "main-step", time: 1_789_430_400_000,
+                              firstTokenMs: 100, generationMs: 1_000)
+        let child = nativeStep(agent: "child", step: 1, uuid: "child-step", time: 1_789_430_401_000,
+                               output: 240, firstTokenMs: 300, generationMs: 3_000)
+        try appendLines(wire, [
+            main[0], child[0], main[1], child[1], main[2], child[2], child[3], main[3],
+        ])
+
+        let result = KimiSessionScanner.scan(previous: nil, roots: [root])
+        XCTAssertEqual(result.entries.count, 2)
+        XCTAssertEqual(result.entries.first { $0.outputTokens == 120 }?.timing,
+                       RequestTiming(measuredFirstTokenMs: 100, generationMs: 1_000))
+        XCTAssertEqual(result.entries.first { $0.outputTokens == 240 }?.timing,
+                       RequestTiming(measuredFirstTokenMs: 300, generationMs: 3_000))
+    }
+
+    func testWrongAgentEndNeitherClaimsNorDiscardsPendingStep() throws {
+        let root = try makeRoot("kimi-code")
+        let wire = try makeKimiCodeSession(root, id: "session_wrong_agent", workspace: "wd_wrong_agent")
+        let lines = nativeStep(step: 1, uuid: "shared-step", firstTokenMs: 200, generationMs: 2_000)
+        let wrongAgentEnd = lines[3].replacingOccurrences(of: #""agentId":"main""#, with: #""agentId":"child""#)
+        try appendLines(wire, Array(lines.prefix(3)) + [wrongAgentEnd])
+
+        let first = KimiSessionScanner.scan(previous: nil, roots: [root])
+        XCTAssertEqual(first.entries.count, 1)
+        XCTAssertNil(first.entries.first?.timing)
+
+        try appendLines(wire, [lines[3]])
+        let second = KimiSessionScanner.scan(previous: first.newState, roots: [root])
+        XCTAssertEqual(second.entries.count, 1)
+        XCTAssertEqual(second.entries.first?.timing,
+                       RequestTiming(measuredFirstTokenMs: 200, generationMs: 2_000))
+    }
+
+    func testStepEndWrittenLaterRefreshesContributionWithTiming() throws {
+        let root = try makeRoot("kimi-code")
+        let wire = try makeKimiCodeSession(root, id: "session_delayed", workspace: "wd_delayed")
+        let lines = nativeStep(firstTokenMs: 200, generationMs: 2_000)
+        try appendLines(wire, Array(lines.prefix(3)))
+        let first = KimiSessionScanner.scan(previous: nil, roots: [root])
+        XCTAssertEqual(first.entries.count, 1)
+        XCTAssertNil(first.entries.first?.timing)
+
+        try appendLines(wire, [lines[3]])
+        let second = KimiSessionScanner.scan(previous: first.newState, roots: [root])
+        XCTAssertEqual(second.refreshedConversationIDs, ["session_delayed"])
+        XCTAssertEqual(second.entries.count, 1)
+        XCTAssertEqual(second.entries.first?.timing, RequestTiming(measuredFirstTokenMs: 200, generationMs: 2_000))
+    }
+
+    func testStoredEventFromOldCacheDecodesWithoutTiming() throws {
+        let root = try makeRoot("kimi-code")
+        let wire = try makeKimiCodeSession(root, id: "session_old_event", workspace: "wd_old_event")
+        try appendLines(wire, nativeStep())
+        let state = try XCTUnwrap(KimiSessionScanner.scan(previous: nil, roots: [root]).newState)
+        let event = try XCTUnwrap(state.fileEvents["session_old_event"]?.values.first?.first)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(event)) as? [String: Any]
+        )
+        object.removeValue(forKey: "timing")
+        let decoded = try JSONDecoder().decode(
+            KimiSessionScanner.StoredEvent.self, from: JSONSerialization.data(withJSONObject: object)
+        )
+        XCTAssertNil(decoded.timing)
+        XCTAssertEqual(decoded.signature, event.signature)
+    }
+
+    func testV1UpgradePreservesDeletedHistoryAndOwnershipButRereadsLiveFiles() throws {
+        let root = try makeRoot("kimi-code")
+        let deletedWire = try makeKimiCodeSession(root, id: "session_deleted", workspace: "wd_upgrade")
+        let inherited = nativeStep(step: 1, uuid: "deleted-step", time: 1_789_430_400_000)
+        try appendLines(deletedWire, inherited)
+
+        let liveDirectory = try makeKimiCodeSessionDirectory(root, id: "session_live", workspace: "wd_upgrade")
+        let liveMain = liveDirectory.appendingPathComponent("agents/main/wire.jsonl")
+        let liveChild = liveDirectory.appendingPathComponent("agents/child/wire.jsonl")
+        try appendLines(liveMain, nativeStep(agent: "main", step: 1, uuid: "live-main",
+                                             time: 1_789_430_401_000, firstTokenMs: 200, generationMs: 2_000))
+        try appendLines(liveChild, nativeStep(agent: "child", step: 1, uuid: "live-child",
+                                              time: 1_789_430_402_000))
+        var v1 = try XCTUnwrap(KimiSessionScanner.scan(previous: nil, roots: [root]).newState)
+        v1.version = 1
+        for conversation in Array(v1.fileEvents.keys) {
+            for path in Array(v1.fileEvents[conversation]?.keys ?? [:].keys) {
+                for index in (v1.fileEvents[conversation]?[path] ?? []).indices {
+                    v1.fileEvents[conversation]?[path]?[index].timing = nil
+                }
+            }
+        }
+        try FileManager.default.removeItem(at: deletedWire.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent())
+        try FileManager.default.removeItem(at: liveChild.deletingLastPathComponent())
+
+        let fork = try makeKimiCodeSession(root, id: "session_fork", workspace: "wd_upgrade")
+        try appendLines(fork, inherited + nativeStep(step: 2, uuid: "fork-new", time: 1_789_430_403_000,
+                                                     firstTokenMs: 400, generationMs: 4_000))
+        let upgraded = KimiSessionScanner.scan(previous: v1, roots: [root])
+        XCTAssertTrue(upgraded.isComplete)
+        XCTAssertEqual(upgraded.newState?.version, 2)
+        XCTAssertEqual(upgraded.filesRead, 2, "现存 main 与 fork 即使签名未变也必须重读")
+        XCTAssertEqual(upgraded.refreshedConversationIDs, ["session_fork", "session_live"])
+        XCTAssertEqual(upgraded.entries.count, 3, "删除源的历史不在刷新结果中，fork 继承记录也不重计")
+        XCTAssertNotNil(upgraded.entries.first {
+            $0.conversationKey == "kimi:session_live"
+                && $0.timestamp == Date(timeIntervalSince1970: 1_789_430_401)
+        }?.timing)
+        XCTAssertNotNil(upgraded.newState?.conversations["session_deleted"])
+        XCTAssertNotNil(upgraded.newState?.seenByConversation["session_deleted"])
+        XCTAssertTrue(upgraded.newState?.fileEvents["session_live"]?.keys.contains {
+            $0.hasSuffix("/agents/child/wire.jsonl")
+        } == true)
+
+        let committed = KimiSessionScanner.committedEntries(from: try XCTUnwrap(upgraded.newState))
+        XCTAssertEqual(committed.count, 4)
+        XCTAssertEqual(committed.filter { $0.conversationKey == "kimi:session_deleted" }.count, 1)
+        XCTAssertEqual(committed.filter { $0.conversationKey == "kimi:session_fork" }.count, 1)
+        XCTAssertEqual(committed.filter { $0.conversationKey == "kimi:session_live" }.count, 2)
+        XCTAssertNil(committed.first { $0.conversationKey == "kimi:session_deleted" }?.timing)
+    }
+
+    func testV1UpgradeReadFailureDoesNotAdvanceStateVersionOrSignature() throws {
+        let root = try makeRoot("kimi-code")
+        let wire = try makeKimiCodeSession(root, id: "session_upgrade_fail", workspace: "wd_upgrade_fail")
+        try appendLines(wire, nativeStep())
+        var v1 = try XCTUnwrap(KimiSessionScanner.scan(previous: nil, roots: [root]).newState)
+        v1.version = 1
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: wire.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: wire.path) }
+
+        let result = KimiSessionScanner.scan(previous: v1, roots: [root])
+        XCTAssertFalse(result.isComplete)
+        XCTAssertEqual(result.newState?.version, 1)
+        XCTAssertEqual(result.newState?.conversations, v1.conversations)
+        XCTAssertTrue(result.entries.isEmpty)
+    }
+
     // MARK: - 旧版（~/.kimi）
 
     func testLegacyStatusUpdateCacheAccountingAndDedup() throws {
@@ -467,6 +768,28 @@ final class KimiSessionScannerTests: XCTestCase {
             )
             try data.write(to: url)
         }
+    }
+
+    private func nativeStep(
+        agent: String = "main",
+        step: Int = 1,
+        uuid: String = "native-step",
+        time: Int64 = 1_789_430_400_000,
+        endInput: Int = 100,
+        output: Int = 120,
+        cacheRead: Int = 20,
+        cacheCreation: Int = 5,
+        requestKind: String = "loop",
+        firstTokenMs: Int = 100,
+        generationMs: Int? = 2_000
+    ) -> [String] {
+        let generation = generationMs.map { "\"llmStreamDurationMs\":\($0)," } ?? ""
+        return [
+            #"{"type":"context.append_loop_event","agentId":"\#(agent)","event":{"type":"step.begin","uuid":"\#(uuid)","turnId":"0","step":\#(step),"time":\#(time)}}"#,
+            #"{"type":"context.append_loop_event","agentId":"\#(agent)","event":{"type":"llm.request","kind":"\#(requestKind)","model":"kimi-code/k3","turnStep":"0.\#(step)","time":\#(time)}}"#,
+            #"{"type":"context.append_loop_event","agentId":"\#(agent)","event":{"type":"usage.record","model":"kimi-code/k3","usage":{"inputOther":100,"output":\#(output),"inputCacheRead":\#(cacheRead),"inputCacheCreation":\#(cacheCreation)},"time":\#(time)}}"#,
+            #"{"type":"context.append_loop_event","agentId":"\#(agent)","event":{"llmFirstTokenLatencyMs":\#(firstTokenMs),\#(generation)"type":"step.end","uuid":"\#(uuid)","turnId":"0","step":\#(step),"usage":{"inputOther":\#(endInput),"output":\#(output),"inputCacheRead":\#(cacheRead),"inputCacheCreation":\#(cacheCreation)},"time":\#(time)}}"#,
+        ]
     }
 
     private func writeStateJSON(directory: URL, fields: String) throws {

@@ -30,7 +30,7 @@ nonisolated enum KimiSessionScanner {
     }
 
     nonisolated struct State: Sendable, Codable, Equatable {
-        static let currentVersion = 1
+        static let currentVersion = 2
         var version = Self.currentVersion
         /// 会话 ID → wire 文件路径 → 读取时签名。全部文件签名一致时会话不重读。
         var conversations: [String: [String: FileSignature]] = [:]
@@ -93,8 +93,12 @@ nonisolated enum KimiSessionScanner {
         force: Bool = false,
         onProgress: ScanProgressCallback? = nil
     ) -> Result {
-        let baseline = previous?.version == State.currentVersion ? previous : nil
+        let isTimingUpgrade = previous?.version == 1
+        let baseline = previous.flatMap {
+            $0.version == State.currentVersion || isTimingUpgrade ? $0 : nil
+        }
         var state = baseline ?? State()
+        if isTimingUpgrade { state.version = State.currentVersion }
         var result = Result()
         let diskSessions = discoverSessions(roots: roots, failedCount: &result.failedFileCount)
         let legacyWorkDirs = legacyWorkDirMap(roots: roots)
@@ -131,8 +135,8 @@ nonisolated enum KimiSessionScanner {
             where path.hasSuffix("/wire.jsonl") && !livePaths.contains(path) && retained[path] != nil {
                 signatures[path] = oldSignature
             }
-            // 签名未变：不重读、不替换贡献。
-            guard force || signatures != baseline?.conversations[session.id] else { continue }
+            // v1 → v2 保留全部旧账本，但现存文件必须重读以补齐原生计时。
+            guard force || isTimingUpgrade || signatures != baseline?.conversations[session.id] else { continue }
 
             let read = readSession(session)
             result.filesRead += read.readPaths.count
@@ -178,8 +182,9 @@ nonisolated enum KimiSessionScanner {
             ))
         }
 
-        result.newState = state
         result.isComplete = result.failedFileCount == 0
+        // 升级中任何来源失败都保留 v1 进度，下轮继续强制重读；成功会话只替换贡献，不会累加。
+        result.newState = isTimingUpgrade && !result.isComplete ? previous : state
         return result
     }
 
@@ -302,6 +307,7 @@ nonisolated enum KimiSessionScanner {
         var output: Int
         var cacheRead: Int
         var cacheCreation: Int
+        var timing: RequestTiming? = nil
     }
 
     private nonisolated struct SessionRead: Sendable {
@@ -319,6 +325,58 @@ nonisolated enum KimiSessionScanner {
         var bound: String?
     }
 
+    private nonisolated struct TokenUsage: Hashable {
+        var input: Int
+        var output: Int
+        var cacheRead: Int
+        var cacheCreation: Int
+
+        init(input: Int, output: Int, cacheRead: Int, cacheCreation: Int) {
+            self.input = input
+            self.output = output
+            self.cacheRead = cacheRead
+            self.cacheCreation = cacheCreation
+        }
+
+        init?(_ object: [String: Any]?) {
+            guard let object,
+                  let input = tokenInteger(object["inputOther"]),
+                  let output = tokenInteger(object["output"]),
+                  let cacheRead = tokenInteger(object["inputCacheRead"], missing: 0),
+                  let cacheCreation = tokenInteger(object["inputCacheCreation"], missing: 0)
+            else { return nil }
+            self.init(input: input, output: output, cacheRead: cacheRead, cacheCreation: cacheCreation)
+        }
+    }
+
+    private nonisolated struct StepKey: Hashable {
+        var agent: String
+        var turnID: String
+        var step: Int
+    }
+
+    private nonisolated struct LoopRequest {
+        var usageIndices: [Int] = []
+        var isRetry = false
+    }
+
+    private nonisolated struct StepContext {
+        var uuid: String
+        var agent: String
+        var requests: [String: LoopRequest] = [:]
+        var isAmbiguous = false
+    }
+
+    private nonisolated struct AgentTimingContext {
+        var activeStep: StepKey?
+        var acceptsUsage = false
+    }
+
+    private nonisolated struct TimingContext {
+        var steps: [StepKey: StepContext] = [:]
+        var agents: [String: AgentTimingContext] = [:]
+    }
+
     private static func readSession(_ session: SessionOnDisk) -> SessionRead {
         var read = SessionRead()
         let independentAgents = Set(session.files.filter {
@@ -328,6 +386,7 @@ nonisolated enum KimiSessionScanner {
         for url in session.files {
             let eventStart = read.events.count
             var context = ModelContext()
+            var timing = TimingContext()
             var seen = Set<String>()
             var corrupt = false
             let outcome = JSONLLineReader.streamLines(url: url, fromOffset: 0) { batch in
@@ -339,7 +398,7 @@ nonisolated enum KimiSessionScanner {
                     }
                     switch session.layout {
                     case .kimiCodeAgents:
-                        parseKimiCodeRecord(object, into: &read, context: &context)
+                        parseKimiCodeRecord(object, into: &read, context: &context, timing: &timing)
                     case .legacyWire:
                         guard let message = object["message"] as? [String: Any],
                               let type = message["type"] as? String else { continue }
@@ -362,33 +421,79 @@ nonisolated enum KimiSessionScanner {
     /// 新版 wire：`usage.record` 为请求级用量；`llm.request` / `profile.bind` /
     /// `config.update` 提供模型回退。`token_counting.*` 是上下文占用，忽略。
     private static func parseKimiCodeRecord(
-        _ object: [String: Any], into read: inout SessionRead, context: inout ModelContext
+        _ object: [String: Any], into read: inout SessionRead,
+        context: inout ModelContext, timing: inout TimingContext
     ) {
-        guard let type = object["type"] as? String else { return }
+        let record: [String: Any]
+        if object["type"] as? String == "context.append_loop_event",
+           var event = object["event"] as? [String: Any] {
+            if event["agentId"] == nil { event["agentId"] = object["agentId"] }
+            record = event
+        } else {
+            record = object
+        }
+        guard let type = record["type"] as? String else { return }
+        let agent = nonEmpty(record["agentId"] as? String) ?? "main"
         switch type {
+        case "step.begin":
+            guard let uuid = nonEmpty(record["uuid"] as? String),
+                  let key = stepKey(record, agent: agent) else { return }
+            if timing.steps[key] == nil {
+                timing.steps[key] = StepContext(uuid: uuid, agent: agent)
+            } else {
+                timing.steps[key]?.isAmbiguous = true
+            }
         case "llm.request":
-            context.request = nonEmpty(object["model"] as? String)
-            context.requestAlias = nonEmpty(object["modelAlias"] as? String)
+            context.request = nonEmpty(record["model"] as? String)
+            context.requestAlias = nonEmpty(record["modelAlias"] as? String)
+            guard record["kind"] as? String == "loop",
+                  let turnStep = nonEmpty(record["turnStep"] as? String),
+                  let key = stepKey(turnStep, agent: agent), timing.steps[key]?.agent == agent else {
+                timing.agents[agent] = AgentTimingContext()
+                return
+            }
+            if timing.steps[key]?.requests[agent] == nil {
+                timing.steps[key]?.requests[agent] = LoopRequest()
+            } else {
+                timing.steps[key]?.requests[agent]?.isRetry = true
+            }
+            timing.agents[agent] = AgentTimingContext(activeStep: key, acceptsUsage: true)
+        case "step.end":
+            guard let uuid = nonEmpty(record["uuid"] as? String),
+                  let key = stepKey(record, agent: agent),
+                  let step = timing.steps.removeValue(forKey: key),
+                  step.uuid == uuid, step.agent == agent, !step.isAmbiguous,
+                  step.requests.values.allSatisfy({ !$0.isRetry }),
+                  let endUsage = TokenUsage(record["usage"] as? [String: Any]),
+                  let firstTokenMs = finiteNumber(record["llmFirstTokenLatencyMs"]),
+                  let generationMs = finiteNumber(record["llmStreamDurationMs"]),
+                  let requestTiming = RequestTiming(
+                    measuredFirstTokenMs: firstTokenMs, generationMs: generationMs
+                  ) else { return }
+            let candidates = step.requests.values.flatMap(\.usageIndices)
+            guard candidates.count == 1, let index = candidates.first,
+                  tokenUsage(read.events[index]) == endUsage else { return }
+            read.events[index].timing = requestTiming
         case "profile.bind", "config.update":
-            if let model = nonEmpty(object["modelAlias"] as? String) {
+            if let model = nonEmpty(record["modelAlias"] as? String) {
                 context.bound = model
                 context.request = nil
                 context.requestAlias = nil
             }
         case "turn.prompt":
             if read.fallbackTitle == nil {
-                read.fallbackTitle = ConversationTitleIndex.clean(object["input"] as? String)
+                read.fallbackTitle = ConversationTitleIndex.clean(record["input"] as? String)
             }
         case "usage.record":
-            guard let usage = object["usage"] as? [String: Any] else { return }
+            guard let usage = record["usage"] as? [String: Any] else { return }
             let input = intValue(usage["inputOther"])
             let output = intValue(usage["output"])
             let cacheRead = intValue(usage["inputCacheRead"])
             let cacheCreation = intValue(usage["inputCacheCreation"])
             guard input + output + cacheRead + cacheCreation > 0,
-                  let timeMs = (object["time"] as? NSNumber)?.doubleValue,
+                  let timeMs = (record["time"] as? NSNumber)?.doubleValue,
                   timeMs.isFinite, timeMs > 0, timeMs < 253_402_300_799_000 else { return }
-            let recordedModel = nonEmpty(object["model"] as? String)
+            let recordedModel = nonEmpty(record["model"] as? String)
             let model: String
             if let recordedModel, recordedModel == context.requestAlias, let actual = context.request,
                Pricing.pricingKey(model: recordedModel) != Pricing.pricingKey(model: actual) {
@@ -402,9 +507,55 @@ nonisolated enum KimiSessionScanner {
                 timestamp: Date(timeIntervalSince1970: timeMs / 1000), model: model,
                 input: input, output: output, cacheRead: cacheRead, cacheCreation: cacheCreation
             ))
+            let index = read.events.count - 1
+            guard let agentContext = timing.agents[agent], agentContext.acceptsUsage,
+                  let key = agentContext.activeStep, timing.steps[key]?.requests[agent] != nil else { return }
+            guard TokenUsage(usage) != nil else {
+                timing.steps[key]?.isAmbiguous = true
+                return
+            }
+            timing.steps[key]?.requests[agent]?.usageIndices.append(index)
         default:
             return
         }
+    }
+
+    private static func stepKey(_ object: [String: Any], agent: String) -> StepKey? {
+        guard let turnID = nonEmpty(object["turnId"] as? String),
+              let step = integer(object["step"]) else { return nil }
+        return StepKey(agent: agent, turnID: turnID, step: step)
+    }
+
+    private static func stepKey(_ turnStep: String, agent: String) -> StepKey? {
+        let parts = turnStep.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, let step = Int(parts[1]) else { return nil }
+        return StepKey(agent: agent, turnID: String(parts[0]), step: step)
+    }
+
+    private static func integer(_ value: Any?) -> Int? {
+        if let number = value as? NSNumber {
+            guard CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+            return Int(number.stringValue)
+        }
+        if let string = value as? String { return Int(string) }
+        return nil
+    }
+
+    private static func tokenInteger(_ value: Any?, missing: Int? = nil) -> Int? {
+        guard let value else { return missing }
+        guard let integer = integer(value), integer >= 0, integer <= Int.max / 8 else { return nil }
+        return integer
+    }
+
+    private static func finiteNumber(_ value: Any?) -> Double? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let double = number.doubleValue
+        return double.isFinite ? double : nil
+    }
+
+    private static func tokenUsage(_ event: StoredEvent) -> TokenUsage {
+        TokenUsage(input: event.input, output: event.output,
+                   cacheRead: event.cacheRead, cacheCreation: event.cacheCreation)
     }
 
     private static func collectLegacyEvent(
@@ -556,7 +707,8 @@ nonisolated enum KimiSessionScanner {
             cacheCreationTokens: event.cacheCreation,
             requestCount: 1,
             costUSD: breakdown?.total,
-            costBreakdown: breakdown
+            costBreakdown: breakdown,
+            timing: event.timing
         )
     }
 

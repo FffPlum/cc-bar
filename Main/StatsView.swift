@@ -981,6 +981,17 @@ struct StatsView: View {
                         isLoading: appState.refreshState(for: .kimi).inFlight
                     ))
                 }
+                for account in appState.kimiManagedAccounts where account.visibleInPopover {
+                    if appState.kimiManagedMirrorsCLI(account), appState.kimiAccount != nil { continue }
+                    guard let accountKey = appState.kimiManagedQuotaCacheRecords[account.id]?.accountID else { continue }
+                    sections.append(timelineSection(
+                        accountKey: accountKey,
+                        title: "Kimi Code · \(appState.kimiManagedDisplayName(account))",
+                        app: .kimi,
+                        snapshot: appState.kimiManagedQuotas[account.id],
+                        isLoading: appState.kimiManagedRefreshStates[account.id]?.inFlight == true
+                    ))
+                }
             case .cursor, .pi, .opencode, .dsh, .antigravity:
                 break
             }
@@ -1720,6 +1731,7 @@ private struct OverviewCompositionPanel: View {
 
     @State private var dimension: CompositionDimension = .service
     @State private var expandedProvider: ModelProvider?
+    @State private var expandedModel: String?
 
     var body: some View {
         let rows = model.composition[dimension] ?? []
@@ -1778,9 +1790,11 @@ private struct OverviewCompositionPanel: View {
         }
         .onChange(of: scope) { _, _ in
             expandedProvider = nil
+            expandedModel = nil
         }
         .onChange(of: dimension) { _, _ in
             expandedProvider = nil
+            expandedModel = nil
         }
     }
 
@@ -1828,6 +1842,7 @@ private struct OverviewCompositionPanel: View {
     private func rowView(_ row: CompositionRow) -> some View {
         let isExpanded: Bool = {
             if case .expandProvider(let provider) = row.action { return expandedProvider == provider }
+            if case .expandModel(let model) = row.action { return expandedModel == model }
             return false
         }()
         VStack(alignment: .leading, spacing: 0) {
@@ -1846,6 +1861,9 @@ private struct OverviewCompositionPanel: View {
             if isExpanded {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(row.providerModels) { item in
+                        providerModelRow(item)
+                    }
+                    ForEach(row.modelSources) { item in
                         providerModelRow(item)
                     }
                 }
@@ -1867,7 +1885,7 @@ private struct OverviewCompositionPanel: View {
                     .foregroundStyle(isSecondary ? Color.secondary : Color.primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .help(dimension == .model ? title(for: row) : "")
+                    .nativeHover(dimension == .model ? ModelDisplayName.text(row.title) : "")
                 if !subtitle(for: row).isEmpty {
                     PrivacySensitiveText(text: subtitle(for: row), sensitive: row.projectStatus?.isPathBased == true)
                         .font(.system(size: 10.5))
@@ -1909,7 +1927,7 @@ private struct OverviewCompositionPanel: View {
                 .frame(width: 64, alignment: .trailing)
             Group {
                 switch row.action {
-                case .expandProvider:
+                case .expandProvider, .expandModel:
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                 case .openProject, .openUnattributed:
                     Image(systemName: "chevron.right")
@@ -1932,7 +1950,7 @@ private struct OverviewCompositionPanel: View {
                 .font(.system(size: 11.5, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .help("\(row.model)\n\(tr("Source", "来源")): \(row.app.displayName)")
+                .nativeHover("\(ModelDisplayName.text(row.model))\n\(tr("Source", "来源")): \(row.app.displayName)")
             Spacer(minLength: 8)
             // 数值列与父行的 Tokens / 费用 / 输出速度列对齐（同样 8pt 间距），占比、命中率、箭头位留空。
             HStack(spacing: 8) {
@@ -1960,8 +1978,9 @@ private struct OverviewCompositionPanel: View {
     }
 
     private func providerModelTitle(_ row: ProviderModelRow) -> String {
-        guard let detail = currentKimiRouteDetail(model: row.model, apps: [row.app]) else { return row.model }
-        return "\(row.model) · \(detail)"
+        let displayName = ModelDisplayName.text(row.model)
+        guard let detail = currentKimiRouteDetail(model: row.model, apps: [row.app]) else { return displayName }
+        return "\(displayName) · \(detail)"
     }
 
     private func currentKimiRouteDetail(model: String, apps: [UsageApp]) -> String? {
@@ -1987,7 +2006,7 @@ private struct OverviewCompositionPanel: View {
                 if PrivacyDisplay.isEnabled, case .openProject(let key) = row.action {
                     return PrivacyDisplay.project(key)
                 }
-                return row.title
+                return dimension == .model ? ModelDisplayName.text(row.title) : row.title
             }
         case .unattributed:
             return tr("Unattributed", "未归属")
@@ -2023,6 +2042,10 @@ private struct OverviewCompositionPanel: View {
         case .expandProvider(let provider):
             withAnimation(.easeOut(duration: 0.18)) {
                 expandedProvider = expandedProvider == provider ? nil : provider
+            }
+        case .expandModel(let model):
+            withAnimation(.easeOut(duration: 0.18)) {
+                expandedModel = expandedModel == model ? nil : model
             }
         case .openProject(let key):
             navigate(.project(key))

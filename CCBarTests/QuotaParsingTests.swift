@@ -19,6 +19,136 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertEqual(fetched.snapshot.primaryWindow?.remainingPercent, 68)
     }
 
+    // MARK: - Kimi Code 官方状态分组
+
+    func testKimiStatusMapsChildComponentsAndExcludesOtherServices() throws {
+        let cases: [(String, ServiceStatusIndicator)] = [
+            ("operational", .none),
+            ("degraded_performance", .minor),
+            ("partial_outage", .major),
+            ("major_outage", .critical),
+            ("under_maintenance", .maintenance),
+            ("future_status", .unknown),
+        ]
+        let fetchedAt = Date(timeIntervalSince1970: 1_750_000_000)
+
+        for (rawStatus, expected) in cases {
+            let data = try kimiComponentsData(
+                declaredIDs: ["future-code-service"],
+                children: [
+                    kimiStatusChild(id: "future-code-service", name: "Future Code Service", status: rawStatus),
+                    kimiStatusChild(id: "kimi-web", name: "Kimi Web", status: "major_outage", groupID: "web-group"),
+                    kimiStatusChild(id: "open-api", name: "SaaS / Open API", status: "major_outage", groupID: "api-group"),
+                ]
+            )
+            let status = try ServiceStatusClient.parseKimiComponents(from: data, fetchedAt: fetchedAt)
+            XCTAssertEqual(status.indicator, expected, rawStatus)
+            XCTAssertEqual(status.fetchedAt, fetchedAt)
+        }
+    }
+
+    func testKimiStatusAggregatesMostSevereChild() throws {
+        let data = try kimiComponentsData(
+            declaredIDs: ["one", "two", "three"],
+            children: [
+                kimiStatusChild(id: "one", name: "One", status: "under_maintenance"),
+                kimiStatusChild(id: "two", name: "Two", status: "degraded_performance"),
+                kimiStatusChild(id: "three", name: "Three", status: "partial_outage"),
+            ]
+        )
+        let status = try ServiceStatusClient.parseKimiComponents(from: data)
+        XCTAssertEqual(status.indicator, .major)
+        XCTAssertEqual(status.components.map(\.id), ["cyrtlddz0q8c", "one", "two", "three"])
+        XCTAssertEqual(status.components.map(\.name), ["Kimi Code", "One", "Two", "Three"])
+        XCTAssertEqual(status.components.map(\.indicator), [.none, .maintenance, .minor, .major])
+    }
+
+    func testKimiStatusUnknownChildPreventsOperationalAggregate() throws {
+        let data = try kimiComponentsData(
+            declaredIDs: ["known", "unknown"],
+            children: [
+                kimiStatusChild(id: "known", name: "Known", status: "operational"),
+                kimiStatusChild(id: "unknown", name: "Unknown", status: "unrecognized"),
+            ]
+        )
+        XCTAssertEqual(try ServiceStatusClient.parseKimiComponents(from: data).indicator, .unknown)
+    }
+
+    func testKimiStatusIncludesGroupStatus() throws {
+        let cases: [(String, ServiceStatusIndicator)] = [
+            ("major_outage", .critical),
+            ("under_maintenance", .maintenance),
+            ("future_status", .unknown),
+        ]
+        for (groupStatus, expected) in cases {
+            let data = try kimiComponentsData(
+                declaredIDs: ["code"],
+                children: [kimiStatusChild(id: "code", name: "Code", status: "operational")],
+                groupStatus: groupStatus
+            )
+            XCTAssertEqual(try ServiceStatusClient.parseKimiComponents(from: data).indicator, expected)
+        }
+    }
+
+    func testKimiStatusRejectsMissingOrIncompleteGroup() throws {
+        let child = kimiStatusChild(id: "code", name: "Code", status: "operational")
+        let withoutGroup = try JSONSerialization.data(withJSONObject: ["components": [child]])
+        XCTAssertThrowsError(try ServiceStatusClient.parseKimiComponents(from: withoutGroup))
+
+        let empty = try kimiComponentsData(declaredIDs: [], children: [])
+        XCTAssertThrowsError(try ServiceStatusClient.parseKimiComponents(from: empty))
+
+        let missingComponents = try kimiComponentsData(declaredIDs: nil, children: [child])
+        XCTAssertThrowsError(try ServiceStatusClient.parseKimiComponents(from: missingComponents))
+
+        let missingChild = try kimiComponentsData(declaredIDs: ["code", "missing"], children: [child])
+        XCTAssertThrowsError(try ServiceStatusClient.parseKimiComponents(from: missingChild))
+
+        let wrongRelation = try kimiComponentsData(
+            declaredIDs: ["code"],
+            children: [kimiStatusChild(id: "code", name: "Code", status: "operational", groupID: "other-group")]
+        )
+        XCTAssertThrowsError(try ServiceStatusClient.parseKimiComponents(from: wrongRelation))
+
+        let undeclaredChild = try kimiComponentsData(
+            declaredIDs: ["code"],
+            children: [child, kimiStatusChild(id: "extra", name: "Extra", status: "operational")]
+        )
+        XCTAssertThrowsError(try ServiceStatusClient.parseKimiComponents(from: undeclaredChild))
+    }
+
+    private func kimiComponentsData(
+        declaredIDs: [String]?,
+        children: [[String: Any]],
+        groupStatus: String = "operational"
+    ) throws -> Data {
+        var group: [String: Any] = [
+            "id": "cyrtlddz0q8c",
+            "name": "Kimi Code",
+            "status": groupStatus,
+            "group": true,
+        ]
+        if let declaredIDs {
+            group["components"] = declaredIDs
+        }
+        return try JSONSerialization.data(withJSONObject: ["components": [group] + children])
+    }
+
+    private func kimiStatusChild(
+        id: String,
+        name: String,
+        status: String,
+        groupID: String = "cyrtlddz0q8c"
+    ) -> [String: Any] {
+        [
+            "id": id,
+            "name": name,
+            "status": status,
+            "group": false,
+            "group_id": groupID,
+        ]
+    }
+
     // MARK: - Antigravity retrieveUserQuota buckets
 
     private func antigravityBucket(
@@ -3889,6 +4019,52 @@ final class QuotaParsingTests: XCTestCase {
             cacheCreation: 1_000_000,
             at: Date()
         ), "K2.8 Preview 滚动路由没有核实的公开 API 价格")
+    }
+
+    func testPiCursorAliasesKeepChannelSpeedAndContextPrices() throws {
+        func price(_ model: String) -> CostBreakdown? {
+            Pricing.costBreakdown(
+                app: .pi, model: model, speed: .standard,
+                input: 1_000_000, output: 1_000_000,
+                cacheRead: 1_000_000, cacheCreation: 0,
+                at: Date(timeIntervalSince1970: 0)
+            )
+        }
+        XCTAssertEqual(price("cursor/composer-2.5:slow"),
+                       CostBreakdown(input: 0.5, output: 2.5, cacheRead: 0.2, cacheCreation: 0))
+        XCTAssertEqual(price("magpie/cursor/composer-2.5:fast"),
+                       CostBreakdown(input: 3, output: 15, cacheRead: 0.5, cacheCreation: 0))
+        XCTAssertEqual(price("cursor/grok-4.7@256k:fast"),
+                       CostBreakdown(input: 4, output: 12, cacheRead: 1, cacheCreation: 0))
+        XCTAssertEqual(price("magpie/cursor/grok-4.7@500k:fast"),
+                       CostBreakdown(input: 6, output: 18, cacheRead: 1.5, cacheCreation: 0))
+        XCTAssertNil(price("cursor/composer-2.5"))
+        XCTAssertNil(price("magpie/cursor/composer-2.5"))
+        XCTAssertNil(price("magpie/cursor/grok-4.7@500k:unknown"))
+        XCTAssertNil(price("cursor/grok-4.7-256k:fast"))
+        XCTAssertNil(Pricing.costBreakdown(
+            app: .codex, model: "cursor/composer-2.5:fast", speed: .fast,
+            input: 1, output: 1, cacheRead: 0, cacheCreation: 0, at: Date()
+        ))
+    }
+
+    func testModelIdentityParsesCursorRoutesAndPreservesUnknownIdentifiers() {
+        let identity = ModelIdentity.parse("magpie/cursor/grok-4.7@256k:fast")
+        XCTAssertEqual(identity.raw, "magpie/cursor/grok-4.7@256k:fast")
+        XCTAssertEqual(identity.entry, "magpie")
+        XCTAssertEqual(identity.channel, .cursor)
+        XCTAssertEqual(identity.model, "grok-4.7")
+        XCTAssertEqual(identity.context, "256k")
+        XCTAssertEqual(identity.speed, .fast)
+        XCTAssertEqual(identity.cursorPricingKey, "cursor-sdk:grok-4.7:256k:fast")
+        XCTAssertEqual(ModelIdentity.parse("cursor/new-model@1m:slow").model, "new-model")
+        XCTAssertEqual(ModelIdentity.parse("cursor/composer-2.5").speed, .unspecified)
+        for value in ["cursor/model@20261027:fast", "cursor/model@0k:fast", "cursor/model:unknown", "unknown/cursor/model:fast"] {
+            let parsed = ModelIdentity.parse(value)
+            XCTAssertEqual(parsed.channel, .unknown)
+            XCTAssertEqual(parsed.model, value)
+            XCTAssertNil(parsed.cursorPricingKey)
+        }
     }
 
     func testGPT55StandardLongContextProAndFastRates() throws {

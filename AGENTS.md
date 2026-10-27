@@ -54,6 +54,17 @@ cc-bar 是一个原生 macOS 菜单栏 App，用 Swift / SwiftUI 实现。
 - 只改和当前任务直接相关的文件。不要顺手整理无关代码、格式或项目结构。
 - 工作区可能已有用户改动。不要回滚、覆盖或清理非本次任务产生的改动。
 
+## Git Flow 开发流程
+
+仓库采用 Git Flow。`main` 和 `develop` 是长期分支；具体的功能与发布分支是临时分支，完成合并后删除。初始参考分支保留为 `templates/feature` 和 `templates/release`，实际开发使用 `feature/…` 与 `release/…`；不要创建名为 `feature` 或 `release` 的独立分支，避免 Git 分支前缀冲突。
+
+- `main`：存放正式发布的历史版本，只接受来自 `release/<版本号>` 的合并。每次正式发布后都在 `main` 上创建对应的 `vX.Y.Z` 标签，不直接在 `main` 上开发功能。
+- `develop`：日常开发的集成主干，接收已完成的功能分支，以及发布分支合并回来的修补与发布准备改动。
+- `feature/<功能名>`：从最新的 `develop` 切出，用于开发新功能；完成后通过代码审查合并回 `develop`，不直接合并到 `main`，合并后删除功能分支。
+- `release/<版本号>`：准备发布时从 `develop` 切出，只进行发布前测试、问题修补、版本号和更新说明等发布准备工作，不加入新功能；完成后先合并到 `main` 并创建版本标签，再合并回 `develop`，最后删除发布分支。
+
+常规流程为：`feature/<功能名>` → `develop` → `release/<版本号>` → `main` + `develop`。例如 `feature/kimi-code-integration`、`release/v1.1.32`。发布操作同时遵循下方「标准发布流程」。
+
 ## 实现约束
 
 - UI 优先使用 SwiftUI / AppKit 系统默认控件和 macOS 原生风格。
@@ -98,7 +109,7 @@ xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destinat
 
 - 更新签名需按 `docs/打包发布.md` 一次性配置公钥和 CI 私钥；本地打包传入 `SPARKLE_PUBLIC_ED_KEY`。缺失时正式打包 / 发布会停止，避免分发无法验证更新的 App。
 - 首次需要把命令行工具指向完整 Xcode（一次性）：`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`。
-- 脚本用 `CODE_SIGN_IDENTITY="" CODE_SIGNING_ALLOWED=NO` 做 Release 构建，再为 Sparkle 嵌套组件和主 App 逐层 ad-hoc 签名，不需要付费 Developer ID 证书或公证。支持的 CPU 架构以实际构建产物为准。
+- 脚本用 `CODE_SIGN_IDENTITY="" CODE_SIGNING_ALLOWED=NO` 做 Release 构建，再为 Sparkle 嵌套组件和主 App 逐层签名；默认与 CI 保持 ad-hoc，本机可运行 `python3 scripts/setup-local-signing.py` 配置固定自签名身份供后续打包自动复用，不需要付费 Developer ID 证书或公证。支持的 CPU 架构以实际构建产物为准。
 - **产物固定输出到 `dist/CCBar.dmg` 和 `dist/CCBar.app.zip`**（`dist/` 已在 `.gitignore` 里，不进版本库）。脚本会先清空 `build/` 目录再重新构建。
 - 打包好的 DMG 和 zip 上传到 GitHub Release 即可分发；不要直接替换用户本机 `/Applications/CCBar.app`——那是覆盖用户正在使用的安装，属于有风险操作，要打包验证就在 `dist/` 或临时目录里查看，不要动 `/Applications`。
 - 完整背景说明见 [README.md](README.md#从源码构建) 和 [docs/打包发布.md](docs/打包发布.md)（该文档里的 Archive / Developer ID 流程只是给需要公证发布给别人用的场景保留的可选项，日常打包不要用）。
@@ -107,13 +118,17 @@ xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destinat
 
 这是用户预先授权的固定发布指令，出现这句话（或明显同义的表述，如「发布一下」「发个新版本」）时按下面四步顺序执行，**不用逐步等确认**。`发版` 是首选的最短触发词；tag 推送成功后，立即汇报新版本号、提交、Actions / Release 链接和本版更新说明全文即可。
 
-1. **提交代码**：把当前工作区未提交的改动按仓库惯例的 commit message 风格提交（可用 `git-commit-messages` skill；无关改动分开提交，不要混在一起）。
+1. **提交代码并创建发布分支**：把当前工作区未提交的改动按仓库惯例的 commit message 风格提交（可用 `git-commit-messages` skill；无关改动分开提交，不要混在一起）。将准备发布的功能合并到 `develop`，从最新的 `develop` 创建并切换到 `release/vX.Y.Z`；后续发布修补、更新说明和版本号改动都提交到该发布分支。
 2. **编写用户更新说明**：对比上一个 `v*` tag 与当前代码、提交和文档，只提炼真实、用户可感知的新增功能、问题修复、体验优化和必要注意事项；不要罗列 commit、文件、重构、CI 或版本号。创建 `release-notes/vX.Y.Z.md`，先读 [release-notes/README.md](release-notes/README.md)，按其中的撰写流程和自检问题写：开头一句话说出本版最主要的变化，下面不分组列出条目，每条一行；不用分类组头、`#` 标题和图片，不加安装说明等每版重复的固定段落。再按同一文档「近期新功能」一节检查并更新 `release-notes/highlights.md`。Release 正文由本版说明加 `highlights.md` 拼成，Release 标题沿用默认的 tag 名。
 3. **版本号 +1**：修改 `ccbar.xcodeproj/project.pbxproj` 里两处 `MARKETING_VERSION`（Debug/Release 配置各一处，要同时改），patch 位 +1（如 `1.0.0` → `1.0.1`），除非用户明确要求升 minor/major。把版本号、`release-notes/vX.Y.Z.md` 和改动过的 `release-notes/highlights.md` 一起单独提交，message 形如 `chore: 发布 vX.Y.Z`。
-4. **触发远程构建发布**：推送分支 + 打带 `v` 前缀的 tag 触发 [.github/workflows/release.yml](.github/workflows/release.yml)，由 GitHub 的 macOS runner 自动运行 `scripts/build.sh`、读取同名更新说明，并将 `dist/CCBar.dmg`、`dist/CCBar.app.zip`、`dist/appcast.xml`、`dist/release-notes.md` 与 `dist/version.json`（新版读取签名 appcast，version.json 保留给旧客户端；均由 workflow 生成，本地打包不产出）挂到 GitHub Release：
+4. **合并发布分支并触发远程构建发布**：把 `release/vX.Y.Z` 合并到 `main` 并打带 `v` 前缀的 tag，再合并回 `develop`。推送 `main`、`develop` 和 tag，由 tag 触发 [.github/workflows/release.yml](.github/workflows/release.yml)，由 GitHub 的 macOS runner 自动运行 `scripts/build.sh`、读取同名更新说明，并将 `dist/CCBar.dmg`、`dist/CCBar.app.zip`、`dist/appcast.xml`、`dist/release-notes.md` 与 `dist/version.json`（新版读取签名 appcast，version.json 保留给旧客户端；均由 workflow 生成，本地打包不产出）挂到 GitHub Release。完成后删除发布分支：
    ```bash
-   git push origin main
+   git switch main
+   git merge --no-ff release/vX.Y.Z
    git tag vX.Y.Z
+   git switch develop
+   git merge --no-ff release/vX.Y.Z
+   git push origin main develop
    git push origin vX.Y.Z
    ```
 
@@ -122,4 +137,4 @@ xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destinat
 - tag 必须和已提交的 `MARKETING_VERSION` 一致，tag 本身不改版本号，只是给已提交好的版本打标记。
 - 打错 tag 可撤销：`git tag -d vX.Y.Z && git push origin :vX.Y.Z`。
 - `git push origin vX.Y.Z` 成功即代表本地发版操作完成；只汇报版本号、提交、Actions / Release 链接和本版更新说明全文，**不得主动查询、等待或轮询** CI、Release 或产物状态。只有用户明确要求“看进度”“确认发布成功”或“检查产物”时，才查询远端状态。
-- 如果用户只是单独说「打个正式版」但没有前面步骤的上下文（比如工作区本来就是干净的），照样按这四步走，第 1 步无改动则跳过、直接从第 2 步开始。
+- 如果用户只是单独说「打个正式版」但没有前面步骤的上下文（比如工作区本来就是干净的），照样按这四步走；第 1 步没有未提交改动时只跳过提交操作，仍需创建发布分支。
