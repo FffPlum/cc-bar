@@ -45,7 +45,7 @@ nonisolated private struct TieredPricedPeriod: Sendable {
 }
 
 nonisolated enum Pricing {
-    /// 价格表按各厂商官方定价页核对（最近一次 2026-10-19），起点对齐 cc-switch `seed_model_pricing` /
+    /// 价格表按各厂商官方定价页核对（基础表 2026-10-19，新增型号 2026-10-27），起点对齐 cc-switch `seed_model_pricing` /
     /// CodexBar `CostUsagePricing`。命中不到时返回 nil。键为 `pricingKey(model:)` 归一化后的模型名（循环剥 provider 前缀
     /// `openai-codex/` / `openai/` / `anthropic/` / `deepseek/` / `opencode-go/` / `commandcode/` /
     /// `command-code/` / `antigravity/` / `z-ai/` / `zai/` / `minimax/` / `deepseek-account/` /
@@ -101,6 +101,7 @@ nonisolated enum Pricing {
         // GPT-6.1 Sol（2026-09-29 DevDay 发布）：输入 / 输出与 GPT-6 Sol 同价，缓存输入减半为 $0.10（0.05x）；
         // 272K 长上下文阶梯见 contextPriceTiers，Fast 档见 codexFastPrices。
         "gpt-6.1-sol":       .init(input: 2,    output: 10,  cacheRead: 0.10, cacheCreation: 2.5),
+        "gpt-6.1-terra":     .init(input: 1,    output: 5,   cacheRead: 0.05, cacheCreation: 1.25),
         "gpt-6-astra":       .init(input: 10,   output: 50,  cacheRead: 1,    cacheCreation: 12.5),
         "gpt-6-sol":         .init(input: 2,    output: 10,  cacheRead: 0.20, cacheCreation: 2.5),
         "gpt-6-luna":        .init(input: 0.10, output: 0.50, cacheRead: 0.01, cacheCreation: 0.125),
@@ -143,6 +144,13 @@ nonisolated enum Pricing {
         "composer-2.5":         .init(input: 0.50, output: 2.50, cacheRead: 0.20, cacheCreation: 0),
         "cursor-composer-2-5":  .init(input: 0.50, output: 2.50, cacheRead: 0.20, cacheCreation: 0),
         "composer-2.5-fast":    .init(input: 3,    output: 15,   cacheRead: 0.50, cacheCreation: 0),
+        // Pi Cursor SDK 的显式速度 / 上下文别名按 Cursor 对应档位计价。
+        "cursor-sdk:composer-2.5:-:slow": .init(input: 0.50, output: 2.50, cacheRead: 0.20, cacheCreation: 0),
+        "cursor-sdk:composer-2.5:-:fast": .init(input: 3, output: 15, cacheRead: 0.50, cacheCreation: 0),
+        "cursor-sdk:grok-4.7:256k:slow": .init(input: 2, output: 6, cacheRead: 0.50, cacheCreation: 0),
+        "cursor-sdk:grok-4.7:256k:fast": .init(input: 4, output: 12, cacheRead: 1, cacheCreation: 0),
+        "cursor-sdk:grok-4.7:500k:slow": .init(input: 4, output: 12, cacheRead: 1, cacheCreation: 0),
+        "cursor-sdk:grok-4.7:500k:fast": .init(input: 6, output: 18, cacheRead: 1.50, cacheCreation: 0),
         // Grok 4.7 输入超过 256K 时整次请求按 2 倍标准价，见 contextPriceTiers。Cursor 自身费用仍用服务端 chargedCents。
         "grok-4-7":             .init(input: 2,    output: 6,    cacheRead: 0.50, cacheCreation: 0),
         "grok-4-6":             .init(input: 2,    output: 6,    cacheRead: 0.50, cacheCreation: 0),
@@ -164,6 +172,12 @@ nonisolated enum Pricing {
         "gemini-2.5-pro":    .init(input: 1.25, output: 10.00, cacheRead: 0.125, cacheCreation: 0),
         "gemini-2.5-flash":  .init(input: 0.30, output: 2.50,  cacheRead: 0.03,  cacheCreation: 0),
         "gemini-2.5-flash-lite": .init(input: 0.10, output: 0.40, cacheRead: 0.01, cacheCreation: 0),
+
+        // —— Moonshot / Kimi 公开 API 费率（USD / 百万 token）——
+        // Kimi Code 订阅路由通过 kimiAPIPricingAliases 精确映射到这里；订阅账单仍与 API 等值估算分开。
+        "kimi-k3":                    .init(input: 3, output: 15, cacheRead: 0.30, cacheCreation: 3),
+        "kimi-k3.1-pro":              .init(input: 2, output: 10, cacheRead: 0.20, cacheCreation: 2),
+        "kimi-k3.1-pro-highspeed":    .init(input: 4, output: 20, cacheRead: 0.20, cacheCreation: 4),
 
         // —— DeepSeek 系列（与 cc-switch seed_model_pricing 对齐）——
         // 缓存语义：通过 Anthropic 兼容端点使用时 input 不含 cache_read，直接乘价。
@@ -192,8 +206,10 @@ nonisolated enum Pricing {
         "glm-5.2":        .init(input: 1.40, output: 4.40, cacheRead: 0.26,  cacheCreation: 0),
         "glm-5.3-flash":  .init(input: 0.15, output: 0.50, cacheRead: 0.03,  cacheCreation: 0),
         "glm-5.3-flashx": .init(input: 0.37, output: 1.25, cacheRead: 0.075, cacheCreation: 0),
-        // MiniMax 现价取永久五折后的实付价。M3 官方另有 >512K 的 2 倍档，Command Code 两档都按短上下文价，这里保持短上下文价。
+        // M3.1 Flash 为固定价，官方未列缓存写入费；M3 取永久五折后的实付价。
+        // M3 官方另有 >512K 的 2 倍档，Command Code 两档都按短上下文价，这里保持短上下文价。
         // M2.7 官方单列缓存写入；M3 定价页没有这项，继续为 0。
+        "minimax-m3.1-flash":      .init(input: 0.15, output: 0.60, cacheRead: 0.015, cacheCreation: 0),
         "minimax-m3":              .init(input: 0.30, output: 1.20, cacheRead: 0.06, cacheCreation: 0),
         "minimax-m2.7":            .init(input: 0.30, output: 1.20, cacheRead: 0.06, cacheCreation: 0.375),
         "minimax-m2.7-highspeed":  .init(input: 0.60, output: 2.40, cacheRead: 0.06, cacheCreation: 0.375),
@@ -204,6 +220,7 @@ nonisolated enum Pricing {
     /// 历史/特殊规则优先本地，其余型号在线优先、命中不到再回落这里。
     private static let codexFastPrices: [String: ModelPrice] = [
         "gpt-6.1-sol":   .init(input: 4,    output: 20,  cacheRead: 0.2,  cacheCreation: 5),
+        "gpt-6.1-terra": .init(input: 2,    output: 10,  cacheRead: 0.1,  cacheCreation: 2.5),
         "gpt-6-astra":   .init(input: 20,   output: 100, cacheRead: 2,    cacheCreation: 25),
         "gpt-6-sol":     .init(input: 4,    output: 20,  cacheRead: 0.4,  cacheCreation: 5),
         "gpt-6-luna":    .init(input: 0.2,  output: 1,   cacheRead: 0.02, cacheCreation: 0.25),
@@ -240,6 +257,7 @@ nonisolated enum Pricing {
     /// Fast 的计费等效 Token 倍率。Codex 使用 ChatGPT credit 倍率；Claude 使用 Fast/Standard API 价比。
     private static let codexFastMultipliers: [String: Decimal] = [
         "gpt-6.1-sol": 2.5,
+        "gpt-6.1-terra": 2.5,
         "gpt-6-astra": 2.5,
         "gpt-6-sol": 2.5,
         "gpt-6-luna": 2.5,
@@ -279,6 +297,11 @@ nonisolated enum Pricing {
             longContextThreshold: 272_000,
             shortContext: .init(input: 2, output: 10, cacheRead: 0.10, cacheCreation: 2.5),
             longContext: .init(input: 4, output: 15, cacheRead: 0.20, cacheCreation: 5)
+        ),
+        "gpt-6.1-terra": .init(
+            longContextThreshold: 272_000,
+            shortContext: .init(input: 1, output: 5, cacheRead: 0.05, cacheCreation: 1.25),
+            longContext: .init(input: 2, output: 7.5, cacheRead: 0.10, cacheCreation: 2.5)
         ),
         "gpt-6-astra": .init(
             longContextThreshold: 272_000,
@@ -393,6 +416,7 @@ nonisolated enum Pricing {
     /// GPT-5.6 Sol 这一行是 2026-08-21 促销前的价，促销价见 `timedCodexFastLongPrices`。
     private static let codexFastLongContextPrices: [String: ModelPrice] = [
         "gpt-6.1-sol":   .init(input: 8,    output: 30,   cacheRead: 0.40, cacheCreation: 10),
+        "gpt-6.1-terra": .init(input: 4,    output: 15,   cacheRead: 0.20, cacheCreation: 5),
         "gpt-6-astra":   .init(input: 40,   output: 150,  cacheRead: 4,    cacheCreation: 50),
         "gpt-6-sol":     .init(input: 8,    output: 30,   cacheRead: 0.8,  cacheCreation: 10),
         "gpt-6-luna":    .init(input: 0.40, output: 1.50, cacheRead: 0.04, cacheCreation: 0.50),
@@ -593,7 +617,7 @@ nonisolated enum Pricing {
                 case .pi: return nil
                 case .opencode: return nil
                 case .dsh: return nil
-                case .antigravity: return nil
+                case .antigravity, .kimi: return nil
                 }
             }
             switch app {
@@ -622,7 +646,7 @@ nonisolated enum Pricing {
             case .dsh:
                 // DSH 没有 Fast 档位概念。
                 return nil
-            case .antigravity:
+            case .antigravity, .kimi:
                 // Antigravity 没有 Fast 档位概念。
                 return nil
             }
@@ -639,8 +663,23 @@ nonisolated enum Pricing {
 
     /// 查价用的模型键：在 `normalize(model:)` 基础上再剥转售标签，不作为任何存储身份。
     nonisolated static func pricingKey(model: String) -> String {
-        normalize(model: model, stripping: pricingPrefixes)
+        let identity = ModelIdentity.parse(model)
+        if identity.channel == .cursor {
+            // 未指定速度时保持缺价，不能把插件当前默认值套到历史请求。
+            return identity.cursorPricingKey ?? model.lowercased()
+        }
+        let key = normalize(model: model, stripping: pricingPrefixes)
+        return kimiAPIPricingAliases[key] ?? key
     }
+
+    /// Kimi Code 日志里的订阅路由与公开 API 型号的精确对应。只用于查价，绝不回写历史模型名；
+    /// `kimi-for-coding` 是独立滚动路由，没有可靠公开 API 价格，不在此白名单中。
+    private static let kimiAPIPricingAliases = [
+        "k3": "kimi-k3",
+        "k3-256k": "kimi-k3",
+        "k3.1-pro": "kimi-k3.1-pro",
+        "k3.1-pro-highspeed": "kimi-k3.1-pro-highspeed",
+    ]
 
     private static let identityPrefixes = [
         "openai-codex/", "openai/", "anthropic/", "deepseek/",
@@ -652,7 +691,9 @@ nonisolated enum Pricing {
     /// DSH 的 DeepSeek 路由名：`deepseek-account/deepseek-flash`（账号登录）、`deepseek-official/deepseek-v4-flash`（API Key）。
     private static let pricingOnlyPrefixes = [
         "antigravity/", "z-ai/", "zai/", "minimax/",
-        "deepseek-account/", "deepseek-official/"
+        "deepseek-account/", "deepseek-official/",
+        // Kimi 渠道前缀只在这里剥除；订阅路由是否对应公开 API 型号由精确白名单决定。
+        "moonshotai/", "moonshot/", "kimi-code/"
     ]
 
     private static let pricingPrefixes = identityPrefixes + pricingOnlyPrefixes
@@ -902,7 +943,7 @@ nonisolated enum Pricing {
             case .dsh:
                 // DSH 无 Fast 档位概念。
                 return nil
-            case .antigravity:
+            case .antigravity, .kimi:
                 // Antigravity 无 Fast 档位概念。
                 return nil
             }
@@ -1029,9 +1070,12 @@ nonisolated enum Pricing {
         let cacheRuleBody = "claude-cache-creation-1h:\(claudeCacheCreation1hMultiplier)"
         let fixedOverrideBody = fixedLocalOverrideKeys.sorted().joined(separator: ";")
         let fixedFastOverrideBody = fixedFastLocalOverrideKeys.sorted().joined(separator: ";")
-        // 查价前缀变化会让原本未定价的用量命中价格，也要触发重建。
+        // 查价前缀、Cursor 解析版本或 Kimi 精确路由映射变化都需要触发重建。
         let pricingPrefixBody = pricingPrefixes.joined(separator: ";")
-        return "\(baseBody)|\(tierBody)|\(timedTierBody)|\(timedFastBody)|\(fastLongBody)|\(timedFastLongBody)|\(overrideBody)|\(fixedOverrideBody)|\(fixedFastOverrideBody)|\(fastPriceBody)|\(cacheRuleBody)|\(pricingPrefixBody)"
+        let pricingAliasBody = "model-identity-cursor-v1;" + kimiAPIPricingAliases.keys.sorted().map {
+            "kimi-api:\($0)=\(kimiAPIPricingAliases[$0]!)"
+        }.joined(separator: ";")
+        return "\(baseBody)|\(tierBody)|\(timedTierBody)|\(timedFastBody)|\(fastLongBody)|\(timedFastLongBody)|\(overrideBody)|\(fixedOverrideBody)|\(fixedFastOverrideBody)|\(fastPriceBody)|\(cacheRuleBody)|\(pricingPrefixBody)|\(pricingAliasBody)"
     }
 
     private static func fingerprintBody(_ values: [String: ModelPrice], prefix: String) -> String {

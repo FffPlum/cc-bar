@@ -243,8 +243,8 @@ struct ProjectStatsView: View {
                 ? tr("No project usage today", "今天还没有项目用量")
                 : tr("No project usage in this range", "该范围内没有项目用量"),
             message: tr(
-                "Project usage comes from local Claude Code, Codex, Pi, OpenCode and DSH conversation logs.",
-                "项目用量来自本机 Claude Code、Codex、Pi、OpenCode、DSH 的对话日志。"
+                "Project usage comes from local Claude Code, Codex, Antigravity, Pi, OpenCode, DSH and Kimi Code conversation logs.",
+                "项目用量来自本机 Claude Code、Codex、Antigravity、Pi、OpenCode、DSH、Kimi Code 的对话日志。"
             ),
             showLast30Days: range != .last30 && range != .all ? {
                 granularity = .day
@@ -757,11 +757,12 @@ private struct ProjectDetailView: View {
                         ) { app in
                             ServiceTile(app: app, size: 12)
                         }
-                        Text(model.model)
+                        Text(ModelDisplayName.text(model.model))
                             .font(.system(size: 11.5, design: .monospaced))
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .layoutPriority(1)
+                            .nativeHover(ModelDisplayName.text(model.model))
                         Spacer(minLength: 6)
                         Text(metric == .tokens ? StatsFormatter.cost(model.totals.costUSD) : StatsFormatter.compactToken(model.totals.totalTokens))
                             .font(.system(size: 10.5))

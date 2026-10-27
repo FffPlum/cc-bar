@@ -9,19 +9,21 @@
   Monitor real-time quotas and reset countdowns for Codex, Claude Code, Cursor, and Antigravity in the menu bar; analyze tokens, costs, and conversations offline locally.
 </p>
 
+This repository is independently maintained from [nanvon/cc-bar](https://github.com/nanvon/cc-bar). Downloads, updates, and issue reports use this repository.
+
 <p align="center">
-  <a href="https://github.com/nanvon/cc-bar/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/v/release/nanvon/cc-bar?color=brightgreen"></a>
-  <img alt="Downloads" src="https://img.shields.io/github/downloads/nanvon/cc-bar/total?color=blue">
-  <a href="https://github.com/nanvon/cc-bar/releases/latest"><img alt="Latest Downloads" src="https://img.shields.io/github/downloads/nanvon/cc-bar/latest/total?label=latest%20downloads&color=blue"></a>
+  <a href="https://github.com/FffPlum/cc-bar/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/v/release/FffPlum/cc-bar?color=brightgreen"></a>
+  <img alt="Downloads" src="https://img.shields.io/github/downloads/FffPlum/cc-bar/total?color=blue">
+  <a href="https://github.com/FffPlum/cc-bar/releases/latest"><img alt="Latest Downloads" src="https://img.shields.io/github/downloads/FffPlum/cc-bar/latest/total?label=latest%20downloads&color=blue"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/nanvon/cc-bar/releases/latest">Download</a> ·
+  <a href="https://github.com/FffPlum/cc-bar/releases/latest">Download</a> ·
   <a href="#-service-support-matrix">Service Matrix</a> ·
   <a href="#-features">Features</a> ·
   <a href="#-data-and-privacy-security">Security</a> ·
   <a href="#-build-from-source">Build</a> ·
-  <a href="https://github.com/nanvon/cc-bar/issues">Issues</a> ·
+  <a href="https://github.com/FffPlum/cc-bar/issues">Issues</a> ·
   <a href="README.md">简体中文</a>
 </p>
 
@@ -46,6 +48,7 @@ cc-bar presents two types of data: **Subscription Quotas** queried directly from
 | **Command Code** | 5h / weekly quotas, GOAT monthly Credits | Supported | — | — | 5-level auto-detection / Keychain Key |
 | **OpenCode Go** | 5h / weekly / monthly quotas | Supported | — | — | OpenCode / Pi read-only detection / Keychain Key |
 | **Pi / OpenCode / DSH** | — | — | Local sessions (Pi / OpenCode / DSH multi-frame zstd) | — | Strictly read-only local logs & DB |
+| **Kimi Code** | 5-hour / weekly / monthly quotas, when available | Supported | New and legacy CLI sessions, including subtasks; API estimates for priced models | — | Local CLI OAuth (automatic renewal) / official API key |
 
 ---
 
@@ -96,7 +99,7 @@ cc-bar presents two types of data: **Subscription Quotas** queried directly from
 > **System Requirement**: macOS 14 (Sonoma) or later.<br>
 > **Prerequisites**: Relevant AI coding tools must be logged in at least once via their respective CLIs or desktop apps.
 
-1. Download the latest `CCBar.dmg` (or `CCBar.app.zip`) from the [Releases page](https://github.com/nanvon/cc-bar/releases/latest).
+1. Download the latest `CCBar.dmg` (or `CCBar.app.zip`) from the [Releases page](https://github.com/FffPlum/cc-bar/releases/latest).
 2. Open the DMG image and drag `CCBar.app` into your `/Applications` directory.
 
 Upgrading to a version with the in-app updater for the first time requires manual installation as described above. Subsequent updates can be viewed under Settings → General → Check for Updates, and installed automatically with restart by clicking "Download and Install".
@@ -140,7 +143,7 @@ Usage logs are parsed and stored locally. Quotas, Cursor remote metering, servic
 > If you have concerns about pre-compiled binaries, you are welcome to inspect the source code and [build from source](#-build-from-source).
 
 > [!NOTE]
-> **Reporting Issues**: Open Settings → General → Diagnostics → Export Diagnostic Logs. After confirmation, a zip bundle will be revealed in Finder; attach it to an [Issue](https://github.com/nanvon/cc-bar/issues). `summary.txt` inside the bundle is plaintext for easy review before sending.
+> **Reporting Issues**: Open Settings → General → Diagnostics → Export Diagnostic Logs. After confirmation, a zip bundle will be revealed in Finder; attach it to an [Issue](https://github.com/FffPlum/cc-bar/issues). `summary.txt` inside the bundle is plaintext for easy review before sending.
 
 ---
 
@@ -169,7 +172,7 @@ Before building, set up `SPARKLE_PUBLIC_ED_KEY` according to [Release Guide](doc
 
 ## 🔗 Related Projects
 
-Tools by the same author sharing the same quota calculation logic and design language:
+Related projects from the upstream author:
 
 | Project | Platform | Tech Stack |
 | :--- | :--- | :--- |

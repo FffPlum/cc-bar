@@ -10,6 +10,7 @@ struct QuotaRefreshPlan: Equatable, Sendable {
     var refreshCursor: Bool
     var refreshCommandCode: Bool
     var refreshOpenCodeGo: Bool
+    var refreshKimi: Bool = false
     /// 有可见导入 Codex 账号时需要调度导入刷新（是否真正刷新仍按各账号
     /// 自身 `visibleInPopover` 过滤；此处只表达"存在可见项"）。
     var refreshImported: Bool
@@ -25,6 +26,7 @@ struct QuotaRefreshPlan: Equatable, Sendable {
         showCursor: Bool,
         showCommandCode: Bool = false,
         showOpenCodeGo: Bool = false,
+        showKimi: Bool = false,
         hasVisibleImported: Bool
     ) -> QuotaRefreshPlan {
         QuotaRefreshPlan(
@@ -34,6 +36,7 @@ struct QuotaRefreshPlan: Equatable, Sendable {
             refreshCursor: showCursor,
             refreshCommandCode: showCommandCode,
             refreshOpenCodeGo: showOpenCodeGo,
+            refreshKimi: showKimi,
             refreshImported: hasVisibleImported,
             canMirrorPrimary: showCodex
         )

@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import AppKit
 
 // MARK: - PopoverRootView
@@ -124,7 +125,7 @@ struct PopoverRootView: View {
     /// header 说"刚刷新过"、下面每个服务却挂着报错,自相矛盾;而 `lastSuccessAt`
     /// 冷启动是从缓存的 `updatedAt` 恢复的,完全离线启动也会显示"X 前已刷新"。
     private func headerSubtitle(now: Date) -> String {
-        let states = enabledPrimaryApps.map { appState.refreshState(for: $0) }
+        let states = displayedRefreshStates
         let latest = states.compactMap(\.lastSuccessAt).max()
         let failing = states.contains { $0.lastError != nil }
         let networkDown = Self.allFailuresAreNetwork(states)
@@ -170,7 +171,7 @@ struct PopoverRootView: View {
             $0.visibleInPopover && !appState.importedCodexAccountMirrorsPrimary($0)
         }
 
-        if providers.isEmpty && !hasImported {
+        if providers.isEmpty && !hasImported && !appState.moonshotAccounts.contains(where: \.visibleInPopover) {
             VStack(spacing: 6) {
                 Text(tr("No services turned on", "未开启任何服务"))
                     .font(.system(size: 12, weight: .medium))
@@ -194,12 +195,28 @@ struct PopoverRootView: View {
                     if index > 0 {
                         Divider().padding(.horizontal, 16)
                     }
-                    primaryServiceBlock(provider)
+                    if provider.app == .kimi,
+                       appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty
+                        || appState.kimiManagedAccounts.contains(where: \.visibleInPopover) {
+                        AccountVendorHeader(title: provider.title, logoName: provider.logoName,
+                                            status: appState.displayedKimiServiceStatus)
+                    }
+                    if provider.app != .kimi || appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty {
+                        primaryServiceBlock(provider)
+                    }
 
                     if provider.app == .codex && hasOtherCodexAfterDedup {
                         Divider().padding(.horizontal, 16)
                         OtherCodexAccountsSection(dedupPrimary: true)
                     }
+                    if provider.app == .kimi && appState.kimiManagedAccounts.contains(where: { $0.visibleInPopover && !appState.kimiManagedMirrorsCLI($0) }) {
+                        if appState.kimiAccount != nil { Divider().padding(.horizontal, 16) }
+                        KimiManagedAccountsSection()
+                    }
+                }
+                if appState.moonshotAccounts.contains(where: \.visibleInPopover) {
+                    Divider().padding(.horizontal, 16)
+                    MoonshotBalancesSection()
                 }
             }
         }
@@ -232,6 +249,8 @@ struct PopoverRootView: View {
             email = appState.commandCodeAccount?.email ?? appState.commandCodeAccount?.login
             plan = appState.commandCodeAccount?.planType ?? appState.quotaSnapshot(for: .commandCode)?.planType
             fallback = "Command Code"
+        case .kimi:
+            return appState.kimiDisplaySubtitle
         case .opencodeGo:
             // Go 没有可读的账号信息，副标题只显示 vendor。
             email = nil
@@ -262,7 +281,10 @@ struct PopoverRootView: View {
             periodIsBillingCycle: cursorCycleBounds(for: provider.app) != nil,
             todayCost: todayCost(for: provider.app),
             serviceStatus: serviceStatus(for: provider.app),
-            showsCost: provider.showsCost
+            showsCost: provider.showsCost,
+            accountEdition: provider.app == .kimi ? appState.kimiCLIRegion?.displayName : nil,
+            isKimiCurrentAccount: provider.app == .kimi && appState.kimiAccount != nil,
+            showsProviderHeader: provider.app != .kimi
         )
     }
 
@@ -326,6 +348,7 @@ struct PopoverRootView: View {
         case .cursor: cursorTodayCost
         case .commandCode: nil
         case .opencodeGo: nil
+        case .kimi: nil
         }
     }
 
@@ -340,17 +363,23 @@ struct PopoverRootView: View {
         case .codex: appState.codexServiceStatus
         case .claude: appState.claudeServiceStatus
         case .cursor: appState.cursorServiceStatus
+        case .kimi: appState.kimiServiceStatus
         case .antigravity, .commandCode, .opencodeGo: nil
         }
         guard let status else { return nil }
-        // 本机连不上 statuspage 时旧快照仍被保留(刻意的,别的信息还能用),
+        let unreachable = app == .kimi
+            ? appState.kimiServiceStatusUnreachable
+            : appState.serviceStatusUnreachable
+        // 获取失败时旧快照仍被保留(刻意的,别的信息还能用),
         // 但它已经不代表"现在"的服务状态了,不能继续拿一个陈旧的绿点说"服务正常"。
-        guard !appState.serviceStatusUnreachable else {
+        guard !unreachable else {
             return ServiceStatus(
                 indicator: .unknown,
                 description: nil,
                 updatedAt: status.updatedAt,
-                fetchedAt: status.fetchedAt
+                fetchedAt: status.fetchedAt,
+                components: status.components,
+                isStale: true
             )
         }
         return status
@@ -365,7 +394,7 @@ struct PopoverRootView: View {
     /// 由 `storeXxx` 清空,所以它非空就等于"最近一次尝试没成功"。
     private var headerState: CCRefreshState? {
         let settings = SettingsStore.shared
-        let states = enabledPrimaryApps.map { appState.refreshState(for: $0) }
+        let states = displayedRefreshStates
         guard !states.isEmpty else { return nil }
         let latest = states.compactMap(\.lastSuccessAt).max()
         let failing = states.contains { $0.lastError != nil }
@@ -388,7 +417,7 @@ struct PopoverRootView: View {
     /// 状态点 tooltip。失败态用专门文案,而不是只说"数据陈旧"——用户需要知道
     /// 看到的数字是上一次成功留下的,不是现在的。
     private func headerStateTooltip(_ state: CCRefreshState) -> String {
-        let states = enabledPrimaryApps.map { appState.refreshState(for: $0) }
+        let states = displayedRefreshStates
         guard states.contains(where: { $0.lastError != nil }) else { return state.tooltip }
         if Self.allFailuresAreNetwork(states) {
             return tr(
@@ -400,6 +429,22 @@ struct PopoverRootView: View {
             "Refresh failing — showing the last data that came through",
             "刷新失败,显示的是上次成功取到的数据"
         )
+    }
+
+    private var displayedRefreshStates: [QuotaRefreshState] {
+        var states = enabledPrimaryApps.compactMap { app -> QuotaRefreshState? in
+            if app == .kimi, appState.kimiAccount == nil, !appState.kimiManagedAccounts.isEmpty { return nil }
+            return appState.refreshState(for: app)
+        }
+        if SettingsStore.shared.isProviderEnabled(.kimi) {
+            states += appState.kimiManagedAccounts.filter {
+                $0.visibleInPopover || $0.showInMenuBar || $0.showInFloatingHUD
+            }.map { appState.kimiManagedRefreshStates[$0.id] ?? QuotaRefreshState() }
+        }
+        states += appState.moonshotAccounts.filter {
+            $0.visibleInPopover || $0.showInMenuBar || $0.showInFloatingHUD
+        }.map { appState.moonshotRefreshStates[$0.id] ?? QuotaRefreshState() }
+        return states
     }
 
     private var enabledPrimaryApps: [QuotaApp] {
@@ -467,7 +512,33 @@ struct PopoverRootView: View {
 
 // MARK: - ServiceBlockView
 
-private struct ServiceBlockView: View {
+/// One vendor title and status, followed by account rows with the same inset.
+struct AccountVendorHeader: View {
+    let title: String
+    var logoName: String? = nil
+    var status: ServiceStatus? = nil
+
+    var body: some View {
+        HStack(spacing: 9) {
+            if let logoName {
+                ServiceTile(logoName: logoName, fallback: "K", tint: .purple)
+            } else {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+            }
+            Text(title).font(.system(size: 13, weight: .semibold))
+            Spacer(minLength: 0)
+            if let status { ServiceStatusDot(status: status, title: title) }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 4)
+    }
+}
+
+struct ServiceBlockView: View {
     let app: QuotaApp
     let title: String
     let subtitle: String
@@ -482,11 +553,24 @@ private struct ServiceBlockView: View {
     let todayCost: Decimal?
     let serviceStatus: ServiceStatus?
     let showsCost: Bool
+    var accountEdition: String? = nil
+    var isKimiCurrentAccount = false
+    var showsProviderHeader = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            headerRow
-            bodyRow
+            if showsProviderHeader {
+                headerRow
+            } else {
+                accountHeader
+            }
+            if snapshot?.isEmptyKimiQuota == true {
+                Text(tr("No quota data available", "暂无额度数据"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            } else {
+                bodyRow
+            }
             ForEach(compactLimits) { limit in
                 compactLimitRow(limit)
             }
@@ -510,49 +594,63 @@ private struct ServiceBlockView: View {
         HStack(spacing: 9) {
             ServiceTile(logoName: logoName, fallback: fallback, tint: tint)
 
-            // 服务名与副标题之间用固定 8pt 间距，不用空格字符（空格宽度随字体变化）；
-            // 宽度不够时只截断副标题，服务名保持完整。
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .kerning(-0.1)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                Text(subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            if let accountEdition {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(title).font(.system(size: 13, weight: .semibold))
+                        if isKimiCurrentAccount { KimiCurrentAccountBadge() }
+                        Text(accountEdition).font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            } else {
+                headerLabels
             }
 
             Spacer(minLength: 0)
 
-            // `.unknown` 也要显示(灰点):它现在还承担"本机拉不到 statuspage"这一档,
-            // 直接隐藏会让用户以为功能没了,而继续显示绿点则是在说一件不成立的事。
             if let status = serviceStatus {
-                Circle()
-                    .fill(status.indicator.dotColor)
-                    .frame(width: 6, height: 6)
-                    .help(serviceStatusTooltip(status))
+                ServiceStatusDot(status: status, title: title)
             }
         }
     }
 
-    /// 时间一律用 `fetchedAt`(本机上次成功拉到 statuspage 的时刻),不用 `updatedAt`
-    /// (statuspage 页面自己的更新时间)。用户要判断的是"这个状态有多新",
-    /// 而断网时后者根本不动,会让陈旧数据看起来仍然及时。
-    private func serviceStatusTooltip(_ status: ServiceStatus) -> String {
-        let age = PopoverRootView.relativeAge(from: status.fetchedAt)
-        if status.indicator == .unknown {
-            return tr(
-                "Couldn't check official status · last updated \(age) ago",
-                "官方状态获取失败 · \(age) 前的数据"
-            )
+    private var accountHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(subtitle)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if isKimiCurrentAccount { KimiCurrentAccountBadge() }
+            if let accountEdition {
+                Text(accountEdition)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+            Spacer(minLength: 0)
         }
-        let trimmed = status.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let head = trimmed.isEmpty ? status.indicator.label : trimmed
-        return tr("\(head) · checked \(age) ago", "\(head) · \(age) 前获取")
+    }
+
+    /// Other services keep the existing inline title and account presentation.
+    private var headerLabels: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .kerning(-0.1)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .layoutPriority(1)
+            Text(subtitle)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
     }
 
     private var bodyRow: some View {
@@ -812,5 +910,140 @@ private struct ServiceBlockView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if oneLine.count <= 110 { return oneLine }
         return String(oneLine.prefix(107)) + "..."
+    }
+}
+
+@MainActor
+private final class QuickHoverPresentation: ObservableObject {
+    @Published var isPresented = false
+    private var anchorHovered = false
+    private var contentHovered = false
+    private var pinned = false
+    private var pending: Task<Void, Never>?
+
+    func hover(_ inside: Bool, content: Bool = false) {
+        if content { contentHovered = inside } else { anchorHovered = inside }
+        pending?.cancel()
+        pending = nil
+        if anchorHovered || contentHovered {
+            guard !isPresented else { return }
+            pending = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                guard !Task.isCancelled, let self, self.anchorHovered || self.contentHovered else { return }
+                self.isPresented = true
+            }
+        } else if !pinned {
+            pending = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                guard !Task.isCancelled, let self, !self.anchorHovered, !self.contentHovered else { return }
+                self.isPresented = false
+            }
+        }
+    }
+
+    func toggle() {
+        pending?.cancel()
+        isPresented.toggle()
+        pinned = isPresented
+    }
+
+    func reset() {
+        pending?.cancel()
+        pending = nil
+        pinned = false
+        anchorHovered = false
+        contentHovered = false
+        isPresented = false
+    }
+}
+
+struct ServiceStatusDot: View {
+    let status: ServiceStatus
+    let title: String
+    @StateObject private var presentation = QuickHoverPresentation()
+
+    var body: some View {
+        Button { presentation.toggle() } label: {
+            Circle().fill(status.indicator.dotColor).frame(width: 6, height: 6)
+                .padding(5).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("\(title): \(status.isStale ? tr("Status unknown", "状态未知") : status.indicator.componentLabel)"))
+        .onHover { presentation.hover($0) }
+        .onDisappear { presentation.reset() }
+        .popover(isPresented: $presentation.isPresented, arrowEdge: .bottom) {
+            ServiceStatusDetailView(status: status, title: title)
+                .onHover { presentation.hover($0, content: true) }
+                .onDisappear { presentation.reset() }
+        }
+    }
+}
+
+private struct ServiceStatusDetailView: View {
+    let status: ServiceStatus
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(status.isStale
+                 ? tr("Official status unavailable · showing older data", "官方状态获取失败 · 显示旧数据")
+                 : tr("Official status", "官方状态"))
+                .font(.system(size: 12.5, weight: .semibold))
+            if status.components.isEmpty {
+                statusRow(name: title, indicator: status.indicator)
+                if !status.isStale, let description = status.description, !description.isEmpty {
+                    Text(description).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(status.components, id: \.id) { component in
+                    statusRow(name: component.name, indicator: component.indicator)
+                }
+            }
+            Divider()
+            Text(status.isStale
+                 ? tr("Last fetched \(PopoverRootView.relativeAge(from: status.fetchedAt)) ago; statuses below are not current",
+                      "\(PopoverRootView.relativeAge(from: status.fetchedAt)) 前获取；以上状态不是当前状态")
+                 : tr("Fetched \(PopoverRootView.relativeAge(from: status.fetchedAt)) ago",
+                      "\(PopoverRootView.relativeAge(from: status.fetchedAt)) 前获取"))
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(width: 300, alignment: .leading)
+    }
+
+    private func statusRow(name: String, indicator: ServiceStatusIndicator) -> some View {
+        HStack(spacing: 8) {
+            Circle().fill(indicator.dotColor).frame(width: 6, height: 6)
+            Text(name).font(.system(size: 11.5)).lineLimit(2)
+            Spacer(minLength: 8)
+            Text(indicator.componentLabel)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct NativeHoverPopover: ViewModifier {
+    let text: String
+    @StateObject private var presentation = QuickHoverPresentation()
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { if !text.isEmpty { presentation.hover($0) } }
+            .onDisappear { presentation.reset() }
+            .popover(isPresented: $presentation.isPresented, arrowEdge: .bottom) {
+                Text(text).font(.system(size: 11.5)).padding(12)
+                    .frame(maxWidth: 420).fixedSize(horizontal: false, vertical: true)
+                    .onHover { presentation.hover($0, content: true) }
+                    .onDisappear { presentation.reset() }
+            }
+    }
+}
+
+extension View {
+    func nativeHover(_ text: String) -> some View {
+        modifier(NativeHoverPopover(text: text))
     }
 }

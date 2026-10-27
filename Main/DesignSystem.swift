@@ -1,6 +1,20 @@
 import SwiftUI
 import AppKit
 
+/// Marks the identity used by the local Kimi Code CLI, independently of quota.
+struct KimiCurrentAccountBadge: View {
+    var body: some View {
+        Text(tr("In use by Kimi", "Kimi 在用"))
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .overlay { Capsule().strokeBorder(Color.secondary.opacity(0.35), lineWidth: 0.5) }
+            .fixedSize()
+            .help(tr("The account currently signed in to Kimi Code on this Mac", "Kimi Code 自己的登录"))
+    }
+}
+
 // MARK: - Screenshot privacy
 
 /// 仅用于展示，不改写原始数据。匿名编号在本次 App 运行期间跨窗口、排序和筛选保持一致。
@@ -90,6 +104,7 @@ extension QuotaApp {
         case .cursor: .cursorAccent
         case .commandCode: Color(red: 24 / 255, green: 24 / 255, blue: 27 / 255)
         case .opencodeGo: .opencodeAccent
+        case .kimi: .purple
         }
     }
 }
@@ -108,6 +123,7 @@ extension UsageApp {
         // Asset Catalog : DshAccent），用于图表 / 色块；tile 走官方品牌主色黑底，不用此色。
         case .dsh: .dshAccent
         case .antigravity: .antigravityAccent
+        case .kimi: .purple
         }
     }
 
@@ -120,6 +136,7 @@ extension UsageApp {
         case .opencode: "OpenCode"
         case .dsh: "DSH"
         case .antigravity: "Antigravity"
+        case .kimi: "Kimi Code"
         }
     }
 
@@ -354,6 +371,7 @@ struct ServiceTile: View {
         switch logoName {
         case "dsh": Color(red: 15 / 255, green: 17 / 255, blue: 21 / 255)
         case "cursor": Color(red: 44 / 255, green: 44 / 255, blue: 46 / 255)
+        case "kimi": .black
         default: nil
         }
     }
@@ -382,7 +400,7 @@ struct ServiceTile: View {
         if let nsImage = LogoCache.image(named: logoName) {
             Image(nsImage: nsImage)
                 .resizable()
-                .renderingMode(.template)
+                .renderingMode(logoName == "kimi" ? .original : .template)
                 .foregroundStyle(foreground)
                 .frame(width: logoSize, height: logoSize)
         } else {
@@ -412,10 +430,11 @@ private enum LogoCache {
 
     static func image(named name: String) -> NSImage? {
         if let cached = cache.object(forKey: name as NSString) { return cached }
-        guard let url = Bundle.main.url(forResource: name, withExtension: "svg"),
-              let image = NSImage(contentsOf: url)
+        guard let url = ["svg", "png", "ico"].compactMap({
+            Bundle.main.url(forResource: name, withExtension: $0)
+        }).first, let image = NSImage(contentsOf: url)
         else { return nil }
-        image.isTemplate = true
+        image.isTemplate = name != "kimi"
         cache.setObject(image, forKey: name as NSString)
         return image
     }

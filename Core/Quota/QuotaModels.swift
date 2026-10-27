@@ -7,6 +7,7 @@ nonisolated enum QuotaApp: String, Sendable, Codable, CaseIterable, Hashable {
     case cursor
     case commandCode
     case opencodeGo
+    case kimi
 
     /// 对应的用量数据源；`nil` = 该服务无用量统计数据（如仅提供额度监控）。
     var usageApp: UsageApp? {
@@ -15,6 +16,7 @@ nonisolated enum QuotaApp: String, Sendable, Codable, CaseIterable, Hashable {
         case .claude: return .claude
         case .cursor: return .cursor
         case .antigravity: return .antigravity
+        case .kimi: return .kimi
         case .commandCode, .opencodeGo: return nil
         }
     }
@@ -94,6 +96,10 @@ nonisolated struct QuotaProviderDescriptor: Sendable, Hashable, Identifiable {
             showsCost: false,
             supportsMenuBar: true,
             supportsFloatingHUD: true
+        ),
+        QuotaProviderDescriptor(
+            app: .kimi, title: "Kimi Code", vendor: "Moonshot AI", logoName: "kimi", fallback: "K",
+            showsCost: false, supportsMenuBar: true, supportsFloatingHUD: true
         ),
     ]
 

@@ -113,7 +113,7 @@ struct ProviderDisplaySettings: Sendable, Codable, Equatable {
             enabledByDefault
         case .cursor:
             ProviderDisplaySettings(enabled: false, menuBar: false, floatingHUD: false)
-        case .commandCode, .opencodeGo:
+        case .commandCode, .opencodeGo, .kimi:
             ProviderDisplaySettings(enabled: false, menuBar: true, floatingHUD: true)
         }
     }
@@ -184,7 +184,7 @@ enum CommandCodeCredentialPreference: String, CaseIterable, Identifiable, Codabl
 @Observable
 @MainActor
 final class SettingsStore {
-    static let shared = SettingsStore()
+    static let shared = SettingsStore(defaults: .standard)
 
     private let defaults: UserDefaults
 
@@ -379,7 +379,7 @@ final class SettingsStore {
     /// 用于首次启动按凭据检测结果收敛默认开关，已装机用户不受影响。
     let isFreshInstall: Bool
 
-    private init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults) {
         self.defaults = defaults
         isFreshInstall = defaults.data(forKey: Keys.providerDisplaySettings) == nil
             && defaults.object(forKey: Keys.showCodex) == nil

@@ -8,7 +8,8 @@ import Foundation
 /// 单条脏数据跳过即可，不拖垮整个 feed。
 nonisolated enum ModelsDevPricingDecoder {
     /// 同名模型跨官方 provider 出现时，保持这个显式优先级；不要使用 Set 遍历顺序。
-    nonisolated private static let allowedProviders = ["anthropic", "openai", "deepseek"]
+    // Moonshot 只收全球 API 的 USD 价格；订阅计划的零价格及人民币换算价不纳入。
+    nonisolated private static let allowedProviders = ["anthropic", "openai", "deepseek", "moonshotai"]
 
     nonisolated private struct Candidate {
         let key: String

@@ -14,6 +14,8 @@ nonisolated struct UsageScanRoots: Sendable {
     var dshRoot: URL
     /// Antigravity 数据根（含 `conversations/`）。默认空：测试不注入就不会读到真实对话库。
     var antigravityRoots: [URL] = []
+    /// Kimi share 根；测试默认空，不访问用户真实日志。
+    var kimiRoots: [URL] = []
 
     static var production: UsageScanRoots {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -28,7 +30,8 @@ nonisolated struct UsageScanRoots: Sendable {
             piRoot: home.appendingPathComponent(".pi/agent/sessions", isDirectory: true),
             opencodeDatabaseURL: OpencodeScanner.defaultDatabaseURL(),
             dshRoot: DshSessionScanner.defaultRoot,
-            antigravityRoots: AntigravityScanner.defaultRoots()
+            antigravityRoots: AntigravityScanner.defaultRoots(),
+            kimiRoots: KimiSessionScanner.defaultRoots()
         )
     }
 }
@@ -244,6 +247,8 @@ final class UsageService {
     /// 之后到达的请求归入下一批；同一批只重扫一次日志。
     private var pendingCycleRebuildReasons: [String] = []
     private var cycleRebuildRequestTask: Task<Void, Never>?
+    /// 最近一次成功完成的常规扫描是否完整读取 Kimi；周期补算据此决定复用状态还是冻结旧桶。
+    private var kimiScanCompleteForCycleRebuild: Bool?
     /// 存在窗口之外、受限重建补不回的周期用量缺口。设置页据此提示用户手动重算；
     /// 手动「重新计算用量」成功后清除。
     private(set) var cycleUsageNeedsManualRecalculation = false
@@ -1114,8 +1119,13 @@ final class UsageService {
         let pi = await piTask
         let opencode = await opencodeTask
         let dsh = await dshTask
+        // drain 已提交本轮增量；直接还原 Kimi 的已归属请求，含已删除文件贡献，不再重读正文。
+        let kimiState = cachedScanState?.kimi
+        let kimiEntries = kimiState.map { KimiSessionScanner.committedEntries(from: $0) } ?? []
         let scanEnded = Date()
         let affectedCycles = cycles.filter { affectedCycleIDs.contains($0.id) }
+        let kimiFailed = affectedCycles.contains { $0.app == .kimi }
+            && (kimiState == nil || kimiScanCompleteForCycleRebuild == false)
         let failedApps = Self.cycleSourceFailedApps(
             Self.cycleRebuildFailedApps(
                 claude: claude,
@@ -1124,7 +1134,8 @@ final class UsageService {
             ),
             opencode: opencode,
             opencodeDatabaseURL: opencodeDatabaseURL,
-            dshFailed: dsh.map { !$0.isComplete } ?? false
+            dshFailed: dsh.map { !$0.isComplete } ?? false,
+            kimiFailed: kimiFailed
         )
         let rebuildableCycleIDs = Self.cycleRebuildableCycleIDs(
             cycles: affectedCycles,
@@ -1132,13 +1143,13 @@ final class UsageService {
             failedApps: failedApps
         )
         await commitCycleAggregation(
-            exactEntries: (claude.entries + codex.entries + pi.entries + opencode.entries + (dsh?.entries ?? []))
+            exactEntries: (claude.entries + codex.entries + pi.entries + opencode.entries + (dsh?.entries ?? []) + kimiEntries)
                 .filter { !failedApps.contains($0.app) },
             cycles: cycles,
             accountSegments: accountSegments,
             failedApps: failedApps,
             rebuildRange: rebuildableCycleIDs,
-            sourceApps: Set<UsageApp>([.claude, .codex])
+            sourceApps: Set<UsageApp>([.claude, .codex, .kimi])
                 .union(CycleUsageAggregator.otherAgentSourceApps)
                 .subtracting(failedApps)
                 .subtracting(dshFrozen ? [.dsh] : [])
@@ -1200,13 +1211,14 @@ final class UsageService {
     }
 
     /// 周期重建的来源失败集合。OpenCode 库从未存在（本机没装）是正常状态，库在却读不全才算失败；
-    /// DSH 由调用方判定（扫描不完整、冻结等），默认目录从未创建时扫描本身就是完整的。
+    /// DSH / Kimi 由调用方判定（扫描不完整、冻结或缺少已提交状态），默认目录从未创建是正常空扫描。
     /// 其他 Agent 只归入 Codex 周期，Codex 周期本轮不能重建时它们也不能算完成。
     nonisolated static func cycleSourceFailedApps(
         _ failedApps: Set<UsageApp>,
         opencode: OpencodeScanner.Result?,
         opencodeDatabaseURL: URL,
-        dshFailed: Bool = false
+        dshFailed: Bool = false,
+        kimiFailed: Bool = false
     ) -> Set<UsageApp> {
         var result = failedApps
         if let opencode, opencode.error != nil || !opencode.isComplete,
@@ -1216,6 +1228,9 @@ final class UsageService {
         if dshFailed {
             result.insert(.dsh)
         }
+        if kimiFailed {
+            result.insert(.kimi)
+        }
         if result.contains(.codex) {
             result.formUnion(CycleUsageAggregator.otherAgentSourceApps)
         }
@@ -1224,7 +1239,7 @@ final class UsageService {
 
     /// 周期统计需要覆盖的来源。有 Codex 周期时，Pi / OpenCode / DSH 里的 Codex 订阅用量也要归集。
     nonisolated static func requiredCycleSourceApps(cycles: [QuotaCycleRecord]) -> Set<UsageApp> {
-        let apps = Set(cycles.map(\.app)).intersection([.codex, .claude])
+        let apps = Set(cycles.map(\.app)).intersection([.codex, .claude, .kimi])
         return apps.contains(.codex) ? apps.union(CycleUsageAggregator.otherAgentSourceApps) : apps
     }
 
@@ -1338,13 +1353,14 @@ final class UsageService {
         await cycleReadyForTesting?()
         #endif
         // Pi 自身不会读取失败，只会随 Codex 一起推迟，不单独列名。
-        let failedProviderNames = [UsageApp.codex, .claude, .opencode, .dsh]
+        let failedProviderNames = [UsageApp.codex, .claude, .opencode, .dsh, .kimi]
             .filter { failedApps.contains($0) }
             .map { app -> String in
                 switch app {
                 case .codex: return "Codex"
                 case .claude: return "Claude Code"
                 case .dsh: return "DSH"
+                case .kimi: return "Kimi Code"
                 default: return "OpenCode"
                 }
             }
@@ -1525,6 +1541,11 @@ final class UsageService {
         let pi = await piTask?.value
         let opencode = await opencodeTask?.value
         let dsh = await dshTask?.value
+        // Kimi 已在 drain 中完成扫描和提交；初始补算同样复用其完整请求账本。
+        let kimiState = pendingApps.contains(.kimi) ? cachedScanState?.kimi : nil
+        let kimiEntries = kimiState.map { KimiSessionScanner.committedEntries(from: $0) } ?? []
+        let kimiFailed = pendingApps.contains(.kimi)
+            && (kimiState == nil || kimiScanCompleteForCycleRebuild == false)
         let pendingCycles = Self.cyclesToRebuild(cycles, for: pendingApps)
         let failedApps = Self.cycleSourceFailedApps(
             Self.cycleRebuildFailedApps(
@@ -1534,7 +1555,8 @@ final class UsageService {
             ),
             opencode: opencode,
             opencodeDatabaseURL: opencodeDatabaseURL,
-            dshFailed: dsh.map { !$0.isComplete } ?? false
+            dshFailed: dsh.map { !$0.isComplete } ?? false,
+            kimiFailed: kimiFailed
         )
         let pendingCycleIDs = Set(pendingCycles.map(\.id))
         let rebuildableCycleIDs = Self.cycleRebuildableCycleIDs(
@@ -1542,8 +1564,9 @@ final class UsageService {
             requestedCycleIDs: pendingCycleIDs,
             failedApps: failedApps
         )
-        let entries: [UsageEntry] = [claude?.entries, codex?.entries, pi?.entries, opencode?.entries, dsh?.entries]
+        var entries: [UsageEntry] = [claude?.entries, codex?.entries, pi?.entries, opencode?.entries, dsh?.entries]
             .compactMap { $0 }.flatMap { $0 }
+        entries.append(contentsOf: kimiEntries)
         await commitCycleAggregation(
             exactEntries: entries.filter { !failedApps.contains($0.app) },
             cycles: cycles,
@@ -1743,7 +1766,7 @@ final class UsageService {
             return .commitFailed("usage history store is read-only")
         }
         // 标识迁移尚未提交时（含没有可信进度的旧快照）按旧 Codex 身份严格核对。
-        let candidate = await buildRebuildCandidate(
+        var candidate = await buildRebuildCandidate(
             useLegacyCodexModels: usesLegacyCodexModels,
             preserveDeletedConversations: purpose != .restrictedRecovery
         )
@@ -1754,6 +1777,48 @@ final class UsageService {
             lastRebuildDiagnostic = "sources=(\(incomplete))"
             AppLog.warn(.usage, "usage rebuild rejected sources=\(incomplete)")
             return .rejectedIncompleteSources(incomplete)
+        }
+        // 旧 Cursor 身份在重算时可能被拆为带上下文 / 速度的新身份；没有逐桶对账不能覆盖历史。
+        let baselineConversations = conversationAggregator.snapshot()
+        var cursorSafe = UsageHistoryConsistency.cursorIdentityRebuildIsSafe(
+            baselineDay: aggregator.snapshotLocal(), candidateDay: candidate.dayBuckets,
+            baselineConversation: baselineConversations.buckets, candidateConversation: candidate.conversationBuckets,
+            baselineCycle: cycleAggregator.snapshot(), candidateCycle: candidate.cycleBuckets
+        )
+        if !cursorSafe, purpose != .restrictedRecovery, !usesLegacyCodexModels {
+            let baselineModels = Set(aggregator.snapshotLocal().filter { $0.app == .codex }.map(\.model))
+                .union(baselineConversations.buckets.filter { $0.app == .codex }.map(\.model))
+                .union(cycleAggregator.snapshot().filter { $0.app == .codex }.map(\.model))
+            let origins = Set(baselineModels.filter {
+                let lower = $0.lowercased()
+                return (lower.hasPrefix("cursor/") || lower.hasPrefix("magpie/cursor/"))
+                    && !$0.contains("@") && !$0.contains(":")
+            })
+            // 已有完整新身份时无法区分其请求与旧桶，不能折回并抹掉已保存的身份。
+            let hasExistingSplit = baselineModels.contains {
+                let old = CodexJSONLScanner.legacyStorageModel($0)
+                return old != $0 && origins.contains(old)
+            }
+            if !origins.isEmpty, !hasExistingSplit {
+                candidate = await buildRebuildCandidate(
+                    preserveDeletedConversations: true, cursorLegacyOrigins: origins
+                )
+                if let incomplete = candidate.incompleteSources {
+                    lastRebuildDiagnostic = "sources=(\(incomplete))"
+                    AppLog.warn(.usage, "usage rebuild rejected sources=\(incomplete)")
+                    return .rejectedIncompleteSources(incomplete)
+                }
+                cursorSafe = UsageHistoryConsistency.cursorIdentityRebuildIsSafe(
+                    baselineDay: aggregator.snapshotLocal(), candidateDay: candidate.dayBuckets,
+                    baselineConversation: baselineConversations.buckets, candidateConversation: candidate.conversationBuckets,
+                    baselineCycle: cycleAggregator.snapshot(), candidateCycle: candidate.cycleBuckets
+                )
+            }
+        }
+        if !cursorSafe {
+            lastRebuildDiagnostic = "cursor_identity_unverified"
+            AppLog.warn(.usage, "usage rebuild rejected cursor identity mismatch")
+            return .rejectedUsageChanged
         }
         // 只有受限恢复要求逐项相等：它的作用是证明旧历史与日志一致，才能采纳新进度。
         // 手动重建以现有日志为准、保留日志已删除的对话，差异是预期结果，只记录不拒绝。
@@ -1839,7 +1904,8 @@ final class UsageService {
     ///   受限恢复的核对传 false，候选只来自现有日志，才能和基准逐项比对。
     private func buildRebuildCandidate(
         useLegacyCodexModels: Bool = false,
-        preserveDeletedConversations: Bool
+        preserveDeletedConversations: Bool,
+        cursorLegacyOrigins: Set<String> = []
     ) async -> RebuildCandidate {
         let progress: ScanProgressCallback? = { [weak self] progress in
             DispatchQueue.main.async { self?.scanProgress = progress }
@@ -1852,6 +1918,8 @@ final class UsageService {
         let opencodeDatabaseURL = roots.opencodeDatabaseURL
         let dshRoot = roots.dshRoot
         let antigravityRoots = roots.antigravityRoots
+        let kimiRoots = roots.kimiRoots
+        let kimiPrevious = cachedScanState?.kimi
         let dshFrozen = isDshHistoryFrozen
         let preservedDshState = cachedScanState?.dsh ?? [:]
 
@@ -1914,6 +1982,9 @@ final class UsageService {
                 ? DshSessionScanner.frozenResult(preserving: preservedDshState)
                 : DshSessionScanner.scan(previous: [:], root: dshRoot, onProgress: progress)
         }.value
+        async let kimiTask = Task.detached(priority: .utility) {
+            KimiSessionScanner.scan(previous: kimiPrevious, roots: kimiRoots, force: true, onProgress: progress)
+        }.value
         async let antigravityTask = Task.detached(priority: .utility) {
             AntigravityScanner.scan(previous: nil, roots: antigravityRoots, onProgress: progress)
         }.value
@@ -1922,10 +1993,19 @@ final class UsageService {
         if claude.hasDeferredMessages { UsageLogWatcher.shared.requestRescan() }
         var codex = await codexTask
         if useLegacyCodexModels { codex = Self.legacyCodexResult(codex) }
+        if !cursorLegacyOrigins.isEmpty {
+            codex.entries = codex.entries.map { entry in
+                var folded = entry
+                let old = CodexJSONLScanner.legacyStorageModel(entry.model)
+                if cursorLegacyOrigins.contains(old) { folded.model = old }
+                return folded
+            }
+        }
         let pi = await piTask
         let opencode = await opencodeTask
         let dsh = await dshTask
         let antigravity = await antigravityTask
+        let kimi = await kimiTask
 
         recordLogReadFailures(claude: claude.readFailures, codex: codex.readFailures)
         var incomplete: [String] = []
@@ -1937,6 +2017,7 @@ final class UsageService {
             incomplete.append("OpenCode")
         }
         if !dshFrozen, !dsh.isComplete { incomplete.append("DSH") }
+        if !kimi.isComplete { incomplete.append("Kimi Code") }
 
         // 需要保留的历史分区（源库中已删除会话、DSH 历史贡献）先按基准装载，
         // 再由完整扫描结果覆盖；不能用空聚合器直接覆盖历史。
@@ -1946,7 +2027,7 @@ final class UsageService {
         let baselineCycles = cycleAggregator.snapshot()
         let candidateDaily = UsageAggregator()
         let candidateConversations = ConversationAggregator()
-        let sessionReplacedApps: Set<UsageApp> = [.opencode, .dsh, .antigravity]
+        let sessionReplacedApps: Set<UsageApp> = [.opencode, .dsh, .antigravity, .kimi]
         candidateDaily.load(from: baselineDay.filter { sessionReplacedApps.contains($0.app) })
         candidateConversations.load(
             infos: baselineConversation.infos.filter { sessionReplacedApps.contains($0.app) },
@@ -1961,6 +2042,7 @@ final class UsageService {
             aggregator: candidateDaily,
             conversations: candidateConversations
         )
+        _ = Self.applyKimiScan(kimi, aggregator: candidateDaily, conversations: candidateConversations)
         _ = Self.applyAntigravityScan(
             antigravity,
             aggregator: candidateDaily,
@@ -1970,9 +2052,9 @@ final class UsageService {
             entries: claude.entries + codex.entries + pi.entries,
             seeds: claude.conversationSeeds + codex.conversationSeeds + pi.conversationSeeds
         )
-        // OpenCode / DSH 从空状态扫描，给出的是现存会话的完整用量；DSH 冻结时不重灌。
+        // OpenCode / DSH / Kimi 给出刷新会话的完整贡献；DSH 冻结时不重灌。
         let cycleEntries = claude.entries + codex.entries + pi.entries + opencode.entries
-            + (dshFrozen ? [] : dsh.entries)
+            + (dshFrozen ? [] : dsh.entries) + kimi.entries
         let freshDshContributions = dshFrozen
             ? dshContributions
             : DshContributionStore.apply(scan: dsh, to: dshContributions).contributions
@@ -1995,16 +2077,19 @@ final class UsageService {
                 cycles: cycles,
                 accountSegments: accountSegments
             )
-            // 与日桶一致：源库中已删除的 OpenCode 会话、日志已删除的 DSH 会话保留原周期桶；
-            // DSH 冻结时整份保留。
+            // 与日桶一致：源库中已删除的 OpenCode / DSH / Kimi 会话保留原周期桶；
+            // DSH 冻结时整份保留，Kimi 读取失败时整个候选已在完整性门槛拒绝。
             let refreshedOpencodeKeys = Set(opencode.refreshedSessionIDs.map { "opencode:\($0)" })
             let refreshedDshKeys = Set(dsh.newState.values.compactMap(\.conversationID).map { "dsh:\($0)" })
+            let refreshedKimiKeys = Set(kimi.refreshedConversationIDs.map { "kimi:\($0)" })
             let preserved = baselineCycles.filter {
                 switch $0.app {
                 case .opencode:
                     return !refreshedOpencodeKeys.contains($0.conversationKey ?? "")
                 case .dsh:
                     return dshFrozen || !refreshedDshKeys.contains($0.conversationKey ?? "")
+                case .kimi:
+                    return !refreshedKimiKeys.contains($0.conversationKey ?? "")
                 default:
                     return false
                 }
@@ -2084,7 +2169,8 @@ final class UsageService {
             pi: pi.newState,
             opencode: opencode.newState,
             dsh: dshFrozen ? preservedDshState : dsh.newState,
-            antigravity: antigravity.newState
+            antigravity: antigravity.newState,
+            kimi: kimi.newState
         )
         let requiredApps = Self.requiredCycleSourceApps(cycles: cycles)
         let completedApps = incomplete.isEmpty
@@ -2157,6 +2243,7 @@ final class UsageService {
         let opencodeDatabaseURL = roots.opencodeDatabaseURL
         let dshRoot = roots.dshRoot
         let antigravityRoots = roots.antigravityRoots
+        let kimiRoots = roots.kimiRoots
         let dshFrozen = isDshHistoryFrozen
         // 账本里的 ID 没有条数上限；基准建立之前账本不完整，旧 seen 列表照常参与去重。
         let claudeKnown = messageLedger.knownIDs(for: .claude)
@@ -2208,6 +2295,9 @@ final class UsageService {
                 ? DshSessionScanner.frozenResult(preserving: prev.dsh)
                 : DshSessionScanner.scan(previous: dshPrevious, root: dshRoot, onProgress: progress)
         }.value
+        async let kimiTask = Task.detached(priority: .utility) {
+            KimiSessionScanner.scan(previous: prev.kimi, roots: kimiRoots, onProgress: progress)
+        }.value
         async let antigravityTask = Task.detached(priority: .utility) {
             AntigravityScanner.scan(
                 previous: prev.antigravity,
@@ -2224,10 +2314,11 @@ final class UsageService {
         let opencode = await opencodeTask
         let dsh = await dshTask
         let antigravity = await antigravityTask
+        let kimi = await kimiTask
         // DSH 的坏帧、坏文件也要能浮出来（§6 决策 4）；pi / opencode 的既有行为不动。
         let failedFileCount = claude.failedFileCount + codex.failedFileCount
             + dsh.failedFileCount + dsh.failedDirectoryCount + dsh.duplicateSessionCount
-            + antigravity.failedDatabaseCount
+            + antigravity.failedDatabaseCount + kimi.failedFileCount
         recordLogReadFailures(claude: claude.readFailures, codex: codex.readFailures)
 
         aggregator.ingestLocal(claude.entries)
@@ -2240,6 +2331,7 @@ final class UsageService {
         let opencodeChanged = Self.applyOpenCodeScan(
             opencode, aggregator: aggregator, conversations: conversationAggregator
         )
+        let kimiChanged = Self.applyKimiScan(kimi, aggregator: aggregator, conversations: conversationAggregator)
         let antigravityChanged = Self.applyAntigravityScan(
             antigravity, aggregator: aggregator, conversations: conversationAggregator
         )
@@ -2272,7 +2364,8 @@ final class UsageService {
                 opencode: opencode,
                 opencodeDatabaseURL: opencodeDatabaseURL,
                 // DSH 只有从零完整扫描才能直接灌入；冻结或带旧 watermark 时留给补算。
-                dshFailed: dshFrozen || !dsh.isComplete || !dshPrevious.isEmpty
+                dshFailed: dshFrozen || !dsh.isComplete || !dshPrevious.isEmpty,
+                kimiFailed: initialApps.contains(.kimi) && !kimi.isComplete
             )
             let initialCycleIDs = Set(initialCycles.map(\.id))
             let rebuildableCycleIDs = Self.cycleRebuildableCycleIDs(
@@ -2281,9 +2374,9 @@ final class UsageService {
                 failedApps: failedApps
             )
             dshCycleRebuilt = initialApps.contains(.dsh) && !failedApps.contains(.dsh)
-            // 从零扫描时 OpenCode / DSH 给出的是全部会话的完整用量，可以直接灌入。
+            // 从零扫描时 OpenCode / DSH / Kimi 给出的是全部会话的完整用量，可以直接灌入。
             cycleAggregator.rebuildRange(
-                exactEntries: (cycleEntries + opencode.entries + dsh.entries)
+                exactEntries: (cycleEntries + opencode.entries + dsh.entries + kimi.entries)
                     .filter { !failedApps.contains($0.app) },
                 cycles: cycles,
                 accountSegments: appState?.quotaCycles.accountSegments ?? [],
@@ -2306,7 +2399,8 @@ final class UsageService {
                 cycles: cycles,
                 accountSegments: appState?.quotaCycles.accountSegments ?? []
             )
-            // OpenCode 刷新会话给出的是完整用量，按会话替换，不能累加。
+            // OpenCode / Kimi 刷新会话给出的是完整用量，按会话替换，不能累加。
+            // Kimi 失败会话不进入 refreshed 集合，其旧周期桶与其他成功会话均保留。
             let opencodeReplaced = opencode.isComplete && cycleAggregator.replaceConversations(
                 app: .opencode,
                 conversationKeys: Set(opencode.refreshedSessionIDs.map { "opencode:\($0)" }),
@@ -2314,7 +2408,14 @@ final class UsageService {
                 cycles: cycles,
                 accountSegments: appState?.quotaCycles.accountSegments ?? []
             )
-            cycleChanged = ingested || opencodeReplaced
+            let kimiReplaced = cycleAggregator.replaceConversations(
+                app: .kimi,
+                conversationKeys: Set(kimi.refreshedConversationIDs.map { "kimi:\($0)" }),
+                entries: kimi.entries,
+                cycles: cycles,
+                accountSegments: appState?.quotaCycles.accountSegments ?? []
+            )
+            cycleChanged = ingested || opencodeReplaced || kimiReplaced
         }
 
         // DSH 不像其他扫描器那样靠 seen 集合兜底去重：本轮若不落盘，watermark 会一并压住，
@@ -2328,7 +2429,7 @@ final class UsageService {
 
         // 没有用量或档案变化时仍统一保存完整快照，watermark 也受写盘节流约束。
         let hasNewEntries = !claude.entries.isEmpty || !codex.entries.isEmpty
-            || !pi.entries.isEmpty || opencodeChanged || antigravityChanged
+            || !pi.entries.isEmpty || opencodeChanged || antigravityChanged || kimiChanged
             || dshUpdate.changed || dshRebuildReady
         if hasNewEntries || conversationChanged { hasUnwrittenRollupChanges = true }
         // 尚未建立代次时必须立刻落盘，否则内存与磁盘无从对齐。
@@ -2393,7 +2494,8 @@ final class UsageService {
             piSeenEntryIds: piSeen,
             opencode: opencode.newState,
             dsh: dshStateForScan,
-            antigravity: antigravity.newState
+            antigravity: antigravity.newState,
+            kimi: kimi.newState
         )
         let cycleNeedsWrite = cycleChanged || loadedCycleGeneration == nil
         // 任何一次落盘都是「汇总 + 进度 + 周期 + DSH」的整份提交：不能只写其中一份。
@@ -2416,7 +2518,8 @@ final class UsageService {
             piSeenEntryIds: piSeen,
             opencode: opencode.newState,
             dsh: dshStateForScan,
-            antigravity: antigravity.newState
+            antigravity: antigravity.newState,
+            kimi: kimi.newState
         )
 
         if shouldCommitSnapshot {
@@ -2452,6 +2555,7 @@ final class UsageService {
         }
         loadedRollupGeneration = generationID
         cachedScanState = newScanState
+        kimiScanCompleteForCycleRebuild = kimi.isComplete
         lastScanAt = Date()
         let unverifiedDshCount = dshContributions.values.filter { $0.needsVerification == true }.count
         if let error = opencode.error {
@@ -2476,6 +2580,7 @@ final class UsageService {
             opencode messages=\(opencode.messagesRead) sessions=\(opencode.refreshedSessionIDs.count) entries=\(opencode.entries.count); \
             dsh files=\(dsh.filesScanned) new=\(dsh.entries.count) unreadable=\(dsh.failedFileCount) directories=\(dsh.failedDirectoryCount) duplicateIDs=\(dsh.duplicateSessionCount); \
             antigravity databases=\(antigravity.databasesRead) conversations=\(antigravity.refreshedConversationIDs.count) entries=\(antigravity.entries.count) unreadable=\(antigravity.failedDatabaseCount); \
+            kimi files=\(kimi.filesRead) conversations=\(kimi.refreshedConversationIDs.count) entries=\(kimi.entries.count) unreadable=\(kimi.failedFileCount); \
             unreadable=\(failedFileCount); elapsed=\(elapsed)
             """)
         return true
@@ -2766,6 +2871,23 @@ final class UsageService {
         return replaceConversations(
             app: .antigravity,
             refreshedKeys: Set(scan.refreshedConversationIDs.map { "antigravity:\($0)" }),
+            entries: scan.entries,
+            seeds: scan.conversationSeeds,
+            aggregator: aggregator,
+            conversations: conversations
+        )
+    }
+
+    /// Kimi 的刷新结果是逐会话完整贡献；失败会话不进入刷新集合，源文件删除保留历史。
+    @discardableResult
+    static func applyKimiScan(
+        _ scan: KimiSessionScanner.Result,
+        aggregator: UsageAggregator,
+        conversations: ConversationAggregator
+    ) -> Bool {
+        replaceConversations(
+            app: .kimi,
+            refreshedKeys: Set(scan.refreshedConversationIDs.map { "kimi:\($0)" }),
             entries: scan.entries,
             seeds: scan.conversationSeeds,
             aggregator: aggregator,

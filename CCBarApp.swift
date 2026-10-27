@@ -43,6 +43,18 @@ private struct MenuBarLabelRoot: View {
 
     var body: some View {
         MenuBarLabel()
+            .onChange(of: appState.kimiManagedAccounts) { _, _ in
+                guard !AppRuntime.isRunningUnitTests else { return }
+                FloatingPanelController.shared.sync()
+            }
+            .onChange(of: appState.moonshotAccounts) { _, _ in
+                guard !AppRuntime.isRunningUnitTests else { return }
+                FloatingPanelController.shared.sync()
+            }
+            .onChange(of: appState.moonshotBalances) { _, _ in
+                guard !AppRuntime.isRunningUnitTests else { return }
+                FloatingPanelController.shared.sync()
+            }
             .onChange(of: SettingsStore.shared.privacyMode) { _, enabled in
                 appState.quotaNotifications.settingsChanged(clearNotifications: enabled)
             }

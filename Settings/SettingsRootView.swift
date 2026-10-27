@@ -280,7 +280,7 @@ struct SettingsRootView: View {
     }
 
     /// 每一行整行可拖（手柄只做提示）。
-    /// Codex 行和它下面的其他 Codex 账号是一块，一起抬起、一起移动。
+    /// 同一厂商的服务行、账户行与添加入口作为一块抬起和移动，视觉上仍同级对齐。
     @ViewBuilder
     private func serviceBlock(
         _ entry: ServiceEntry,
@@ -297,6 +297,10 @@ struct SettingsRootView: View {
 
             if entry.id == .quota(.codex) {
                 ImportedCodexAccountsView()
+            }
+            if entry.id == .quota(.kimi) {
+                KimiManagedAccountsSettingsView()
+                MoonshotAccountsSettingsView()
             }
         }
     }
@@ -953,8 +957,8 @@ struct SettingsRootView: View {
             }
             InsetDivider()
             PrefsRow(label: "Billing cycle quota", chinese: "计费周期额度",
-                     desc: "Cursor Total / Auto / API, and Command Code and OpenCode Go monthly quotas.",
-                     chineseDesc: "Cursor Total／Auto／API，以及 Command Code、OpenCode Go 月额度") {
+                     desc: "Cursor Total / Auto / API, and Command Code, OpenCode Go and Kimi Code monthly quotas.",
+                     chineseDesc: "Cursor Total／Auto／API，以及 Command Code、OpenCode Go、Kimi Code 月额度") {
                 Toggle(tr("Billing cycle quota", "计费周期额度"), isOn: Binding(
                     get: { settings.quotaAlertBillingCycleEnabled },
                     set: { settings.quotaAlertBillingCycleEnabled = $0; service.settingsChanged() }
@@ -1032,7 +1036,7 @@ struct SettingsRootView: View {
             set: { newValue in
                 settings.setServiceEnabled(newValue, for: app)
                 // Antigravity / Cursor / Command Code / OpenCode Go 开启后立即取一次额度，不等下一轮调度。
-                guard newValue, [QuotaApp.antigravity, .cursor, .commandCode, .opencodeGo].contains(app) else { return }
+                guard newValue, [QuotaApp.antigravity, .cursor, .commandCode, .opencodeGo, .kimi].contains(app) else { return }
                 Task { await appState.refreshQuotas(reason: .userInitiated) }
             }
         )
@@ -1095,6 +1099,8 @@ struct SettingsRootView: View {
                 plan: appState.commandCodeQuota?.planType ?? appState.commandCodeAccount?.planType,
                 signedIn: appState.commandCodeAccount != nil
             )
+        case .kimi:
+            return (email: appState.kimiNickname, plan: appState.kimiPlanName, signedIn: appState.kimiAccount != nil)
         case .opencodeGo:
             // Go 没有可读的账号信息，检测到 key 即视为已登录，副标题显示「已登录」。
             return (email: nil, plan: nil, signedIn: appState.opencodeGoAccount != nil)
@@ -1127,6 +1133,10 @@ struct SettingsRootView: View {
         case .pi:
             hasRecords = exists(".pi/agent/sessions")
             installed = exists(".pi")
+        case .kimi:
+            let roots = KimiSessionScanner.defaultRoots()
+            hasRecords = roots.contains { fileManager.fileExists(atPath: $0.appendingPathComponent("sessions").path) }
+            installed = roots.contains { fileManager.fileExists(atPath: $0.path) }
         case .opencode:
             hasRecords = exists(".local/share/opencode/opencode.db")
             installed = exists(".config/opencode") || exists(".local/share/opencode")
@@ -1201,6 +1211,11 @@ struct SettingsRootView: View {
         case .commandCode:
             sourceLines.append(tr("\(provider.title) does not provide usage data.", "\(provider.title) 不提供用量数据。"))
             isDetected = info.signedIn
+        case .kimi:
+            isDetected = appState.hasKimiSubscriptionAccount || !appState.moonshotAccounts.isEmpty
+                || localRecordState(for: .kimi) != .missing
+            sourceLines.append(tr("Usage: reads local Kimi Code CLI conversation records and estimates token costs on this Mac.",
+                                  "用量：读取本机 Kimi Code CLI 对话记录，统计 Token 并估算参考费用。"))
         case .opencodeGo:
             sourceLines.append(tr(
                 "Usage: conversations that use OpenCode Go models are counted under OpenCode or Pi.",
@@ -1363,6 +1378,9 @@ struct SettingsRootView: View {
         case .commandCode:
             tr("Quota: reads Command Code's local credentials or the ones you entered (stored in Keychain), and asks Command Code for remaining quota.",
                "额度：读取 Command Code 的本机凭据或手动填写的凭据（保存在钥匙串），向 Command Code 查询剩余额度。")
+        case .kimi:
+            tr("Quota: reads your existing Kimi Code CLI sign-in and asks Kimi for remaining quota. Expired access tokens are renewed automatically and saved back to the CLI credential file.",
+               "额度：读取已有 Kimi Code CLI 登录，向 Kimi 查询剩余额度。访问令牌过期时自动续期，并同步更新 CLI 凭据文件。")
         case .opencodeGo:
             tr("Quota: reads the OpenCode Go API key from OpenCode, Pi, the OPENCODE_API_KEY environment variable, or the one you entered (stored in Keychain), and asks OpenCode for remaining quota.",
                "额度：读取 OpenCode、Pi 中的 OpenCode Go API Key、环境变量 OPENCODE_API_KEY 或手动填写的 Key（保存在钥匙串），向 OpenCode 查询剩余额度。")
@@ -1382,6 +1400,8 @@ struct SettingsRootView: View {
             tr("Sign in to the Cursor app to detect it", "登录 Cursor 应用后自动识别")
         case .commandCode:
             tr("Sign in with the Command Code CLI to detect it, or", "登录 Command Code CLI 后自动识别，或")
+        case .kimi:
+            tr("Sign in with /login in Kimi Code CLI to detect it", "在 Kimi Code CLI 中运行 /login 后自动识别")
         case .opencodeGo:
             tr("Connect OpenCode Go in OpenCode or Pi to detect it, or", "在 OpenCode 或 Pi 中连接 OpenCode Go 后自动识别，或")
         }
@@ -1395,6 +1415,8 @@ struct SettingsRootView: View {
                "开启后会读取 Cursor 的登录状态，联网查询额度和用量。")
         case .commandCode:
             tr("Turning on fetches Command Code quota online.", "开启后会联网查询 Command Code 额度。")
+        case .kimi:
+            tr("Turning on reads your Kimi Code sign-in to fetch quota online.", "开启后会读取 Kimi Code 登录状态，联网查询额度。")
         case .opencodeGo:
             tr("Turning on fetches OpenCode Go quota online.", "开启后会联网查询 OpenCode Go 额度。")
         default:
@@ -1457,6 +1479,7 @@ struct SettingsRootView: View {
         case .opencode: appName = "OpenCode"
         case .dsh: appName = "DSH"
         case .antigravity: appName = "Antigravity"
+        case .kimi: appName = "Kimi Code"
         }
         if progress.filesTotal > 0 {
             return tr(
@@ -1901,6 +1924,7 @@ private enum LocalRecordState: Equatable {
 }
 
 private struct ServiceRow: View {
+    @Environment(AppState.self) private var appState
     let entry: ServiceEntry
     let floatingHUDGloballyEnabled: Bool
     /// 左侧重排抓手的抬起态；拖动手势由列表挂在整行上。
@@ -1926,10 +1950,15 @@ private struct ServiceRow: View {
             .padding(.trailing, ServiceRowMetrics.tileGap)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(entry.title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(entry.isDetected ? Color.primary : Color.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(entry.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(entry.isDetected ? Color.primary : Color.secondary)
+                        .lineLimit(1)
+                    if entry.id == .quota(.kimi), appState.kimiAccount != nil {
+                        KimiCurrentAccountBadge()
+                    }
+                }
                 subtitleLine
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1979,6 +2008,12 @@ private struct ServiceRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .help(entry.subtitle)
+            if entry.id == .quota(.kimi), let region = appState.kimiCLIRegion {
+                Text("· \(region.displayName)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
             if let errorDetail = entry.errorDetail {
                 Text("· \(tr("Refresh failed", "刷新失败"))")
                     .font(.system(size: 11))
@@ -2091,7 +2126,7 @@ private struct ServiceInfoButton: View {
 
 /// 矩阵单元格里的 13pt 复选框，没有文字标签（列头说明含义），`title` 只作无障碍标签。
 /// 整个单元格可点，不只是 13pt 的框。
-private struct DisplayDestinationCheckbox: View {
+struct DisplayDestinationCheckbox: View {
     let title: String
     @Binding var isOn: Bool
     var disabled: Bool = false

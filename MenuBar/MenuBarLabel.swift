@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreImage
 
 struct MenuBarLabel: View {
     @Environment(AppState.self) private var appState
@@ -8,12 +9,16 @@ struct MenuBarLabel: View {
         Image(nsImage: MenuBarBadgeImage.make(
             providers: visibleProviders,
             snapshots: snapshots,
+            managedKimiSnapshots: managedKimiSnapshots,
+            moonshotBalanceTexts: moonshotBalanceTexts,
             window: SettingsStore.shared.menuBarWindow
         ))
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityLabel(MenuBarBadgeImage.accessibilityLabel(
             providers: visibleProviders,
             snapshots: snapshots,
+            managedKimiSnapshots: managedKimiSnapshots,
+            moonshotBalanceTexts: moonshotBalanceTexts,
             window: SettingsStore.shared.menuBarWindow
         ))
     }
@@ -21,6 +26,7 @@ struct MenuBarLabel: View {
     private var visibleProviders: [QuotaProviderDescriptor] {
         SettingsStore.shared.orderedMenuBarProviders.filter {
             SettingsStore.shared.effectiveMenuBarVisibility(for: $0.app)
+                && ($0.app != .kimi || appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty)
         }
     }
 
@@ -28,6 +34,20 @@ struct MenuBarLabel: View {
         Dictionary(uniqueKeysWithValues: QuotaApp.allCases.compactMap { app in
             appState.quotaSnapshot(for: app).map { (app, $0) }
         })
+    }
+
+    private var managedKimiSnapshots: [QuotaSnapshot] {
+        SettingsStore.shared.isProviderEnabled(.kimi)
+            ? appState.kimiManagedAccounts.filter { $0.showInMenuBar && !(appState.kimiManagedMirrorsCLI($0) && SettingsStore.shared.effectiveMenuBarVisibility(for: .kimi)) }.compactMap { appState.kimiManagedQuotas[$0.id] }
+            : []
+    }
+
+    private var moonshotBalanceTexts: [String] {
+        appState.moonshotAccounts.filter(\.showInMenuBar).compactMap { account in
+            appState.moonshotBalances[account.id].map {
+                MoonshotBalanceFormatter.amount($0.available, currencyCode: $0.currencyCode)
+            }
+        }
     }
 }
 
@@ -37,11 +57,23 @@ enum MenuBarLogo {
 
     static func rawImage(named name: String) -> NSImage? {
         if let cached = cache.object(forKey: name as NSString) { return cached }
-        guard let url = Bundle.main.url(forResource: name, withExtension: "svg"),
-              let img = NSImage(contentsOf: url) else { return nil }
-        img.size = size
-        cache.setObject(img, forKey: name as NSString)
-        return img
+        guard let url = ["svg", "png", "ico"].compactMap({
+            Bundle.main.url(forResource: name, withExtension: $0)
+        }).first, let img = NSImage(contentsOf: url) else { return nil }
+        let icon = name == "kimi" ? monochromeFavicon(img) ?? img : img
+        icon.size = size
+        cache.setObject(icon, forKey: name as NSString)
+        return icon
+    }
+    /// 官网 favicon 为黑底白字；菜单栏用系统滤镜提取亮度蒙版，避免模板化后只剩实心方块。
+    static func monochromeFavicon(_ image: NSImage) -> NSImage? {
+        guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let filter = CIFilter(name: "CIMaskToAlpha", parameters: [kCIInputImageKey: CIImage(cgImage: source)]),
+              let output = filter.outputImage,
+              let cgImage = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        let result = NSImage(cgImage: cgImage, size: image.size)
+        result.isTemplate = true
+        return result
     }
 }
 
@@ -58,6 +90,8 @@ enum MenuBarBadgeImage {
     static func make(
         providers: [QuotaProviderDescriptor],
         snapshots: [QuotaApp: QuotaSnapshot],
+        managedKimiSnapshots: [QuotaSnapshot] = [],
+        moonshotBalanceTexts: [String] = [],
         window: MenuBarWindowChoice
     ) -> NSImage {
         let items = providers.map { provider in
@@ -66,6 +100,10 @@ enum MenuBarBadgeImage {
                 fallback: provider.fallback,
                 text: pctText(snapshots[provider.app], window: window)
             )
+        } + managedKimiSnapshots.map {
+            BadgeItem(logo: "kimi", fallback: "K", text: pctText($0, window: window))
+        } + moonshotBalanceTexts.map {
+            BadgeItem(logo: "kimi", fallback: "$", text: $0)
         }
 
         let attrs = textAttributes
@@ -108,6 +146,8 @@ enum MenuBarBadgeImage {
     static func accessibilityLabel(
         providers: [QuotaProviderDescriptor],
         snapshots: [QuotaApp: QuotaSnapshot],
+        managedKimiSnapshots: [QuotaSnapshot] = [],
+        moonshotBalanceTexts: [String] = [],
         window: MenuBarWindowChoice
     ) -> String {
         let parts = providers.map { provider in
@@ -115,7 +155,8 @@ enum MenuBarBadgeImage {
                 return "\(provider.title) Unlimited"
             }
             return "\(provider.title) \(pctText(snapshots[provider.app], window: window))"
-        }
+        } + managedKimiSnapshots.map { "Kimi Code account \(pctText($0, window: window))" }
+            + moonshotBalanceTexts.map { "Moonshot API balance \($0)" }
         return parts.isEmpty ? "CCBar" : parts.joined(separator: ", ")
     }
 

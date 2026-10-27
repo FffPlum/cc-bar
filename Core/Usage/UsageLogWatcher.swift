@@ -49,13 +49,14 @@ nonisolated struct UsageLogPathMatcher: Sendable {
 
     static func standard(roots: UsageScanRoots = .production) -> UsageLogPathMatcher {
         let directories = [roots.claudeRoot] + roots.codexRoots + [roots.piRoot, roots.dshRoot]
+            + roots.kimiRoots.map { $0.appendingPathComponent("sessions", isDirectory: true) }
         // 只认数据库本体和 WAL；`-shm` 读者也会写，不代表有新数据。
         let database = roots.opencodeDatabaseURL
         let files = [
             database,
             database.deletingLastPathComponent()
                 .appendingPathComponent(database.lastPathComponent + "-wal", isDirectory: false),
-        ]
+        ] + roots.kimiRoots.map { $0.appendingPathComponent("kimi.json", isDirectory: false) }
         // FSEvents 上报的是解析过符号链接的真实路径，两种写法都收下。
         func variants(_ urls: [URL]) -> [String] {
             Array(Set(urls.flatMap { [$0.path, $0.resolvingSymlinksInPath().path] }))
@@ -134,10 +135,13 @@ final class UsageLogWatcher {
             ".local/share/opencode",
             // DSH：默认根 `~/.dsh/sessions`，这里监听顶层目录（sessions 可能尚未创建）。
             ".dsh",
+            ".kimi-code",
+            ".kimi",
             // Antigravity：`~/.gemini/antigravity*/conversations` 与 `~/.config/antigravity`。
             ".gemini",
             ".config/antigravity",
         ].map { home.appendingPathComponent($0, isDirectory: true).path }
+            + KimiSessionScanner.defaultRoots().map(\.path)
     }
 
     /// 周期扫描的门控：返回 true 表示这一轮应该真的扫。

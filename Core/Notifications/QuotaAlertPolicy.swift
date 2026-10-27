@@ -47,6 +47,8 @@ nonisolated enum QuotaAlertPolicy {
                 supported = ["command-code-five-hour", "command-code-weekly", "command-code-monthly"].contains(limit.id)
             case .opencodeGo:
                 supported = ["opencode-go-rolling", "opencode-go-weekly", "opencode-go-monthly"].contains(limit.id)
+            case .kimi:
+                supported = ["kimi-five-hour", "kimi-weekly", "kimi-monthly-total", "kimi-monthly-code"].contains(limit.id)
             }
             return supported && seen.insert(windowKey(limit, app: snapshot.app)).inserted
         }

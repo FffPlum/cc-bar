@@ -7,35 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		49C2AC02000000000001AAAA /* AppUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AC01000000000001AAAA /* AppUpdater.swift */; };
-		49C2AC04000000000001AAAA /* AppUpdateWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AC03000000000001AAAA /* AppUpdateWindow.swift */; };
-		49C2AC07000000000001AAAA /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 49C2AC06000000000001AAAA /* Sparkle */; };
-		49C2AC09000000000001AAAA /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 49C2AC08000000000001AAAA /* Sparkle */; };
-		49C2AB04000000000001AAAA /* CodexModelIdentityMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AB03000000000001AAAA /* CodexModelIdentityMigrationTests.swift */; };
-		49C2AB02000000000001AAAA /* CodexModelIdentityMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AB01000000000001AAAA /* CodexModelIdentityMigration.swift */; };
-		49C1BE03000000000001AAAA /* libzstd in Frameworks */ = {isa = PBXBuildFile; productRef = 49C1BE02000000000001AAAA /* libzstd */; };
-		49C1BE05000000000001AAAA /* libzstd in Frameworks */ = {isa = PBXBuildFile; productRef = 49C1BE04000000000001AAAA /* libzstd */; };
-		49C1BE09000000000001AAAA /* DshZstdFrames.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE06000000000001AAAA /* DshZstdFrames.swift */; };
-		49C1BE0A000000000001AAAA /* DshZstdDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE07000000000001AAAA /* DshZstdDecoder.swift */; };
-		49C1BE31000000000001AAAA /* ZstdStreamReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE30000000000001AAAA /* ZstdStreamReader.swift */; };
-		49C1BE0B000000000001AAAA /* DshZstdFrameScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE08000000000001AAAA /* DshZstdFrameScannerTests.swift */; };
-		49C1BE0F000000000001AAAA /* DshSessionScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE0C000000000001AAAA /* DshSessionScanner.swift */; };
-		49C1BE10000000000001AAAA /* DshSessionScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE0D000000000001AAAA /* DshSessionScannerTests.swift */; };
-		49C1BE11000000000001AAAA /* DshTestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE0E000000000001AAAA /* DshTestFixtures.swift */; };
-		49C1BE16000000000001AAAA /* DshContributionCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE12000000000001AAAA /* DshContributionCache.swift */; };
-		49C2AA02000000000001AAAA /* UsageSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA01000000000001AAAA /* UsageSnapshotStore.swift */; };
-		49C2AA04000000000001AAAA /* LegacyUsageHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA03000000000001AAAA /* LegacyUsageHistory.swift */; };
-		49C2AA06000000000001AAAA /* UsageHistoryConsistency.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA05000000000001AAAA /* UsageHistoryConsistency.swift */; };
-		49C2AA08000000000001AAAA /* UsageSnapshotStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA07000000000001AAAA /* UsageSnapshotStoreTests.swift */; };
-		49C2AA0A000000000001AAAA /* UsageHistoryRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA09000000000001AAAA /* UsageHistoryRecoveryTests.swift */; };
-		49C2AA0C000000000001AAAA /* UsageSafeRebuildTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA0B000000000001AAAA /* UsageSafeRebuildTests.swift */; };
-		49C2AA0E000000000001AAAA /* UsageHistoryTestHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA0D000000000001AAAA /* UsageHistoryTestHarness.swift */; };
-		49C1BE17000000000001AAAA /* DshContributionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE13000000000001AAAA /* DshContributionStore.swift */; };
-		49C1BE18000000000001AAAA /* DshContributionRollup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE14000000000001AAAA /* DshContributionRollup.swift */; };
-		49C1BE19000000000001AAAA /* DshContributionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE15000000000001AAAA /* DshContributionTests.swift */; };
-		49C1BE1F000000000001AAAA /* DshAggregationRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE1E000000000001AAAA /* DshAggregationRegressionTests.swift */; };
-		49C1BE1B000000000001AAAA /* DshPricingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE1A000000000001AAAA /* DshPricingTests.swift */; };
-		49C1BE1D000000000001AAAA /* DshDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE1C000000000001AAAA /* DshDiagnosticsTests.swift */; };
 		4931AC592FC02A4200EE598C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4931AC522FC02A4200EE598C /* Assets.xcassets */; };
 		4931AC622FC02A4200EE598C /* MenuBarLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4931AC4F2FC02A4200EE598C /* MenuBarLabel.swift */; };
 		4931AC632FC02A4200EE598C /* CCBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4931AC412FC02A4200EE598C /* CCBarApp.swift */; };
@@ -45,90 +16,45 @@
 		4931AC672FC02A4200EE598C /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4931AC3E2FC02A4200EE598C /* AppDelegate.swift */; };
 		49C1B101000000000001AABB /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B101000000000001AAAA /* Models.swift */; };
 		49C1B102000000000001AABB /* JWT.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B102000000000001AAAA /* JWT.swift */; };
-		49C1BC11000000000001AABB /* CursorAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC11000000000001AAAA /* CursorAuth.swift */; };
-		49C1D100000000000001AABB /* AntigravityCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1D100000000000001AAAA /* AntigravityCredentials.swift */; };
-		49C1BC13000000000001AABB /* CursorUsageCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC13000000000001AAAA /* CursorUsageCache.swift */; };
 		49C1B103000000000001AABB /* CodexAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B103000000000001AAAA /* CodexAuth.swift */; };
 		49C1B104000000000001AABB /* ClaudeAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B104000000000001AAAA /* ClaudeAuth.swift */; };
-		49C1B198000000000001AABB /* ClaudeDesktopAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B198000000000001AAAA /* ClaudeDesktopAuth.swift */; };
 		49C1B105000000000001AABB /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B105000000000001AAAA /* Settings.swift */; };
 		49C1B106000000000001AABB /* QuotaCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B106000000000001AAAA /* QuotaCache.swift */; };
 		49C1B107000000000001AABB /* ScanCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B107000000000001AAAA /* ScanCache.swift */; };
 		49C1B108000000000001AABB /* QuotaHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B108000000000001AAAA /* QuotaHistoryStore.swift */; };
-		49C1BA10000000000001AABB /* QuotaCycleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BA10000000000001AAAA /* QuotaCycleStore.swift */; };
 		49C1B120000000000001AABB /* QuotaModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B120000000000001AAAA /* QuotaModels.swift */; };
 		49C1B121000000000001AABB /* CodexTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B121000000000001AAAA /* CodexTokenRefresher.swift */; };
 		49C1B122000000000001AABB /* CodexQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B122000000000001AAAA /* CodexQuotaClient.swift */; };
-		49C1D101000000000001AABB /* AntigravityQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1D101000000000001AAAA /* AntigravityQuotaClient.swift */; };
-		49C1BC10000000000001AABB /* CursorQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC10000000000001AAAA /* CursorQuotaClient.swift */; };
-		49C1BC14000000000001AABB /* CursorUsageFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC14000000000001AAAA /* CursorUsageFetcher.swift */; };
 		49C1B123000000000001AABB /* ClaudeQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B123000000000001AAAA /* ClaudeQuotaClient.swift */; };
 		49C1B124000000000001AABB /* ClaudeCLIFallbackQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B124000000000001AAAA /* ClaudeCLIFallbackQuotaClient.swift */; };
 		49C1B125000000000001AABB /* ClaudeTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B125000000000001AAAA /* ClaudeTokenRefresher.swift */; };
 		49C1B126000000000001AABB /* ServiceStatusClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B126000000000001AAAA /* ServiceStatusClient.swift */; };
 		49C1B128000000000001AABB /* CodexResetCreditsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B128000000000001AAAA /* CodexResetCreditsClient.swift */; };
-		49C1BF01000000000001AABB /* QuotaRefreshPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF01000000000001AAAA /* QuotaRefreshPlan.swift */; };
-		49C1BF06000000000001AABB /* QuotaPersistenceCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF06000000000001AAAA /* QuotaPersistenceCoordinator.swift */; };
-		49C1BF07000000000001AABB /* QuotaPersistenceCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF07000000000001AAAA /* QuotaPersistenceCoordinatorTests.swift */; };
-		49C1BF08000000000001AABB /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF08000000000001AAAA /* UpdateChecker.swift */; };
-		49C2AF01000000000001AABB /* NetworkProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AF01000000000001AAAA /* NetworkProxy.swift */; };
-		49C1BF09000000000001AABB /* UpdateCheckerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF09000000000001AAAA /* UpdateCheckerTests.swift */; };
-		49C1BF02000000000001AABB /* QuotaRefreshPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF02000000000001AAAA /* QuotaRefreshPlanTests.swift */; };
-		49C1CC05000000000001AABB /* CommandCodeQuotaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC05000000000001AAAA /* CommandCodeQuotaTests.swift */; };
-		49C1CC09000000000001AABB /* OpenCodeGoQuotaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC09000000000001AAAA /* OpenCodeGoQuotaTests.swift */; };
-		49C1BF03000000000001AABB /* ImportedCodexStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF03000000000001AAAA /* ImportedCodexStoreTests.swift */; };
-		49C1BF04000000000001AABB /* ScannerIncrementalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF04000000000001AAAA /* ScannerIncrementalTests.swift */; };
-		49C1BF05000000000001AABB /* UsageEquivalenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF05000000000001AAAA /* UsageEquivalenceTests.swift */; };
-		49C1BF30000000000001AABB /* StatsOverviewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF30000000000001AAAA /* StatsOverviewModelTests.swift */; };
 		49C1B131000000000001AABB /* Scheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B131000000000001AAAA /* Scheduler.swift */; };
 		49C1B132000000000001AABB /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B132000000000001AAAA /* L10n.swift */; };
-		49C1BD01000000000001AABB /* AppLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BD01000000000001AAAA /* AppLog.swift */; };
-		49C1BD02000000000001AABB /* Redact.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BD02000000000001AAAA /* Redact.swift */; };
-		49C1BD03000000000001AABB /* DiagnosticsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BD03000000000001AAAA /* DiagnosticsBundle.swift */; };
-		49C1BD04000000000001AABB /* RedactTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BD04000000000001AAAA /* RedactTests.swift */; };
 		49C1B140000000000001AABB /* codex.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1B140000000000001AAAA /* codex.svg */; };
 		49C1B141000000000001AABB /* claude.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1B141000000000001AAAA /* claude.svg */; };
 		49C1B143000000000001AABB /* antigravity.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1B143000000000001AAAA /* antigravity.svg */; };
-		49C1BC16000000000001AABB /* cursor.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1BC16000000000001AAAA /* cursor.svg */; };
-		49C1CC01000000000001AABB /* commandcode.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1CC01000000000001AAAA /* commandcode.svg */; };
-		49C1EE01000000000001AABB /* pi.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1EE01000000000001AAAA /* pi.svg */; };
-		49C1EE02000000000001AABB /* opencode.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1EE02000000000001AAAA /* opencode.svg */; };
-		49C1EE03000000000001AABB /* dsh.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1EE03000000000001AAAA /* dsh.svg */; };
-		49C1CC02000000000001AABB /* CommandCodeAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC02000000000001AAAA /* CommandCodeAuth.swift */; };
-		49C1CC06000000000001AABB /* OpenCodeGoAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC06000000000001AAAA /* OpenCodeGoAuth.swift */; };
-		49C1CC03000000000001AABB /* CommandCodeQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC03000000000001AAAA /* CommandCodeQuotaClient.swift */; };
-		49C1CC07000000000001AABB /* OpenCodeGoQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC07000000000001AAAA /* OpenCodeGoQuotaClient.swift */; };
-		49C1CC04000000000001AABB /* CommandCodeCredentialSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC04000000000001AAAA /* CommandCodeCredentialSheet.swift */; };
-		49C1CC08000000000001AABB /* OpenCodeGoCredentialSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC08000000000001AAAA /* OpenCodeGoCredentialSheet.swift */; };
 		49C1B150000000000001AABB /* UsageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B150000000000001AAAA /* UsageModels.swift */; };
 		49C1B151000000000001AABB /* Pricing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B151000000000001AAAA /* Pricing.swift */; };
 		49C1B152000000000001AABB /* JSONLLineReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B152000000000001AAAA /* JSONLLineReader.swift */; };
 		49C1B153000000000001AABB /* ClaudeJSONLScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B153000000000001AAAA /* ClaudeJSONLScanner.swift */; };
 		49C1B154000000000001AABB /* CodexJSONLScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B154000000000001AAAA /* CodexJSONLScanner.swift */; };
-		49C1B32000000000000FAABB /* PiJSONLScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B32000000000000FAAAA /* PiJSONLScanner.swift */; };
-		A6A1B90000000000000FAABB /* AntigravityScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A1B90000000000000FAAAA /* AntigravityScanner.swift */; };
-		49C1B90000000000000FAABB /* OpencodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B90000000000000FAAAA /* OpencodeScanner.swift */; };
 		49C1B155000000000001AABB /* UsageAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B155000000000001AAAA /* UsageAggregator.swift */; };
 		49C1B156000000000001AABB /* UsageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B156000000000001AAAA /* UsageService.swift */; };
-		49C1B197000000000001AABB /* UsageLogWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B197000000000001AAAA /* UsageLogWatcher.swift */; };
-		49C1BA11000000000001AABB /* CycleUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BA11000000000001AAAA /* CycleUsage.swift */; };
 		49C1B157000000000001AABB /* PricingCatalogModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B157000000000001AAAA /* PricingCatalogModels.swift */; };
 		49C1B158000000000001AABB /* LiteLLMPricingDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B158000000000001AAAA /* LiteLLMPricingDecoder.swift */; };
 		49C1B159000000000001AABB /* ModelsDevPricingDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B159000000000001AAAA /* ModelsDevPricingDecoder.swift */; };
 		49C1B15A000000000001AABB /* PricingCatalogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B15A000000000001AAAA /* PricingCatalogStore.swift */; };
-		49C1B16A000000000001AABB /* ModelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B16A000000000001AAAA /* ModelProvider.swift */; };
 		49C1B161000000000001AABB /* MainWindowRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B161000000000001AAAA /* MainWindowRootView.swift */; };
 		49C1B162000000000001AABB /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B162000000000001AAAA /* StatsView.swift */; };
-		49C1B1F0000000000001AABB /* StatsOverviewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B1F0000000000001AAAA /* StatsOverviewModel.swift */; };
 		49C1B163000000000001AABB /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B163000000000001AAAA /* DesignSystem.swift */; };
 		49C1B164000000000001AABB /* ConversationStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B164000000000001AAAA /* ConversationStatsView.swift */; };
-		49C1BA12000000000001AABB /* CycleStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BA12000000000001AAAA /* CycleStatsView.swift */; };
-		49C1BB02000000000001AABB /* ProjectStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BB02000000000001AAAA /* ProjectStatsView.swift */; };
 		49C1B165000000000001AABB /* ConversationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B165000000000001AAAA /* ConversationModels.swift */; };
 		49C1B166000000000001AABB /* ConversationAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B166000000000001AAAA /* ConversationAggregator.swift */; };
-		49C1BB01000000000001AABB /* ProjectWorktreeResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BB01000000000001AAAA /* ProjectWorktreeResolver.swift */; };
 		49C1B167000000000001AABB /* ConversationTitleIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B167000000000001AAAA /* ConversationTitleIndex.swift */; };
 		49C1B168000000000001AABB /* ConversationRollupCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B168000000000001AAAA /* ConversationRollupCache.swift */; };
+		49C1B16A000000000001AABB /* ModelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B16A000000000001AAAA /* ModelProvider.swift */; };
 		49C1B171000000000001AABB /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B171000000000001AAAA /* FloatingPanel.swift */; };
 		49C1B172000000000001AABB /* FloatingContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B172000000000001AAAA /* FloatingContentView.swift */; };
 		49C1B173000000000001AABB /* FloatingPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B173000000000001AAAA /* FloatingPanelController.swift */; };
@@ -139,22 +65,122 @@
 		49C1B194000000000001AABB /* ImportedCodexAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B194000000000001AAAA /* ImportedCodexAccountsView.swift */; };
 		49C1B195000000000001AABB /* CodexResetCreditsDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B195000000000001AAAA /* CodexResetCreditsDetailView.swift */; };
 		49C1B196000000000001AABB /* ImportedUsageBackfill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B196000000000001AAAA /* ImportedUsageBackfill.swift */; };
+		49C1B197000000000001AABB /* UsageLogWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B197000000000001AAAA /* UsageLogWatcher.swift */; };
+		49C1B198000000000001AABB /* ClaudeDesktopAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B198000000000001AAAA /* ClaudeDesktopAuth.swift */; };
+		49C1B1F0000000000001AABB /* StatsOverviewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B1F0000000000001AAAA /* StatsOverviewModel.swift */; };
 		49C1B300000000000001AABB /* QuotaParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B300000000000001AAAA /* QuotaParsingTests.swift */; };
-		49C1BC12000000000001AABB /* CursorAuthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC12000000000001AAAA /* CursorAuthTests.swift */; };
-		49C1BC15000000000001AABB /* CursorUsageFetcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC15000000000001AAAA /* CursorUsageFetcherTests.swift */; };
 		49C1B31000000000000FAABB /* PiJSONLScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B31000000000000FAAAA /* PiJSONLScannerTests.swift */; };
-		49C1B91000000000000FAABB /* OpencodeScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B91000000000000FAAAA /* OpencodeScannerTests.swift */; };
-		A6A1B90000000000000FBABB /* AntigravityScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A1B90000000000000FBAAA /* AntigravityScannerTests.swift */; };
-		49C1BF0A000000000001AABB /* ConversationProjectResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF0A000000000001AAAA /* ConversationProjectResolverTests.swift */; };
-		49C1BB03000000000001AABB /* ProjectUsageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BB03000000000001AAAA /* ProjectUsageTests.swift */; };
+		49C1B32000000000000FAABB /* PiJSONLScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B32000000000000FAAAA /* PiJSONLScanner.swift */; };
 		49C1B3F3000000000001AABB /* codex-fast-scan.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 49C1B3F0000000000001AAAA /* codex-fast-scan.jsonl */; };
 		49C1B3F4000000000001AABB /* claude-fast-scan.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 49C1B3F1000000000001AAAA /* claude-fast-scan.jsonl */; };
+		49C1B90000000000000FAABB /* OpencodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B90000000000000FAAAA /* OpencodeScanner.swift */; };
+		49C1B91000000000000FAABB /* OpencodeScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B91000000000000FAAAA /* OpencodeScannerTests.swift */; };
+		49C1BA10000000000001AABB /* QuotaCycleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BA10000000000001AAAA /* QuotaCycleStore.swift */; };
+		49C1BA11000000000001AABB /* CycleUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BA11000000000001AAAA /* CycleUsage.swift */; };
+		49C1BA12000000000001AABB /* CycleStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BA12000000000001AAAA /* CycleStatsView.swift */; };
+		49C1BB01000000000001AABB /* ProjectWorktreeResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BB01000000000001AAAA /* ProjectWorktreeResolver.swift */; };
+		49C1BB02000000000001AABB /* ProjectStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BB02000000000001AAAA /* ProjectStatsView.swift */; };
+		49C1BB03000000000001AABB /* ProjectUsageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BB03000000000001AAAA /* ProjectUsageTests.swift */; };
+		49C1BC10000000000001AABB /* CursorQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC10000000000001AAAA /* CursorQuotaClient.swift */; };
+		49C1BC11000000000001AABB /* CursorAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC11000000000001AAAA /* CursorAuth.swift */; };
+		49C1BC12000000000001AABB /* CursorAuthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC12000000000001AAAA /* CursorAuthTests.swift */; };
+		49C1BC13000000000001AABB /* CursorUsageCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC13000000000001AAAA /* CursorUsageCache.swift */; };
+		49C1BC14000000000001AABB /* CursorUsageFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC14000000000001AAAA /* CursorUsageFetcher.swift */; };
+		49C1BC15000000000001AABB /* CursorUsageFetcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BC15000000000001AAAA /* CursorUsageFetcherTests.swift */; };
+		49C1BC16000000000001AABB /* cursor.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1BC16000000000001AAAA /* cursor.svg */; };
+		49C1BD01000000000001AABB /* AppLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BD01000000000001AAAA /* AppLog.swift */; };
+		49C1BD02000000000001AABB /* Redact.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BD02000000000001AAAA /* Redact.swift */; };
+		49C1BD03000000000001AABB /* DiagnosticsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BD03000000000001AAAA /* DiagnosticsBundle.swift */; };
+		49C1BD04000000000001AABB /* RedactTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BD04000000000001AAAA /* RedactTests.swift */; };
+		49C1BE03000000000001AAAA /* libzstd in Frameworks */ = {isa = PBXBuildFile; productRef = 49C1BE02000000000001AAAA /* libzstd */; };
+		49C1BE05000000000001AAAA /* libzstd in Frameworks */ = {isa = PBXBuildFile; productRef = 49C1BE04000000000001AAAA /* libzstd */; };
+		49C1BE09000000000001AAAA /* DshZstdFrames.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE06000000000001AAAA /* DshZstdFrames.swift */; };
+		49C1BE0A000000000001AAAA /* DshZstdDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE07000000000001AAAA /* DshZstdDecoder.swift */; };
+		49C1BE0B000000000001AAAA /* DshZstdFrameScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE08000000000001AAAA /* DshZstdFrameScannerTests.swift */; };
+		49C1BE0F000000000001AAAA /* DshSessionScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE0C000000000001AAAA /* DshSessionScanner.swift */; };
+		49C1BE10000000000001AAAA /* DshSessionScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE0D000000000001AAAA /* DshSessionScannerTests.swift */; };
+		49C1BE11000000000001AAAA /* DshTestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE0E000000000001AAAA /* DshTestFixtures.swift */; };
+		49C1BE16000000000001AAAA /* DshContributionCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE12000000000001AAAA /* DshContributionCache.swift */; };
+		49C1BE17000000000001AAAA /* DshContributionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE13000000000001AAAA /* DshContributionStore.swift */; };
+		49C1BE18000000000001AAAA /* DshContributionRollup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE14000000000001AAAA /* DshContributionRollup.swift */; };
+		49C1BE19000000000001AAAA /* DshContributionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE15000000000001AAAA /* DshContributionTests.swift */; };
+		49C1BE1B000000000001AAAA /* DshPricingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE1A000000000001AAAA /* DshPricingTests.swift */; };
+		49C1BE1D000000000001AAAA /* DshDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE1C000000000001AAAA /* DshDiagnosticsTests.swift */; };
+		49C1BE1F000000000001AAAA /* DshAggregationRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE1E000000000001AAAA /* DshAggregationRegressionTests.swift */; };
+		49C1BE31000000000001AAAA /* ZstdStreamReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BE30000000000001AAAA /* ZstdStreamReader.swift */; };
+		49C1BF01000000000001AABB /* QuotaRefreshPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF01000000000001AAAA /* QuotaRefreshPlan.swift */; };
+		49C1BF02000000000001AABB /* QuotaRefreshPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF02000000000001AAAA /* QuotaRefreshPlanTests.swift */; };
+		49C1BF03000000000001AABB /* ImportedCodexStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF03000000000001AAAA /* ImportedCodexStoreTests.swift */; };
+		49C1BF04000000000001AABB /* ScannerIncrementalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF04000000000001AAAA /* ScannerIncrementalTests.swift */; };
+		49C1BF05000000000001AABB /* UsageEquivalenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF05000000000001AAAA /* UsageEquivalenceTests.swift */; };
+		49C1BF06000000000001AABB /* QuotaPersistenceCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF06000000000001AAAA /* QuotaPersistenceCoordinator.swift */; };
+		49C1BF07000000000001AABB /* QuotaPersistenceCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF07000000000001AAAA /* QuotaPersistenceCoordinatorTests.swift */; };
+		49C1BF08000000000001AABB /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF08000000000001AAAA /* UpdateChecker.swift */; };
+		49C1BF09000000000001AABB /* UpdateCheckerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF09000000000001AAAA /* UpdateCheckerTests.swift */; };
+		49C1BF0A000000000001AABB /* ConversationProjectResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF0A000000000001AAAA /* ConversationProjectResolverTests.swift */; };
+		49C1BF30000000000001AABB /* StatsOverviewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1BF30000000000001AAAA /* StatsOverviewModelTests.swift */; };
+		49C1CC01000000000001AABB /* commandcode.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1CC01000000000001AAAA /* commandcode.svg */; };
+		49C1CC02000000000001AABB /* CommandCodeAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC02000000000001AAAA /* CommandCodeAuth.swift */; };
+		49C1CC03000000000001AABB /* CommandCodeQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC03000000000001AAAA /* CommandCodeQuotaClient.swift */; };
+		49C1CC04000000000001AABB /* CommandCodeCredentialSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC04000000000001AAAA /* CommandCodeCredentialSheet.swift */; };
+		49C1CC05000000000001AABB /* CommandCodeQuotaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC05000000000001AAAA /* CommandCodeQuotaTests.swift */; };
+		49C1CC06000000000001AABB /* OpenCodeGoAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC06000000000001AAAA /* OpenCodeGoAuth.swift */; };
+		49C1CC07000000000001AABB /* OpenCodeGoQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC07000000000001AAAA /* OpenCodeGoQuotaClient.swift */; };
+		49C1CC08000000000001AABB /* OpenCodeGoCredentialSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC08000000000001AAAA /* OpenCodeGoCredentialSheet.swift */; };
+		49C1CC09000000000001AABB /* OpenCodeGoQuotaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC09000000000001AAAA /* OpenCodeGoQuotaTests.swift */; };
+		49C1D100000000000001AABB /* AntigravityCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1D100000000000001AAAA /* AntigravityCredentials.swift */; };
+		49C1D101000000000001AABB /* AntigravityQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1D101000000000001AAAA /* AntigravityQuotaClient.swift */; };
+		49C1EE01000000000001AABB /* pi.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1EE01000000000001AAAA /* pi.svg */; };
+		49C1EE02000000000001AABB /* opencode.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1EE02000000000001AAAA /* opencode.svg */; };
+		49C1EE03000000000001AABB /* dsh.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1EE03000000000001AAAA /* dsh.svg */; };
+		49C2AA02000000000001AAAA /* UsageSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA01000000000001AAAA /* UsageSnapshotStore.swift */; };
+		49C2AA04000000000001AAAA /* LegacyUsageHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA03000000000001AAAA /* LegacyUsageHistory.swift */; };
+		49C2AA06000000000001AAAA /* UsageHistoryConsistency.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA05000000000001AAAA /* UsageHistoryConsistency.swift */; };
+		49C2AA08000000000001AAAA /* UsageSnapshotStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA07000000000001AAAA /* UsageSnapshotStoreTests.swift */; };
+		49C2AA0A000000000001AAAA /* UsageHistoryRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA09000000000001AAAA /* UsageHistoryRecoveryTests.swift */; };
+		49C2AA0C000000000001AAAA /* UsageSafeRebuildTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA0B000000000001AAAA /* UsageSafeRebuildTests.swift */; };
+		49C2AA0E000000000001AAAA /* UsageHistoryTestHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AA0D000000000001AAAA /* UsageHistoryTestHarness.swift */; };
+		49C2AB02000000000001AAAA /* CodexModelIdentityMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AB01000000000001AAAA /* CodexModelIdentityMigration.swift */; };
+		49C2AB04000000000001AAAA /* CodexModelIdentityMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AB03000000000001AAAA /* CodexModelIdentityMigrationTests.swift */; };
+		49C2AC02000000000001AAAA /* AppUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AC01000000000001AAAA /* AppUpdater.swift */; };
+		49C2AC04000000000001AAAA /* AppUpdateWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AC03000000000001AAAA /* AppUpdateWindow.swift */; };
+		49C2AC07000000000001AAAA /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 49C2AC06000000000001AAAA /* Sparkle */; };
+		49C2AC09000000000001AAAA /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 49C2AC08000000000001AAAA /* Sparkle */; };
 		49C2AD01000000000001AABB /* QuotaAlertModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AD01000000000001AAAA /* QuotaAlertModels.swift */; };
 		49C2AD02000000000001AABB /* QuotaAlertPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AD02000000000001AAAA /* QuotaAlertPolicy.swift */; };
 		49C2AD03000000000001AABB /* QuotaNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AD03000000000001AAAA /* QuotaNotificationService.swift */; };
 		49C2AD04000000000001AABB /* SystemNotificationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AD04000000000001AAAA /* SystemNotificationClient.swift */; };
 		49C2AD05000000000001AABB /* QuotaAlertStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AD05000000000001AAAA /* QuotaAlertStore.swift */; };
 		49C2AD06000000000001AABB /* QuotaAlertTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AD06000000000001AAAA /* QuotaAlertTests.swift */; };
+		49C2AF01000000000001AABB /* NetworkProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C2AF01000000000001AAAA /* NetworkProxy.swift */; };
+		A6A1B90000000000000FAABB /* AntigravityScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A1B90000000000000FAAAA /* AntigravityScanner.swift */; };
+		A6A1B90000000000000FBABB /* AntigravityScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A1B90000000000000FBAAA /* AntigravityScannerTests.swift */; };
+		B71C1000000000000000AABB /* KimiSessionScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71C1000000000000000AAAA /* KimiSessionScanner.swift */; };
+		B71C2000000000000000AABB /* KimiSessionScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71C2000000000000000AAAA /* KimiSessionScannerTests.swift */; };
+		B71C3000000000000000AABB /* KimiUsageIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71C3000000000000000AAAA /* KimiUsageIntegrationTests.swift */; };
+		B71D1000000000000000AABB /* KimiCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D1000000000000000AAAA /* KimiCredentials.swift */; };
+		B71D2000000000000000AABB /* KimiQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D2000000000000000AAAA /* KimiQuotaClient.swift */; };
+		B71D3000000000000000AABB /* KimiTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D3000000000000000AAAA /* KimiTokenRefresher.swift */; };
+		B71D4000000000000000AABB /* KimiQuotaClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D4000000000000000AAAA /* KimiQuotaClientTests.swift */; };
+		B71D5000000000000000AABB /* KimiQuotaIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D5000000000000000AAAA /* KimiQuotaIntegrationTests.swift */; };
+		B71D6000000000000000AABB /* kimi.ico in Resources */ = {isa = PBXBuildFile; fileRef = B71D6000000000000000AAAA /* kimi.ico */; };
+		B71E0100000000000000AABB /* KimiManagedAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0100000000000000AAAA /* KimiManagedAccountStore.swift */; };
+		B71E0200000000000000AABB /* KimiDeviceAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0200000000000000AAAA /* KimiDeviceAuthorization.swift */; };
+		B71E0300000000000000AABB /* KimiManagedTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0300000000000000AAAA /* KimiManagedTokenRefresher.swift */; };
+		B71E0400000000000000AABB /* KimiManagedQuotaCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0400000000000000AAAA /* KimiManagedQuotaCache.swift */; };
+		B71E0500000000000000AABB /* KimiManagedAccounts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0500000000000000AAAA /* KimiManagedAccounts.swift */; };
+		B71E0600000000000000AABB /* KimiManagedAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0600000000000000AAAA /* KimiManagedAccountsView.swift */; };
+		B71E0700000000000000AABB /* KimiManagedAccountsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0700000000000000AAAA /* KimiManagedAccountsSection.swift */; };
+		B71E0800000000000000AABB /* MoonshotAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0800000000000000AAAA /* MoonshotAccountStore.swift */; };
+		B71E0900000000000000AABB /* MoonshotBalanceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0900000000000000AAAA /* MoonshotBalanceClient.swift */; };
+		B71E0A00000000000000AABB /* MoonshotAccounts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0A00000000000000AAAA /* MoonshotAccounts.swift */; };
+		B71E0B00000000000000AABB /* MoonshotAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0B00000000000000AAAA /* MoonshotAccountsView.swift */; };
+		B71E0C00000000000000AABB /* MoonshotBalancesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0C00000000000000AAAA /* MoonshotBalancesSection.swift */; };
+		B71E2100000000000000AABB /* KimiManagedAccountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E2100000000000000AAAA /* KimiManagedAccountTests.swift */; };
+		B71E2200000000000000AABB /* MoonshotBalanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E2200000000000000AAAA /* MoonshotBalanceTests.swift */; };
+		B71E3100000000000000AABB /* CachedManagedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E3100000000000000AAAA /* CachedManagedKeychain.swift */; };
+		B71E3200000000000000AABB /* CachedManagedKeychainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E3200000000000000AAAA /* CachedManagedKeychainTests.swift */; };
+		B71F0100000000000000AABB /* KimiTimingAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71F0100000000000000AAAA /* KimiTimingAuditTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -168,10 +194,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		49C2AC01000000000001AAAA /* AppUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdater.swift; sourceTree = "<group>"; };
-		49C2AC03000000000001AAAA /* AppUpdateWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateWindow.swift; sourceTree = "<group>"; };
-		49C2AB03000000000001AAAA /* CodexModelIdentityMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexModelIdentityMigrationTests.swift; sourceTree = "<group>"; };
-		49C2AB01000000000001AAAA /* CodexModelIdentityMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexModelIdentityMigration.swift; sourceTree = "<group>"; };
 		4931AC302FC029A000EE598C /* CCBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CCBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4931AC3E2FC02A4200EE598C /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		4931AC3F2FC02A4200EE598C /* ccbar.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ccbar.xcodeproj; sourceTree = "<group>"; };
@@ -185,111 +207,45 @@
 		4931AC542FC02A4200EE598C /* SettingsRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRootView.swift; sourceTree = "<group>"; };
 		49C1B101000000000001AAAA /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		49C1B102000000000001AAAA /* JWT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JWT.swift; sourceTree = "<group>"; };
-		49C1BC11000000000001AAAA /* CursorAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorAuth.swift; sourceTree = "<group>"; };
-		49C1D100000000000001AAAA /* AntigravityCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityCredentials.swift; sourceTree = "<group>"; };
-		49C1BC13000000000001AAAA /* CursorUsageCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorUsageCache.swift; sourceTree = "<group>"; };
 		49C1B103000000000001AAAA /* CodexAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexAuth.swift; sourceTree = "<group>"; };
 		49C1B104000000000001AAAA /* ClaudeAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeAuth.swift; sourceTree = "<group>"; };
-		49C1B198000000000001AAAA /* ClaudeDesktopAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeDesktopAuth.swift; sourceTree = "<group>"; };
 		49C1B105000000000001AAAA /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
 		49C1B106000000000001AAAA /* QuotaCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaCache.swift; sourceTree = "<group>"; };
 		49C1B107000000000001AAAA /* ScanCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanCache.swift; sourceTree = "<group>"; };
 		49C1B108000000000001AAAA /* QuotaHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaHistoryStore.swift; sourceTree = "<group>"; };
-		49C1BA10000000000001AAAA /* QuotaCycleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaCycleStore.swift; sourceTree = "<group>"; };
 		49C1B120000000000001AAAA /* QuotaModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaModels.swift; sourceTree = "<group>"; };
 		49C1B121000000000001AAAA /* CodexTokenRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexTokenRefresher.swift; sourceTree = "<group>"; };
 		49C1B122000000000001AAAA /* CodexQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexQuotaClient.swift; sourceTree = "<group>"; };
-		49C1D101000000000001AAAA /* AntigravityQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityQuotaClient.swift; sourceTree = "<group>"; };
-		49C1BC10000000000001AAAA /* CursorQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorQuotaClient.swift; sourceTree = "<group>"; };
-		49C1BC14000000000001AAAA /* CursorUsageFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorUsageFetcher.swift; sourceTree = "<group>"; };
 		49C1B123000000000001AAAA /* ClaudeQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeQuotaClient.swift; sourceTree = "<group>"; };
 		49C1B124000000000001AAAA /* ClaudeCLIFallbackQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeCLIFallbackQuotaClient.swift; sourceTree = "<group>"; };
 		49C1B125000000000001AAAA /* ClaudeTokenRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeTokenRefresher.swift; sourceTree = "<group>"; };
 		49C1B126000000000001AAAA /* ServiceStatusClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceStatusClient.swift; sourceTree = "<group>"; };
 		49C1B128000000000001AAAA /* CodexResetCreditsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexResetCreditsClient.swift; sourceTree = "<group>"; };
-		49C1BF01000000000001AAAA /* QuotaRefreshPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaRefreshPlan.swift; sourceTree = "<group>"; };
-		49C1BF06000000000001AAAA /* QuotaPersistenceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaPersistenceCoordinator.swift; sourceTree = "<group>"; };
-		49C1BF07000000000001AAAA /* QuotaPersistenceCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaPersistenceCoordinatorTests.swift; sourceTree = "<group>"; };
-		49C1BF08000000000001AAAA /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
-		49C2AF01000000000001AAAA /* NetworkProxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProxy.swift; sourceTree = "<group>"; };
-		49C1BF09000000000001AAAA /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
-		49C1BF02000000000001AAAA /* QuotaRefreshPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaRefreshPlanTests.swift; sourceTree = "<group>"; };
-		49C1CC05000000000001AAAA /* CommandCodeQuotaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeQuotaTests.swift; sourceTree = "<group>"; };
-		49C1CC09000000000001AAAA /* OpenCodeGoQuotaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoQuotaTests.swift; sourceTree = "<group>"; };
-		49C1BF03000000000001AAAA /* ImportedCodexStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedCodexStoreTests.swift; sourceTree = "<group>"; };
-		49C1BF04000000000001AAAA /* ScannerIncrementalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerIncrementalTests.swift; sourceTree = "<group>"; };
-		49C1BF05000000000001AAAA /* UsageEquivalenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageEquivalenceTests.swift; sourceTree = "<group>"; };
-		49C1BF30000000000001AAAA /* StatsOverviewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsOverviewModelTests.swift; sourceTree = "<group>"; };
 		49C1B131000000000001AAAA /* Scheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scheduler.swift; sourceTree = "<group>"; };
 		49C1B132000000000001AAAA /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
-		49C1BD01000000000001AAAA /* AppLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLog.swift; sourceTree = "<group>"; };
-		49C1BD02000000000001AAAA /* Redact.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Redact.swift; sourceTree = "<group>"; };
-		49C1BD03000000000001AAAA /* DiagnosticsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsBundle.swift; sourceTree = "<group>"; };
-		49C1BD04000000000001AAAA /* RedactTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedactTests.swift; sourceTree = "<group>"; };
 		49C1B140000000000001AAAA /* codex.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = codex.svg; sourceTree = "<group>"; };
 		49C1B141000000000001AAAA /* claude.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = claude.svg; sourceTree = "<group>"; };
 		49C1B143000000000001AAAA /* antigravity.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = antigravity.svg; sourceTree = "<group>"; };
-		49C1BC16000000000001AAAA /* cursor.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = cursor.svg; sourceTree = "<group>"; };
-		49C1CC01000000000001AAAA /* commandcode.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = commandcode.svg; sourceTree = "<group>"; };
-		49C1EE01000000000001AAAA /* pi.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = pi.svg; sourceTree = "<group>"; };
-		49C1EE02000000000001AAAA /* opencode.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = opencode.svg; sourceTree = "<group>"; };
-		49C1EE03000000000001AAAA /* dsh.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = dsh.svg; sourceTree = "<group>"; };
-		49C1CC02000000000001AAAA /* CommandCodeAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeAuth.swift; sourceTree = "<group>"; };
-		49C1CC06000000000001AAAA /* OpenCodeGoAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoAuth.swift; sourceTree = "<group>"; };
-		49C1CC03000000000001AAAA /* CommandCodeQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeQuotaClient.swift; sourceTree = "<group>"; };
-		49C1CC07000000000001AAAA /* OpenCodeGoQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoQuotaClient.swift; sourceTree = "<group>"; };
-		49C1CC04000000000001AAAA /* CommandCodeCredentialSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeCredentialSheet.swift; sourceTree = "<group>"; };
-		49C1CC08000000000001AAAA /* OpenCodeGoCredentialSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoCredentialSheet.swift; sourceTree = "<group>"; };
 		49C1B150000000000001AAAA /* UsageModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageModels.swift; sourceTree = "<group>"; };
 		49C1B151000000000001AAAA /* Pricing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pricing.swift; sourceTree = "<group>"; };
 		49C1B152000000000001AAAA /* JSONLLineReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONLLineReader.swift; sourceTree = "<group>"; };
 		49C1B153000000000001AAAA /* ClaudeJSONLScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeJSONLScanner.swift; sourceTree = "<group>"; };
 		49C1B154000000000001AAAA /* CodexJSONLScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexJSONLScanner.swift; sourceTree = "<group>"; };
-		49C1B32000000000000FAAAA /* PiJSONLScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiJSONLScanner.swift; sourceTree = "<group>"; };
-		49C1BE06000000000001AAAA /* DshZstdFrames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshZstdFrames.swift; sourceTree = "<group>"; };
-		49C1BE07000000000001AAAA /* DshZstdDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshZstdDecoder.swift; sourceTree = "<group>"; };
-		49C1BE30000000000001AAAA /* ZstdStreamReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZstdStreamReader.swift; sourceTree = "<group>"; };
-		49C1BE08000000000001AAAA /* DshZstdFrameScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshZstdFrameScannerTests.swift; sourceTree = "<group>"; };
-		49C1BE0C000000000001AAAA /* DshSessionScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshSessionScanner.swift; sourceTree = "<group>"; };
-		49C1BE0D000000000001AAAA /* DshSessionScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshSessionScannerTests.swift; sourceTree = "<group>"; };
-		49C1BE0E000000000001AAAA /* DshTestFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshTestFixtures.swift; sourceTree = "<group>"; };
-		49C1BE12000000000001AAAA /* DshContributionCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshContributionCache.swift; sourceTree = "<group>"; };
-		49C2AA01000000000001AAAA /* UsageSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSnapshotStore.swift; sourceTree = "<group>"; };
-		49C2AA03000000000001AAAA /* LegacyUsageHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyUsageHistory.swift; sourceTree = "<group>"; };
-		49C2AA05000000000001AAAA /* UsageHistoryConsistency.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageHistoryConsistency.swift; sourceTree = "<group>"; };
-		49C2AA07000000000001AAAA /* UsageSnapshotStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSnapshotStoreTests.swift; sourceTree = "<group>"; };
-		49C2AA09000000000001AAAA /* UsageHistoryRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageHistoryRecoveryTests.swift; sourceTree = "<group>"; };
-		49C2AA0B000000000001AAAA /* UsageSafeRebuildTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSafeRebuildTests.swift; sourceTree = "<group>"; };
-		49C2AA0D000000000001AAAA /* UsageHistoryTestHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageHistoryTestHarness.swift; sourceTree = "<group>"; };
-		49C1BE13000000000001AAAA /* DshContributionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshContributionStore.swift; sourceTree = "<group>"; };
-		49C1BE14000000000001AAAA /* DshContributionRollup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshContributionRollup.swift; sourceTree = "<group>"; };
-		49C1BE15000000000001AAAA /* DshContributionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshContributionTests.swift; sourceTree = "<group>"; };
-		49C1BE1E000000000001AAAA /* DshAggregationRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshAggregationRegressionTests.swift; sourceTree = "<group>"; };
-		49C1BE1A000000000001AAAA /* DshPricingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshPricingTests.swift; sourceTree = "<group>"; };
-		49C1BE1C000000000001AAAA /* DshDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshDiagnosticsTests.swift; sourceTree = "<group>"; };
-		A6A1B90000000000000FAAAA /* AntigravityScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityScanner.swift; sourceTree = "<group>"; };
-		49C1B90000000000000FAAAA /* OpencodeScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpencodeScanner.swift; sourceTree = "<group>"; };
 		49C1B155000000000001AAAA /* UsageAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageAggregator.swift; sourceTree = "<group>"; };
-		49C1B16A000000000001AAAA /* ModelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelProvider.swift; sourceTree = "<group>"; };
 		49C1B156000000000001AAAA /* UsageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageService.swift; sourceTree = "<group>"; };
-		49C1B197000000000001AAAA /* UsageLogWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageLogWatcher.swift; sourceTree = "<group>"; };
-		49C1BA11000000000001AAAA /* CycleUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CycleUsage.swift; sourceTree = "<group>"; };
 		49C1B157000000000001AAAA /* PricingCatalogModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PricingCatalogModels.swift; sourceTree = "<group>"; };
 		49C1B158000000000001AAAA /* LiteLLMPricingDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiteLLMPricingDecoder.swift; sourceTree = "<group>"; };
 		49C1B159000000000001AAAA /* ModelsDevPricingDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsDevPricingDecoder.swift; sourceTree = "<group>"; };
 		49C1B15A000000000001AAAA /* PricingCatalogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PricingCatalogStore.swift; sourceTree = "<group>"; };
 		49C1B161000000000001AAAA /* MainWindowRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowRootView.swift; sourceTree = "<group>"; };
 		49C1B162000000000001AAAA /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
-		49C1B1F0000000000001AAAA /* StatsOverviewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsOverviewModel.swift; sourceTree = "<group>"; };
 		49C1B163000000000001AAAA /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		49C1B164000000000001AAAA /* ConversationStatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStatsView.swift; sourceTree = "<group>"; };
-		49C1BA12000000000001AAAA /* CycleStatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CycleStatsView.swift; sourceTree = "<group>"; };
-		49C1BB02000000000001AAAA /* ProjectStatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStatsView.swift; sourceTree = "<group>"; };
 		49C1B165000000000001AAAA /* ConversationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationModels.swift; sourceTree = "<group>"; };
 		49C1B166000000000001AAAA /* ConversationAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationAggregator.swift; sourceTree = "<group>"; };
-		49C1BB01000000000001AAAA /* ProjectWorktreeResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWorktreeResolver.swift; sourceTree = "<group>"; };
 		49C1B167000000000001AAAA /* ConversationTitleIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationTitleIndex.swift; sourceTree = "<group>"; };
 		49C1B168000000000001AAAA /* ConversationRollupCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationRollupCache.swift; sourceTree = "<group>"; };
+		49C1B16A000000000001AAAA /* ModelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelProvider.swift; sourceTree = "<group>"; };
 		49C1B171000000000001AAAA /* FloatingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanel.swift; sourceTree = "<group>"; };
 		49C1B172000000000001AAAA /* FloatingContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingContentView.swift; sourceTree = "<group>"; };
 		49C1B173000000000001AAAA /* FloatingPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelController.swift; sourceTree = "<group>"; };
@@ -300,23 +256,119 @@
 		49C1B194000000000001AAAA /* ImportedCodexAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedCodexAccountsView.swift; sourceTree = "<group>"; };
 		49C1B195000000000001AAAA /* CodexResetCreditsDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexResetCreditsDetailView.swift; sourceTree = "<group>"; };
 		49C1B196000000000001AAAA /* ImportedUsageBackfill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedUsageBackfill.swift; sourceTree = "<group>"; };
+		49C1B197000000000001AAAA /* UsageLogWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageLogWatcher.swift; sourceTree = "<group>"; };
+		49C1B198000000000001AAAA /* ClaudeDesktopAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeDesktopAuth.swift; sourceTree = "<group>"; };
+		49C1B1F0000000000001AAAA /* StatsOverviewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsOverviewModel.swift; sourceTree = "<group>"; };
 		49C1B300000000000001AAAA /* QuotaParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaParsingTests.swift; sourceTree = "<group>"; };
-		49C1BC12000000000001AAAA /* CursorAuthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorAuthTests.swift; sourceTree = "<group>"; };
-		49C1BC15000000000001AAAA /* CursorUsageFetcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorUsageFetcherTests.swift; sourceTree = "<group>"; };
-		49C1B31000000000000FAAAA /* PiJSONLScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiJSONLScannerTests.swift; sourceTree = "<group>"; };
-		49C1B91000000000000FAAAA /* OpencodeScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpencodeScannerTests.swift; sourceTree = "<group>"; };
-		A6A1B90000000000000FBAAA /* AntigravityScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityScannerTests.swift; sourceTree = "<group>"; };
-		49C1BF0A000000000001AAAA /* ConversationProjectResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationProjectResolverTests.swift; sourceTree = "<group>"; };
-		49C1BB03000000000001AAAA /* ProjectUsageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectUsageTests.swift; sourceTree = "<group>"; };
 		49C1B301000000000001AAAA /* CCBarTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CCBarTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		49C1B31000000000000FAAAA /* PiJSONLScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiJSONLScannerTests.swift; sourceTree = "<group>"; };
+		49C1B32000000000000FAAAA /* PiJSONLScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiJSONLScanner.swift; sourceTree = "<group>"; };
 		49C1B3F0000000000001AAAA /* codex-fast-scan.jsonl */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "codex-fast-scan.jsonl"; sourceTree = "<group>"; };
 		49C1B3F1000000000001AAAA /* claude-fast-scan.jsonl */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "claude-fast-scan.jsonl"; sourceTree = "<group>"; };
+		49C1B90000000000000FAAAA /* OpencodeScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpencodeScanner.swift; sourceTree = "<group>"; };
+		49C1B91000000000000FAAAA /* OpencodeScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpencodeScannerTests.swift; sourceTree = "<group>"; };
+		49C1BA10000000000001AAAA /* QuotaCycleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaCycleStore.swift; sourceTree = "<group>"; };
+		49C1BA11000000000001AAAA /* CycleUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CycleUsage.swift; sourceTree = "<group>"; };
+		49C1BA12000000000001AAAA /* CycleStatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CycleStatsView.swift; sourceTree = "<group>"; };
+		49C1BB01000000000001AAAA /* ProjectWorktreeResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWorktreeResolver.swift; sourceTree = "<group>"; };
+		49C1BB02000000000001AAAA /* ProjectStatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStatsView.swift; sourceTree = "<group>"; };
+		49C1BB03000000000001AAAA /* ProjectUsageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectUsageTests.swift; sourceTree = "<group>"; };
+		49C1BC10000000000001AAAA /* CursorQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorQuotaClient.swift; sourceTree = "<group>"; };
+		49C1BC11000000000001AAAA /* CursorAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorAuth.swift; sourceTree = "<group>"; };
+		49C1BC12000000000001AAAA /* CursorAuthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorAuthTests.swift; sourceTree = "<group>"; };
+		49C1BC13000000000001AAAA /* CursorUsageCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorUsageCache.swift; sourceTree = "<group>"; };
+		49C1BC14000000000001AAAA /* CursorUsageFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorUsageFetcher.swift; sourceTree = "<group>"; };
+		49C1BC15000000000001AAAA /* CursorUsageFetcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorUsageFetcherTests.swift; sourceTree = "<group>"; };
+		49C1BC16000000000001AAAA /* cursor.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = cursor.svg; sourceTree = "<group>"; };
+		49C1BD01000000000001AAAA /* AppLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLog.swift; sourceTree = "<group>"; };
+		49C1BD02000000000001AAAA /* Redact.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Redact.swift; sourceTree = "<group>"; };
+		49C1BD03000000000001AAAA /* DiagnosticsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsBundle.swift; sourceTree = "<group>"; };
+		49C1BD04000000000001AAAA /* RedactTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedactTests.swift; sourceTree = "<group>"; };
+		49C1BE06000000000001AAAA /* DshZstdFrames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshZstdFrames.swift; sourceTree = "<group>"; };
+		49C1BE07000000000001AAAA /* DshZstdDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshZstdDecoder.swift; sourceTree = "<group>"; };
+		49C1BE08000000000001AAAA /* DshZstdFrameScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshZstdFrameScannerTests.swift; sourceTree = "<group>"; };
+		49C1BE0C000000000001AAAA /* DshSessionScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshSessionScanner.swift; sourceTree = "<group>"; };
+		49C1BE0D000000000001AAAA /* DshSessionScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshSessionScannerTests.swift; sourceTree = "<group>"; };
+		49C1BE0E000000000001AAAA /* DshTestFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshTestFixtures.swift; sourceTree = "<group>"; };
+		49C1BE12000000000001AAAA /* DshContributionCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshContributionCache.swift; sourceTree = "<group>"; };
+		49C1BE13000000000001AAAA /* DshContributionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshContributionStore.swift; sourceTree = "<group>"; };
+		49C1BE14000000000001AAAA /* DshContributionRollup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshContributionRollup.swift; sourceTree = "<group>"; };
+		49C1BE15000000000001AAAA /* DshContributionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshContributionTests.swift; sourceTree = "<group>"; };
+		49C1BE1A000000000001AAAA /* DshPricingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshPricingTests.swift; sourceTree = "<group>"; };
+		49C1BE1C000000000001AAAA /* DshDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshDiagnosticsTests.swift; sourceTree = "<group>"; };
+		49C1BE1E000000000001AAAA /* DshAggregationRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshAggregationRegressionTests.swift; sourceTree = "<group>"; };
+		49C1BE30000000000001AAAA /* ZstdStreamReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZstdStreamReader.swift; sourceTree = "<group>"; };
+		49C1BF01000000000001AAAA /* QuotaRefreshPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaRefreshPlan.swift; sourceTree = "<group>"; };
+		49C1BF02000000000001AAAA /* QuotaRefreshPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaRefreshPlanTests.swift; sourceTree = "<group>"; };
+		49C1BF03000000000001AAAA /* ImportedCodexStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedCodexStoreTests.swift; sourceTree = "<group>"; };
+		49C1BF04000000000001AAAA /* ScannerIncrementalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerIncrementalTests.swift; sourceTree = "<group>"; };
+		49C1BF05000000000001AAAA /* UsageEquivalenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageEquivalenceTests.swift; sourceTree = "<group>"; };
+		49C1BF06000000000001AAAA /* QuotaPersistenceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaPersistenceCoordinator.swift; sourceTree = "<group>"; };
+		49C1BF07000000000001AAAA /* QuotaPersistenceCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaPersistenceCoordinatorTests.swift; sourceTree = "<group>"; };
+		49C1BF08000000000001AAAA /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
+		49C1BF09000000000001AAAA /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
+		49C1BF0A000000000001AAAA /* ConversationProjectResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationProjectResolverTests.swift; sourceTree = "<group>"; };
+		49C1BF30000000000001AAAA /* StatsOverviewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsOverviewModelTests.swift; sourceTree = "<group>"; };
+		49C1CC01000000000001AAAA /* commandcode.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = commandcode.svg; sourceTree = "<group>"; };
+		49C1CC02000000000001AAAA /* CommandCodeAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeAuth.swift; sourceTree = "<group>"; };
+		49C1CC03000000000001AAAA /* CommandCodeQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeQuotaClient.swift; sourceTree = "<group>"; };
+		49C1CC04000000000001AAAA /* CommandCodeCredentialSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeCredentialSheet.swift; sourceTree = "<group>"; };
+		49C1CC05000000000001AAAA /* CommandCodeQuotaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeQuotaTests.swift; sourceTree = "<group>"; };
+		49C1CC06000000000001AAAA /* OpenCodeGoAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoAuth.swift; sourceTree = "<group>"; };
+		49C1CC07000000000001AAAA /* OpenCodeGoQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoQuotaClient.swift; sourceTree = "<group>"; };
+		49C1CC08000000000001AAAA /* OpenCodeGoCredentialSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoCredentialSheet.swift; sourceTree = "<group>"; };
+		49C1CC09000000000001AAAA /* OpenCodeGoQuotaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoQuotaTests.swift; sourceTree = "<group>"; };
+		49C1D100000000000001AAAA /* AntigravityCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityCredentials.swift; sourceTree = "<group>"; };
+		49C1D101000000000001AAAA /* AntigravityQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityQuotaClient.swift; sourceTree = "<group>"; };
+		49C1EE01000000000001AAAA /* pi.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = pi.svg; sourceTree = "<group>"; };
+		49C1EE02000000000001AAAA /* opencode.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = opencode.svg; sourceTree = "<group>"; };
+		49C1EE03000000000001AAAA /* dsh.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = dsh.svg; sourceTree = "<group>"; };
+		49C2AA01000000000001AAAA /* UsageSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSnapshotStore.swift; sourceTree = "<group>"; };
+		49C2AA03000000000001AAAA /* LegacyUsageHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyUsageHistory.swift; sourceTree = "<group>"; };
+		49C2AA05000000000001AAAA /* UsageHistoryConsistency.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageHistoryConsistency.swift; sourceTree = "<group>"; };
+		49C2AA07000000000001AAAA /* UsageSnapshotStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSnapshotStoreTests.swift; sourceTree = "<group>"; };
+		49C2AA09000000000001AAAA /* UsageHistoryRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageHistoryRecoveryTests.swift; sourceTree = "<group>"; };
+		49C2AA0B000000000001AAAA /* UsageSafeRebuildTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSafeRebuildTests.swift; sourceTree = "<group>"; };
+		49C2AA0D000000000001AAAA /* UsageHistoryTestHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageHistoryTestHarness.swift; sourceTree = "<group>"; };
+		49C2AB01000000000001AAAA /* CodexModelIdentityMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexModelIdentityMigration.swift; sourceTree = "<group>"; };
+		49C2AB03000000000001AAAA /* CodexModelIdentityMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexModelIdentityMigrationTests.swift; sourceTree = "<group>"; };
+		49C2AC01000000000001AAAA /* AppUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdater.swift; sourceTree = "<group>"; };
+		49C2AC03000000000001AAAA /* AppUpdateWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateWindow.swift; sourceTree = "<group>"; };
 		49C2AD01000000000001AAAA /* QuotaAlertModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaAlertModels.swift; sourceTree = "<group>"; };
 		49C2AD02000000000001AAAA /* QuotaAlertPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaAlertPolicy.swift; sourceTree = "<group>"; };
 		49C2AD03000000000001AAAA /* QuotaNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaNotificationService.swift; sourceTree = "<group>"; };
 		49C2AD04000000000001AAAA /* SystemNotificationClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemNotificationClient.swift; sourceTree = "<group>"; };
 		49C2AD05000000000001AAAA /* QuotaAlertStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaAlertStore.swift; sourceTree = "<group>"; };
 		49C2AD06000000000001AAAA /* QuotaAlertTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaAlertTests.swift; sourceTree = "<group>"; };
+		49C2AF01000000000001AAAA /* NetworkProxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProxy.swift; sourceTree = "<group>"; };
+		A6A1B90000000000000FAAAA /* AntigravityScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityScanner.swift; sourceTree = "<group>"; };
+		A6A1B90000000000000FBAAA /* AntigravityScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityScannerTests.swift; sourceTree = "<group>"; };
+		B71C1000000000000000AAAA /* KimiSessionScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiSessionScanner.swift; sourceTree = "<group>"; };
+		B71C2000000000000000AAAA /* KimiSessionScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiSessionScannerTests.swift; sourceTree = "<group>"; };
+		B71C3000000000000000AAAA /* KimiUsageIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiUsageIntegrationTests.swift; sourceTree = "<group>"; };
+		B71D1000000000000000AAAA /* KimiCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiCredentials.swift; sourceTree = "<group>"; };
+		B71D2000000000000000AAAA /* KimiQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiQuotaClient.swift; sourceTree = "<group>"; };
+		B71D3000000000000000AAAA /* KimiTokenRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiTokenRefresher.swift; sourceTree = "<group>"; };
+		B71D4000000000000000AAAA /* KimiQuotaClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiQuotaClientTests.swift; sourceTree = "<group>"; };
+		B71D5000000000000000AAAA /* KimiQuotaIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiQuotaIntegrationTests.swift; sourceTree = "<group>"; };
+		B71D6000000000000000AAAA /* kimi.ico */ = {isa = PBXFileReference; lastKnownFileType = image.ico; path = kimi.ico; sourceTree = "<group>"; };
+		B71E0100000000000000AAAA /* KimiManagedAccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedAccountStore.swift; sourceTree = "<group>"; };
+		B71E0200000000000000AAAA /* KimiDeviceAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiDeviceAuthorization.swift; sourceTree = "<group>"; };
+		B71E0300000000000000AAAA /* KimiManagedTokenRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedTokenRefresher.swift; sourceTree = "<group>"; };
+		B71E0400000000000000AAAA /* KimiManagedQuotaCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedQuotaCache.swift; sourceTree = "<group>"; };
+		B71E0500000000000000AAAA /* KimiManagedAccounts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedAccounts.swift; sourceTree = "<group>"; };
+		B71E0600000000000000AAAA /* KimiManagedAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedAccountsView.swift; sourceTree = "<group>"; };
+		B71E0700000000000000AAAA /* KimiManagedAccountsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedAccountsSection.swift; sourceTree = "<group>"; };
+		B71E0800000000000000AAAA /* MoonshotAccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotAccountStore.swift; sourceTree = "<group>"; };
+		B71E0900000000000000AAAA /* MoonshotBalanceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotBalanceClient.swift; sourceTree = "<group>"; };
+		B71E0A00000000000000AAAA /* MoonshotAccounts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotAccounts.swift; sourceTree = "<group>"; };
+		B71E0B00000000000000AAAA /* MoonshotAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotAccountsView.swift; sourceTree = "<group>"; };
+		B71E0C00000000000000AAAA /* MoonshotBalancesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotBalancesSection.swift; sourceTree = "<group>"; };
+		B71E2100000000000000AAAA /* KimiManagedAccountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedAccountTests.swift; sourceTree = "<group>"; };
+		B71E2200000000000000AAAA /* MoonshotBalanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotBalanceTests.swift; sourceTree = "<group>"; };
+		B71E3100000000000000AAAA /* CachedManagedKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedManagedKeychain.swift; sourceTree = "<group>"; };
+		B71E3200000000000000AAAA /* CachedManagedKeychainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedManagedKeychainTests.swift; sourceTree = "<group>"; };
+		B71F0100000000000000AAAA /* KimiTimingAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiTimingAuditTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -380,6 +432,8 @@
 				49C1BF08000000000001AAAA /* UpdateChecker.swift */,
 				49C2AF01000000000001AAAA /* NetworkProxy.swift */,
 				49C2AC01000000000001AAAA /* AppUpdater.swift */,
+				B71E0500000000000000AAAA /* KimiManagedAccounts.swift */,
+				B71E0A00000000000000AAAA /* MoonshotAccounts.swift */,
 				49C1B110000000000001AAAA /* Credentials */,
 				49C1B112000000000001AAAA /* Quota */,
 				49C1B15F000000000001AAAA /* Usage */,
@@ -396,6 +450,8 @@
 				4931AC4F2FC02A4200EE598C /* MenuBarLabel.swift */,
 				4931AC502FC02A4200EE598C /* PopoverRootView.swift */,
 				49C1B193000000000001AAAA /* OtherCodexAccountsSection.swift */,
+				B71E0700000000000000AAAA /* KimiManagedAccountsSection.swift */,
+				B71E0C00000000000000AAAA /* MoonshotBalancesSection.swift */,
 			);
 			path = MenuBar;
 			sourceTree = "<group>";
@@ -417,6 +473,8 @@
 				49C1CC08000000000001AAAA /* OpenCodeGoCredentialSheet.swift */,
 				49C1B194000000000001AAAA /* ImportedCodexAccountsView.swift */,
 				49C1B195000000000001AAAA /* CodexResetCreditsDetailView.swift */,
+				B71E0600000000000000AAAA /* KimiManagedAccountsView.swift */,
+				B71E0B00000000000000AAAA /* MoonshotAccountsView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -435,11 +493,15 @@
 				49C1D100000000000001AAAA /* AntigravityCredentials.swift */,
 				49C1CC02000000000001AAAA /* CommandCodeAuth.swift */,
 				49C1CC06000000000001AAAA /* OpenCodeGoAuth.swift */,
+				B71D1000000000000000AAAA /* KimiCredentials.swift */,
 				49C1B103000000000001AAAA /* CodexAuth.swift */,
 				49C1B104000000000001AAAA /* ClaudeAuth.swift */,
 				49C1B198000000000001AAAA /* ClaudeDesktopAuth.swift */,
 				49C1B191000000000001AAAA /* ImportedCodexAccount.swift */,
 				49C1B192000000000001AAAA /* ImportedCodexStore.swift */,
+				B71E0100000000000000AAAA /* KimiManagedAccountStore.swift */,
+				B71E3100000000000000AAAA /* CachedManagedKeychain.swift */,
+				B71E0800000000000000AAAA /* MoonshotAccountStore.swift */,
 			);
 			path = Credentials;
 			sourceTree = "<group>";
@@ -459,6 +521,7 @@
 				49C1B168000000000001AAAA /* ConversationRollupCache.swift */,
 				49C1B196000000000001AAAA /* ImportedUsageBackfill.swift */,
 				49C1BC13000000000001AAAA /* CursorUsageCache.swift */,
+				B71E0400000000000000AAAA /* KimiManagedQuotaCache.swift */,
 			);
 			path = Storage;
 			sourceTree = "<group>";
@@ -473,6 +536,11 @@
 				49C1BC10000000000001AAAA /* CursorQuotaClient.swift */,
 				49C1CC03000000000001AAAA /* CommandCodeQuotaClient.swift */,
 				49C1CC07000000000001AAAA /* OpenCodeGoQuotaClient.swift */,
+				B71D3000000000000000AAAA /* KimiTokenRefresher.swift */,
+				B71D2000000000000000AAAA /* KimiQuotaClient.swift */,
+				B71E0200000000000000AAAA /* KimiDeviceAuthorization.swift */,
+				B71E0300000000000000AAAA /* KimiManagedTokenRefresher.swift */,
+				B71E0900000000000000AAAA /* MoonshotBalanceClient.swift */,
 				49C1B128000000000001AAAA /* CodexResetCreditsClient.swift */,
 				49C1B123000000000001AAAA /* ClaudeQuotaClient.swift */,
 				49C1B124000000000001AAAA /* ClaudeCLIFallbackQuotaClient.swift */,
@@ -494,19 +562,10 @@
 				49C1CC01000000000001AAAA /* commandcode.svg */,
 				49C1EE01000000000001AAAA /* pi.svg */,
 				49C1EE02000000000001AAAA /* opencode.svg */,
+				B71D6000000000000000AAAA /* kimi.ico */,
 				49C1EE03000000000001AAAA /* dsh.svg */,
 			);
 			path = Logos;
-			sourceTree = "<group>";
-		};
-		49C1BD00000000000001AAAA /* Diagnostics */ = {
-			isa = PBXGroup;
-			children = (
-				49C1BD01000000000001AAAA /* AppLog.swift */,
-				49C1BD02000000000001AAAA /* Redact.swift */,
-				49C1BD03000000000001AAAA /* DiagnosticsBundle.swift */,
-			);
-			path = Diagnostics;
 			sourceTree = "<group>";
 		};
 		49C1B15B000000000001AAAA /* Pricing */ = {
@@ -530,6 +589,7 @@
 				49C2AB01000000000001AAAA /* CodexModelIdentityMigration.swift */,
 				49C1B154000000000001AAAA /* CodexJSONLScanner.swift */,
 				49C1B32000000000000FAAAA /* PiJSONLScanner.swift */,
+				B71C1000000000000000AAAA /* KimiSessionScanner.swift */,
 				A6A1B90000000000000FAAAA /* AntigravityScanner.swift */,
 				49C1B90000000000000FAAAA /* OpencodeScanner.swift */,
 				49C1BE06000000000001AAAA /* DshZstdFrames.swift */,
@@ -596,6 +656,11 @@
 				49C1BF02000000000001AAAA /* QuotaRefreshPlanTests.swift */,
 				49C1CC05000000000001AAAA /* CommandCodeQuotaTests.swift */,
 				49C1CC09000000000001AAAA /* OpenCodeGoQuotaTests.swift */,
+				B71D5000000000000000AAAA /* KimiQuotaIntegrationTests.swift */,
+				B71D4000000000000000AAAA /* KimiQuotaClientTests.swift */,
+				B71E2100000000000000AAAA /* KimiManagedAccountTests.swift */,
+				B71E3200000000000000AAAA /* CachedManagedKeychainTests.swift */,
+				B71E2200000000000000AAAA /* MoonshotBalanceTests.swift */,
 				49C1BF03000000000001AAAA /* ImportedCodexStoreTests.swift */,
 				49C1BF04000000000001AAAA /* ScannerIncrementalTests.swift */,
 				49C1BF05000000000001AAAA /* UsageEquivalenceTests.swift */,
@@ -603,6 +668,9 @@
 				49C1BF07000000000001AAAA /* QuotaPersistenceCoordinatorTests.swift */,
 				49C1BD04000000000001AAAA /* RedactTests.swift */,
 				49C1B31000000000000FAAAA /* PiJSONLScannerTests.swift */,
+				B71C3000000000000000AAAA /* KimiUsageIntegrationTests.swift */,
+				B71C2000000000000000AAAA /* KimiSessionScannerTests.swift */,
+				B71F0100000000000000AAAA /* KimiTimingAuditTests.swift */,
 				49C1B91000000000000FAAAA /* OpencodeScannerTests.swift */,
 				A6A1B90000000000000FBAAA /* AntigravityScannerTests.swift */,
 				49C1BE08000000000001AAAA /* DshZstdFrameScannerTests.swift */,
@@ -632,6 +700,16 @@
 				49C1B3F1000000000001AAAA /* claude-fast-scan.jsonl */,
 			);
 			path = Fixtures;
+			sourceTree = "<group>";
+		};
+		49C1BD00000000000001AAAA /* Diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				49C1BD01000000000001AAAA /* AppLog.swift */,
+				49C1BD02000000000001AAAA /* Redact.swift */,
+				49C1BD03000000000001AAAA /* DiagnosticsBundle.swift */,
+			);
+			path = Diagnostics;
 			sourceTree = "<group>";
 		};
 		49C2AD10000000000001AAAA /* Notifications */ = {
@@ -753,6 +831,7 @@
 				49C1CC01000000000001AABB /* commandcode.svg in Resources */,
 				49C1EE01000000000001AABB /* pi.svg in Resources */,
 				49C1EE02000000000001AABB /* opencode.svg in Resources */,
+				B71D6000000000000000AABB /* kimi.ico in Resources */,
 				49C1EE03000000000001AABB /* dsh.svg in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -792,6 +871,7 @@
 				49C1D100000000000001AABB /* AntigravityCredentials.swift in Sources */,
 				49C1CC02000000000001AABB /* CommandCodeAuth.swift in Sources */,
 				49C1CC06000000000001AABB /* OpenCodeGoAuth.swift in Sources */,
+				B71D1000000000000000AABB /* KimiCredentials.swift in Sources */,
 				49C1BC13000000000001AABB /* CursorUsageCache.swift in Sources */,
 				49C1B103000000000001AABB /* CodexAuth.swift in Sources */,
 				49C1B104000000000001AABB /* ClaudeAuth.swift in Sources */,
@@ -805,6 +885,8 @@
 				49C1BC10000000000001AABB /* CursorQuotaClient.swift in Sources */,
 				49C1CC03000000000001AABB /* CommandCodeQuotaClient.swift in Sources */,
 				49C1CC07000000000001AABB /* OpenCodeGoQuotaClient.swift in Sources */,
+				B71D3000000000000000AABB /* KimiTokenRefresher.swift in Sources */,
+				B71D2000000000000000AABB /* KimiQuotaClient.swift in Sources */,
 				49C1BC14000000000001AABB /* CursorUsageFetcher.swift in Sources */,
 				49C1B128000000000001AABB /* CodexResetCreditsClient.swift in Sources */,
 				49C1BF01000000000001AABB /* QuotaRefreshPlan.swift in Sources */,
@@ -833,6 +915,7 @@
 				49C2AB02000000000001AAAA /* CodexModelIdentityMigration.swift in Sources */,
 				49C1B154000000000001AABB /* CodexJSONLScanner.swift in Sources */,
 				49C1B32000000000000FAABB /* PiJSONLScanner.swift in Sources */,
+				B71C1000000000000000AABB /* KimiSessionScanner.swift in Sources */,
 				A6A1B90000000000000FAABB /* AntigravityScanner.swift in Sources */,
 				49C1B90000000000000FAABB /* OpencodeScanner.swift in Sources */,
 				49C1BE09000000000001AAAA /* DshZstdFrames.swift in Sources */,
@@ -875,6 +958,19 @@
 				49C1B193000000000001AABB /* OtherCodexAccountsSection.swift in Sources */,
 				49C1B194000000000001AABB /* ImportedCodexAccountsView.swift in Sources */,
 				49C1B195000000000001AABB /* CodexResetCreditsDetailView.swift in Sources */,
+				B71E0100000000000000AABB /* KimiManagedAccountStore.swift in Sources */,
+				B71E3100000000000000AABB /* CachedManagedKeychain.swift in Sources */,
+				B71E0200000000000000AABB /* KimiDeviceAuthorization.swift in Sources */,
+				B71E0300000000000000AABB /* KimiManagedTokenRefresher.swift in Sources */,
+				B71E0400000000000000AABB /* KimiManagedQuotaCache.swift in Sources */,
+				B71E0500000000000000AABB /* KimiManagedAccounts.swift in Sources */,
+				B71E0600000000000000AABB /* KimiManagedAccountsView.swift in Sources */,
+				B71E0700000000000000AABB /* KimiManagedAccountsSection.swift in Sources */,
+				B71E0800000000000000AABB /* MoonshotAccountStore.swift in Sources */,
+				B71E0900000000000000AABB /* MoonshotBalanceClient.swift in Sources */,
+				B71E0A00000000000000AABB /* MoonshotAccounts.swift in Sources */,
+				B71E0B00000000000000AABB /* MoonshotAccountsView.swift in Sources */,
+				B71E0C00000000000000AABB /* MoonshotBalancesSection.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -889,6 +985,11 @@
 				49C1BF02000000000001AABB /* QuotaRefreshPlanTests.swift in Sources */,
 				49C1CC05000000000001AABB /* CommandCodeQuotaTests.swift in Sources */,
 				49C1CC09000000000001AABB /* OpenCodeGoQuotaTests.swift in Sources */,
+				B71D5000000000000000AABB /* KimiQuotaIntegrationTests.swift in Sources */,
+				B71D4000000000000000AABB /* KimiQuotaClientTests.swift in Sources */,
+				B71E2100000000000000AABB /* KimiManagedAccountTests.swift in Sources */,
+				B71E3200000000000000AABB /* CachedManagedKeychainTests.swift in Sources */,
+				B71E2200000000000000AABB /* MoonshotBalanceTests.swift in Sources */,
 				49C1BF03000000000001AABB /* ImportedCodexStoreTests.swift in Sources */,
 				49C1BF04000000000001AABB /* ScannerIncrementalTests.swift in Sources */,
 				49C1BF05000000000001AABB /* UsageEquivalenceTests.swift in Sources */,
@@ -897,6 +998,9 @@
 				49C1BD04000000000001AABB /* RedactTests.swift in Sources */,
 				49C1BF09000000000001AABB /* UpdateCheckerTests.swift in Sources */,
 				49C1B31000000000000FAABB /* PiJSONLScannerTests.swift in Sources */,
+				B71C3000000000000000AABB /* KimiUsageIntegrationTests.swift in Sources */,
+				B71C2000000000000000AABB /* KimiSessionScannerTests.swift in Sources */,
+				B71F0100000000000000AABB /* KimiTimingAuditTests.swift in Sources */,
 				49C1B91000000000000FAABB /* OpencodeScannerTests.swift in Sources */,
 				A6A1B90000000000000FBABB /* AntigravityScannerTests.swift in Sources */,
 				49C1BE0B000000000001AAAA /* DshZstdFrameScannerTests.swift in Sources */,
@@ -963,7 +1067,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 324F7B2X9T;
+				DEVELOPMENT_TEAM = QFFC6738CD;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -1029,7 +1133,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 324F7B2X9T;
+				DEVELOPMENT_TEAM = QFFC6738CD;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -1062,6 +1166,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = "$(MARKETING_VERSION)";
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = QFFC6738CD;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1071,11 +1176,11 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.30;
-				PRODUCT_BUNDLE_IDENTIFIER = com.nanvon.ccbar;
+				MARKETING_VERSION = 1.1.32;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fffplum.ccbar;
 				PRODUCT_NAME = CCBar;
 				REGISTER_APP_GROUPS = YES;
-				SPARKLE_PUBLIC_ED_KEY = "ZBP7TIEjReojbAckWVPq4ShHcG1o9+nAEm4hfsfhj98=";
+				SPARKLE_PUBLIC_ED_KEY = "I0dqZBYJ26oJXXo0Yak1KMwZpPQh7LFHf0davSsP3W0=";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -1096,6 +1201,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = "$(MARKETING_VERSION)";
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = QFFC6738CD;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1105,11 +1211,11 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.30;
-				PRODUCT_BUNDLE_IDENTIFIER = com.nanvon.ccbar;
+				MARKETING_VERSION = 1.1.32;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fffplum.ccbar;
 				PRODUCT_NAME = CCBar;
 				REGISTER_APP_GROUPS = YES;
-				SPARKLE_PUBLIC_ED_KEY = "ZBP7TIEjReojbAckWVPq4ShHcG1o9+nAEm4hfsfhj98=";
+				SPARKLE_PUBLIC_ED_KEY = "I0dqZBYJ26oJXXo0Yak1KMwZpPQh7LFHf0davSsP3W0=";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -1125,7 +1231,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 324F7B2X9T;
+				DEVELOPMENT_TEAM = QFFC6738CD;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1134,7 +1240,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.nanvon.ccbar.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fffplum.ccbar.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -1150,7 +1256,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 324F7B2X9T;
+				DEVELOPMENT_TEAM = QFFC6738CD;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1159,7 +1265,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.nanvon.ccbar.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fffplum.ccbar.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -1202,14 +1308,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		49C2AC05000000000001AAAA /* XCRemoteSwiftPackageReference "Sparkle" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/sparkle-project/Sparkle";
-			requirement = {
-				kind = exactVersion;
-				version = 2.10.0;
-			};
-		};
 		49C1BE01000000000001AAAA /* XCRemoteSwiftPackageReference "zstd" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/facebook/zstd.git";
@@ -1218,19 +1316,17 @@
 				version = 1.5.7;
 			};
 		};
+		49C2AC05000000000001AAAA /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.10.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		49C2AC06000000000001AAAA /* Sparkle */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 49C2AC05000000000001AAAA /* XCRemoteSwiftPackageReference "Sparkle" */;
-			productName = Sparkle;
-		};
-		49C2AC08000000000001AAAA /* Sparkle */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 49C2AC05000000000001AAAA /* XCRemoteSwiftPackageReference "Sparkle" */;
-			productName = Sparkle;
-		};
 		49C1BE02000000000001AAAA /* libzstd */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 49C1BE01000000000001AAAA /* XCRemoteSwiftPackageReference "zstd" */;
@@ -1240,6 +1336,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 49C1BE01000000000001AAAA /* XCRemoteSwiftPackageReference "zstd" */;
 			productName = libzstd;
+		};
+		49C2AC06000000000001AAAA /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 49C2AC05000000000001AAAA /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+		49C2AC08000000000001AAAA /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 49C2AC05000000000001AAAA /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

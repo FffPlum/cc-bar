@@ -9,19 +9,21 @@
   在菜单栏实时监控 Codex、Claude Code、Cursor、Antigravity 配额与重置时间，本地离线分析 Tokens、费用与对话。
 </p>
 
+本项目基于 [nanvon/cc-bar](https://github.com/nanvon/cc-bar) 独立维护；下载、更新与问题反馈均以当前仓库为准。
+
 <p align="center">
-  <a href="https://github.com/nanvon/cc-bar/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/v/release/nanvon/cc-bar?color=brightgreen"></a>
-  <img alt="Downloads" src="https://img.shields.io/github/downloads/nanvon/cc-bar/total?color=blue">
-  <a href="https://github.com/nanvon/cc-bar/releases/latest"><img alt="Latest Downloads" src="https://img.shields.io/github/downloads/nanvon/cc-bar/latest/total?label=latest%20downloads&color=blue"></a>
+  <a href="https://github.com/FffPlum/cc-bar/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/v/release/FffPlum/cc-bar?color=brightgreen"></a>
+  <img alt="Downloads" src="https://img.shields.io/github/downloads/FffPlum/cc-bar/total?color=blue">
+  <a href="https://github.com/FffPlum/cc-bar/releases/latest"><img alt="Latest Downloads" src="https://img.shields.io/github/downloads/FffPlum/cc-bar/latest/total?label=latest%20downloads&color=blue"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/nanvon/cc-bar/releases/latest">下载安装</a> ·
+  <a href="https://github.com/FffPlum/cc-bar/releases/latest">下载安装</a> ·
   <a href="#-服务支持矩阵">服务支持</a> ·
   <a href="#-核心特性">核心特性</a> ·
   <a href="#-数据与隐私安全">安全说明</a> ·
   <a href="#-从源码构建">从源码构建</a> ·
-  <a href="https://github.com/nanvon/cc-bar/issues">问题反馈</a> ·
+  <a href="https://github.com/FffPlum/cc-bar/issues">问题反馈</a> ·
   <a href="README_EN.md">English</a>
 </p>
 
@@ -46,6 +48,7 @@ cc-bar 展示两类数据：**订阅额度**直连各服务官方接口获取剩
 | **Command Code** | 5 小时 / 周额度、GOAT 月度 Credits | 支持 | — | — | 本地 5 级只读探测 / Keychain Key |
 | **OpenCode Go** | 5 小时 / 周 / 月额度 | 支持 | — | — | OpenCode / Pi 本地只读探测 / Keychain Key |
 | **Pi / OpenCode / DSH** | — | — | 本地会话日志（Pi / OpenCode / DSH 多帧 zstd） | — | 严格只读本地日志与数据库 |
+| **Kimi Code** | 5 小时 / 周 / 月额度（依账号返回） | 支持 | 本机新旧 CLI 会话（含子任务）；可靠模型按 API 价估算 | — | 本地 CLI OAuth（自动续期）/ 官方 API Key |
 
 ---
 
@@ -96,7 +99,7 @@ cc-bar 展示两类数据：**订阅额度**直连各服务官方接口获取剩
 > **运行环境**：macOS 14 (Sonoma) 或更新版本。<br>
 > **前置条件**：相关 AI 编程工具需已在终端或桌面端完成至少一次登录。
 
-1. 进入 [Releases 页面](https://github.com/nanvon/cc-bar/releases/latest) 下载最新的 `CCBar.dmg`（或 `CCBar.app.zip`）。
+1. 进入 [Releases 页面](https://github.com/FffPlum/cc-bar/releases/latest) 下载最新的 `CCBar.dmg`（或 `CCBar.app.zip`）。
 2. 打开 DMG，将 `CCBar.app` 拖入 `/Applications` 文件夹即可。
 
 首次升级到含应用内更新器的版本，需要按上述步骤手动安装一次。此后可在「设置 → 通用 → 检查更新」查看更新内容，点击「下载并安装」后自动完成安装并重新启动。
@@ -140,7 +143,7 @@ cc-bar 展示两类数据：**订阅额度**直连各服务官方接口获取剩
 > 如果你对预编译二进制包有所顾虑，欢迎审阅完整源码并[从源码自主构建](#-从源码构建)。
 
 > [!NOTE]
-> **遇到问题怎么反馈**：打开「设置 → 通用 → 诊断 → 导出诊断日志」，确认提示后会生成一个 zip 并在 Finder 中选中，把它附在 [Issue](https://github.com/nanvon/cc-bar/issues) 里即可。包内的 `summary.txt` 是纯文本，发送前可以自己先打开看一眼。
+> **遇到问题怎么反馈**：打开「设置 → 通用 → 诊断 → 导出诊断日志」，确认提示后会生成一个 zip 并在 Finder 中选中，把它附在 [Issue](https://github.com/FffPlum/cc-bar/issues) 里即可。包内的 `summary.txt` 是纯文本，发送前可以自己先打开看一眼。
 
 ---
 
@@ -160,7 +163,7 @@ sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 SPARKLE_PUBLIC_ED_KEY="你的更新公钥" ./scripts/build.sh
 ```
 
-构建前需按 [更新签名配置](docs/打包发布.md#首次配置更新签名密钥) 设置 `SPARKLE_PUBLIC_ED_KEY` 公钥。构建脚本使用 `CODE_SIGNING_ALLOWED=NO` 编译，再逐层进行 ad-hoc 签名，产出 `dist/CCBar.dmg` 与 `dist/CCBar.app.zip`。安装包不绑定本机开发证书；支持的 CPU 架构以实际构建产物为准，首次启动的系统提示见上方安装说明。
+构建前需按 [更新签名配置](docs/打包发布.md#首次配置更新签名密钥) 设置 `SPARKLE_PUBLIC_ED_KEY` 公钥。构建脚本使用 `CODE_SIGNING_ALLOWED=NO` 编译，再逐层签名，产出 `dist/CCBar.dmg` 与 `dist/CCBar.app.zip`。默认使用 ad-hoc；本机自用可先运行一次 `python3 scripts/setup-local-signing.py`，后续打包自动复用固定的自签名证书，详见 [本机签名配置](docs/打包发布.md#本机固定自签名仅本机自用)。默认 ad-hoc 安装包不绑定本机开发证书；支持的 CPU 架构以实际构建产物为准，首次启动的系统提示见上方安装说明。
 
 > [!WARNING]
 > 请勿使用 Xcode 菜单中的 **Product → Archive** 导出分发，该方式会绑定个人开发证书，导致构建包无法在其他设备运行。
@@ -169,7 +172,7 @@ SPARKLE_PUBLIC_ED_KEY="你的更新公钥" ./scripts/build.sh
 
 ## 🔗 相关项目
 
-同作者系列工具，共享同一套配额口径与设计语言：
+上游作者的相关项目：
 
 | 项目 | 平台形态 | 技术栈 |
 | :--- | :--- | :--- |

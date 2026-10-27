@@ -6,6 +6,7 @@ nonisolated enum QuotaHistoryAccountKind: String, Sendable, Codable {
     case codexImported
     case claudePrimary
     case antigravityPrimary
+    case kimiPrimary
 }
 
 nonisolated struct QuotaHistorySample: Sendable, Equatable, Codable {
@@ -124,6 +125,11 @@ enum QuotaHistoryAccountKey {
         }
         let digest = SHA256.hash(data: Data(email.utf8))
         return "antigravity:primary:\(digest.map { String(format: "%02x", $0) }.joined())"
+    }
+
+    /// 凭据层已提供稳定且不可逆的账号键；历史、周期与缓存直接共用它，不再从邮箱或 token 另建身份。
+    nonisolated static func kimiPrimary(accountKey: String?) -> String {
+        nonEmpty(accountKey) ?? "kimi:primary"
     }
 
     nonisolated private static func nonEmpty(_ value: String?) -> String? {

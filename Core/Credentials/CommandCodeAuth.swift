@@ -47,7 +47,7 @@ struct CommandCodeAuthSession: Sendable, Equatable {
 }
 
 enum CommandCodeAuth {
-    private static let keychainService = "com.nanvon.ccbar.command-code"
+    private static let keychainService = "com.fffplum.ccbar.command-code"
     private static let keychainAccount = "primary"
 
     static func load(

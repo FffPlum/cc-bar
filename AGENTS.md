@@ -6,8 +6,8 @@
 
 cc-bar 是一个原生 macOS 菜单栏 App，用 Swift / SwiftUI 实现。
 
-- 额度 Provider（`QuotaApp`）：Codex、Claude Code、Antigravity、Cursor、Command Code、OpenCode Go，外加用户手动导入的其他 Codex 账号。
-- 本地用量数据源（`UsageApp`）：Codex、Claude Code、Antigravity、Pi、OpenCode、DSH 走本机日志扫描，Cursor 走远端计量。
+- 额度 Provider（`QuotaApp`）：Codex、Claude Code、Antigravity、Cursor、Command Code、OpenCode Go、Kimi Code，外加用户手动导入的其他 Codex 账号。
+- 本地用量数据源（`UsageApp`）：Codex、Claude Code、Antigravity、Pi、OpenCode、DSH、Kimi Code 走本机日志扫描，Cursor 走远端计量。
 - 展示位：菜单栏标签、Popover、主窗口（统计 / 设置）、桌面悬浮窗、首次启动引导。
 
 项目主体功能已开发完成，后续以新需求和迭代为主，不再按初始里程碑推进。
@@ -54,6 +54,28 @@ cc-bar 是一个原生 macOS 菜单栏 App，用 Swift / SwiftUI 实现。
 - 只改和当前任务直接相关的文件。不要顺手整理无关代码、格式或项目结构。
 - 工作区可能已有用户改动。不要回滚、覆盖或清理非本次任务产生的改动。
 
+## Git Flow 开发流程
+
+仓库采用 Git Flow。长期分支仅保留 `main` 和 `develop`；具体的功能与发布分支是临时分支，完成合并后删除。实际开发使用 `feature/…` 与 `release/…`，不需要初始模板分支；不要创建名为 `feature` 或 `release` 的独立分支，避免 Git 分支前缀冲突。
+
+- `main`：存放正式发布的历史版本，只接受来自 `release/<版本号>` 的 Pull Request；完成自查后使用 squash 合并，保持线性历史。每次正式发布后都在 `main` 的发布提交上创建对应的 `vX.Y.Z` 标签，不直接开发、直接推送或创建 merge commit。
+- `develop`：日常开发的集成主干，接收已完成的功能分支，以及发布分支合并回来的修补与发布准备改动。
+- `feature/<功能名>`：从最新的 `develop` 切出，用于开发新功能；完成后通过代码审查合并回 `develop`，不直接合并到 `main`，合并后删除功能分支。
+- `release/<版本号>`：准备发布时从 `develop` 切出，只进行发布前测试、问题修补、版本号和更新说明等发布准备工作，不加入新功能；完成后先合并到 `main` 并创建版本标签，再合并回 `develop`，最后删除发布分支。
+
+常规流程为：`feature/<功能名>` → `develop` → `release/<版本号>` → `main` + `develop`。例如 `feature/kimi-code-integration`、`release/v1.1.32`。发布操作同时遵循下方「标准发布流程」。
+
+### main 分支保护
+
+本仓库对 `refs/heads/main` 启用以下限制：
+
+- 禁止删除分支、强制推送和非快进更新。
+- 必须通过 Pull Request 合并，必需批准数（Required approvals）为 `0`，不要求其他维护者批准；个人维护者可以自行审查并合并自己的 PR。
+- 只允许 squash 合并，要求线性历史；`develop` 仍使用普通合并保留开发历史。
+- 不配置绕过角色；不得直接推送 `main`、临时关闭保护或使用管理员权限绕过 PR。文档约定不等于远端配置成功，配置后须读取 GitHub 的有效规则核对。
+
+当前远端规则入口：[main](https://github.com/FffPlum/cc-bar/rules/25934085)。
+
 ## 实现约束
 
 - UI 优先使用 SwiftUI / AppKit 系统默认控件和 macOS 原生风格。
@@ -64,7 +86,7 @@ cc-bar 是一个原生 macOS 菜单栏 App，用 Swift / SwiftUI 实现。
   - 图标优先使用 SF Symbols。
   - 界面文案遵守 `设计风格.md` §5.4：标题能说清的不加说明，说明不复述标题，状态提示先说结果再说下一步，涉及隐私和凭据的说法要与代码行为一致。
 - 不自造大面积背景、玻璃阴影、Web 风格控件或无关装饰。
-- 额度 Provider 默认顺序为 Codex → Claude Code → Antigravity → Cursor → Command Code → OpenCode Go（`QuotaProviderDescriptor.allProviders`）；其后是只有用量的 Pi → OpenCode → DSH。用户可在「设置 → 服务与账号」拖拽调整（全部服务混排），顺序存 `SettingsStore.serviceOrder`：设置列表读全部，菜单栏 / Popover / 悬浮窗只取额度服务，主窗口统计只取有用量的服务。导入的其他 Codex 账号仍挂在 Codex 下，用既有独立排序。
+- 额度 Provider 默认顺序为 Codex → Claude Code → Antigravity → Cursor → Command Code → OpenCode Go → Kimi Code（`QuotaProviderDescriptor.allProviders`）；其后是只有用量的 Pi → OpenCode → DSH。用户可在「设置 → 服务与账号」拖拽调整（全部服务混排），顺序存 `SettingsStore.serviceOrder`：设置列表读全部，菜单栏 / Popover / 悬浮窗只取额度服务，主窗口统计只取有用量的服务。导入的其他 Codex 账号仍挂在 Codex 下，用既有独立排序。
 - 网络请求失败时保留已有快照，不要清空可展示数据。
 - 429 后必须遵守现有退避策略，不要为了手动刷新绕过限流。
 
@@ -98,7 +120,7 @@ xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destinat
 
 - 更新签名需按 `docs/打包发布.md` 一次性配置公钥和 CI 私钥；本地打包传入 `SPARKLE_PUBLIC_ED_KEY`。缺失时正式打包 / 发布会停止，避免分发无法验证更新的 App。
 - 首次需要把命令行工具指向完整 Xcode（一次性）：`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`。
-- 脚本用 `CODE_SIGN_IDENTITY="" CODE_SIGNING_ALLOWED=NO` 做 Release 构建，再为 Sparkle 嵌套组件和主 App 逐层 ad-hoc 签名，不需要付费 Developer ID 证书或公证。支持的 CPU 架构以实际构建产物为准。
+- 脚本用 `CODE_SIGN_IDENTITY="" CODE_SIGNING_ALLOWED=NO` 做 Release 构建，再为 Sparkle 嵌套组件和主 App 逐层签名；默认与 CI 保持 ad-hoc，本机可运行 `python3 scripts/setup-local-signing.py` 配置固定自签名身份供后续打包自动复用，不需要付费 Developer ID 证书或公证。支持的 CPU 架构以实际构建产物为准。
 - **产物固定输出到 `dist/CCBar.dmg` 和 `dist/CCBar.app.zip`**（`dist/` 已在 `.gitignore` 里，不进版本库）。脚本会先清空 `build/` 目录再重新构建。
 - 打包好的 DMG 和 zip 上传到 GitHub Release 即可分发；不要直接替换用户本机 `/Applications/CCBar.app`——那是覆盖用户正在使用的安装，属于有风险操作，要打包验证就在 `dist/` 或临时目录里查看，不要动 `/Applications`。
 - 完整背景说明见 [README.md](README.md#从源码构建) 和 [docs/打包发布.md](docs/打包发布.md)（该文档里的 Archive / Developer ID 流程只是给需要公证发布给别人用的场景保留的可选项，日常打包不要用）。
@@ -107,19 +129,31 @@ xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destinat
 
 这是用户预先授权的固定发布指令，出现这句话（或明显同义的表述，如「发布一下」「发个新版本」）时按下面四步顺序执行，**不用逐步等确认**。`发版` 是首选的最短触发词；tag 推送成功后，立即汇报新版本号、提交、Actions / Release 链接和本版更新说明全文即可。
 
-1. **提交代码**：把当前工作区未提交的改动按仓库惯例的 commit message 风格提交（可用 `git-commit-messages` skill；无关改动分开提交，不要混在一起）。
+1. **提交代码并创建发布分支**：把当前工作区未提交的改动按仓库惯例的 commit message 风格提交（可用 `git-commit-messages` skill；无关改动分开提交，不要混在一起）。将准备发布的功能合并到 `develop`，从最新的 `develop` 创建并切换到 `release/vX.Y.Z`；后续发布修补、更新说明和版本号改动都提交到该发布分支。
 2. **编写用户更新说明**：对比上一个 `v*` tag 与当前代码、提交和文档，只提炼真实、用户可感知的新增功能、问题修复、体验优化和必要注意事项；不要罗列 commit、文件、重构、CI 或版本号。创建 `release-notes/vX.Y.Z.md`，先读 [release-notes/README.md](release-notes/README.md)，按其中的撰写流程和自检问题写：开头一句话说出本版最主要的变化，下面不分组列出条目，每条一行；不用分类组头、`#` 标题和图片，不加安装说明等每版重复的固定段落。再按同一文档「近期新功能」一节检查并更新 `release-notes/highlights.md`。Release 正文由本版说明加 `highlights.md` 拼成，Release 标题沿用默认的 tag 名。
 3. **版本号 +1**：修改 `ccbar.xcodeproj/project.pbxproj` 里两处 `MARKETING_VERSION`（Debug/Release 配置各一处，要同时改），patch 位 +1（如 `1.0.0` → `1.0.1`），除非用户明确要求升 minor/major。把版本号、`release-notes/vX.Y.Z.md` 和改动过的 `release-notes/highlights.md` 一起单独提交，message 形如 `chore: 发布 vX.Y.Z`。
-4. **触发远程构建发布**：推送分支 + 打带 `v` 前缀的 tag 触发 [.github/workflows/release.yml](.github/workflows/release.yml)，由 GitHub 的 macOS runner 自动运行 `scripts/build.sh`、读取同名更新说明，并将 `dist/CCBar.dmg`、`dist/CCBar.app.zip`、`dist/appcast.xml`、`dist/release-notes.md` 与 `dist/version.json`（新版读取签名 appcast，version.json 保留给旧客户端；均由 workflow 生成，本地打包不产出）挂到 GitHub Release：
+4. **经 PR 合并发布分支并触发远程构建发布**：推送 `release/vX.Y.Z` 并创建目标为 `main` 的 Pull Request。完成自查后，通过 GitHub 执行 squash 合并，不直接推送 main。拉取合并后的 `origin/main`，在该发布提交上创建 `vX.Y.Z` 标签。将发布分支合并回 `develop`，并把新的 main 发布提交合入 develop，使后续发布有共同基点；这些合并只发生在 develop。推送 develop 和 tag，由 tag 触发 [.github/workflows/release.yml](.github/workflows/release.yml)，由 GitHub 的 macOS runner 自动运行 `scripts/build.sh`、读取同名更新说明，并将 `dist/CCBar.dmg`、`dist/CCBar.app.zip`、`dist/appcast.xml`、`dist/release-notes.md` 与 `dist/version.json`（新版读取签名 appcast，version.json 保留给旧客户端；均由 workflow 生成，本地打包不产出）挂到 GitHub Release。完成后删除已合并的本地、远端发布分支：
    ```bash
-   git push origin main
+   git push -u origin release/vX.Y.Z
+   gh pr create --base main --head release/vX.Y.Z
+   # 完成 PR 自查后执行；PR编号使用创建结果，不得猜测
+   gh pr merge <PR编号> --squash
+   git fetch origin main
+   git switch main
+   git merge --ff-only origin/main
    git tag vX.Y.Z
+   git switch develop
+   git merge --no-ff release/vX.Y.Z
+   git merge --no-ff main
+   git push origin develop
    git push origin vX.Y.Z
    ```
+
+   如果本地 main 含有未发布且不在 origin/main 中的旧提交，不做强制重置或覆盖；先保留其历史，再处理本地主分支同步。不能把与远端不同的本地 main 直接用于打发布标签。
 
 - **更新日志由 AI 在发布前编写**：`release-notes/vX.Y.Z.md` 是该版本唯一的 Release Notes 来源；GitHub Actions 会校验其存在且非空，然后把全文原样放在 Release 正文开头，后面追加 `release-notes/highlights.md` 的近期新功能（为空则不追加）；缺失时不会创建 Release。应用内更新内容与 Release 正文一致（本版说明在前、近期新功能在后），跨版本更新也只显示最新版这份内容。它不是传统的聚合 `CHANGELOG.md`，每个版本只保留一份面向用户的说明。
 - **版本号从 `1.0.0` 重新起算**：仓库早期（`73ddff4` 之前）用过不带 `v` 前缀的 `0.x.y` 裸版本号 tag，那批是历史遗留，不再接续；新发布一律带 `v` 前缀，从 `v1.0.0` 开始。
 - tag 必须和已提交的 `MARKETING_VERSION` 一致，tag 本身不改版本号，只是给已提交好的版本打标记。
 - 打错 tag 可撤销：`git tag -d vX.Y.Z && git push origin :vX.Y.Z`。
 - `git push origin vX.Y.Z` 成功即代表本地发版操作完成；只汇报版本号、提交、Actions / Release 链接和本版更新说明全文，**不得主动查询、等待或轮询** CI、Release 或产物状态。只有用户明确要求“看进度”“确认发布成功”或“检查产物”时，才查询远端状态。
-- 如果用户只是单独说「打个正式版」但没有前面步骤的上下文（比如工作区本来就是干净的），照样按这四步走，第 1 步无改动则跳过、直接从第 2 步开始。
+- 如果用户只是单独说「打个正式版」但没有前面步骤的上下文（比如工作区本来就是干净的），照样按这四步走；第 1 步没有未提交改动时只跳过提交操作，仍需创建发布分支。
