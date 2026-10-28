@@ -8,6 +8,7 @@ struct CommandCodeCredentialSheet: View {
     @State private var manualKeyInput: String = ""
     @State private var hasStoredKey: Bool = false
     @State private var isSaving: Bool = false
+    @State private var credentialError = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -73,9 +74,15 @@ struct CommandCodeCredentialSheet: View {
             .padding(20)
         }
         .frame(width: 440, height: 320)
+        .alert(tr("Couldn't save credentials", "凭据未能保存"), isPresented: $credentialError) {
+            Button(tr("OK", "好"), role: .cancel) { }
+        } message: {
+            Text(tr("Check the API key and local file permissions, then try again.", "请检查 API Key 和本机文件权限后重试。"))
+        }
         .onAppear {
             preference = SettingsStore.shared.commandCodeCredentialPreference
-            hasStoredKey = (CommandCodeAuth.loadFromKeychain() != nil)
+            CommandCodeAuth.retryLegacyAccess()
+            hasStoredKey = (CommandCodeAuth.loadStoredKey() != nil)
         }
     }
 
@@ -120,8 +127,8 @@ struct CommandCodeCredentialSheet: View {
     private var manualSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(tr(
-                "The API key is stored in the macOS Keychain and only used to check quota with the official Command Code API.",
-                "API Key 保存在 macOS 钥匙串中，仅用于连接 Command Code 官方接口查询额度。"
+                "The API key is stored in a private file on this Mac and only used to check quota with the official Command Code API.",
+                "API Key 保存在本机私有文件中，仅用于连接 Command Code 官方接口查询额度。"
             ))
             .font(.system(size: 11.5))
             .foregroundStyle(.secondary)
@@ -132,14 +139,15 @@ struct CommandCodeCredentialSheet: View {
                         Image(systemName: "checkmark.shield.fill")
                             .foregroundStyle(.green)
                             .font(.system(size: 12))
-                        Text(tr("API Key configured in Keychain", "Keychain 中已保存 API Key"))
+                        Text(tr("API Key saved", "已保存 API Key"))
                             .font(.system(size: 11.5))
                             .foregroundStyle(.secondary)
                         Spacer()
                         Button(tr("Remove", "清除")) {
-                            CommandCodeAuth.deleteFromKeychain()
-                            hasStoredKey = false
-                            manualKeyInput = ""
+                            if CommandCodeAuth.deleteStoredKey() {
+                                hasStoredKey = false
+                                manualKeyInput = ""
+                            } else { credentialError = true }
                         }
                         .buttonStyle(.borderless)
                         .font(.system(size: 11))
@@ -162,11 +170,13 @@ struct CommandCodeCredentialSheet: View {
 
     private func saveAndDismiss() {
         isSaving = true
-        SettingsStore.shared.commandCodeCredentialPreference = preference
-
-        if preference == .manual && !manualKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            CommandCodeAuth.saveToKeychain(apiKey: manualKeyInput)
+        if preference == .manual && !manualKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !CommandCodeAuth.saveStoredKey(apiKey: manualKeyInput) {
+            isSaving = false
+            credentialError = true
+            return
         }
+        SettingsStore.shared.commandCodeCredentialPreference = preference
 
         Task {
             await appState.loadCommandCode()

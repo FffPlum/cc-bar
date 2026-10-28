@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 结构与 `CommandCodeCredentialSheet` 相同：自动读取本机凭据，或手动填写存入钥匙串的 API Key。
+/// 结构与 `CommandCodeCredentialSheet` 相同：自动读取本机凭据，或手动填写存入本机私有文件的 API Key。
 struct OpenCodeGoCredentialSheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
@@ -9,6 +9,7 @@ struct OpenCodeGoCredentialSheet: View {
     @State private var manualKeyInput: String = ""
     @State private var hasStoredKey: Bool = false
     @State private var isSaving: Bool = false
+    @State private var credentialError = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -74,9 +75,15 @@ struct OpenCodeGoCredentialSheet: View {
             .padding(20)
         }
         .frame(width: 440, height: 320)
+        .alert(tr("Couldn't save credentials", "凭据未能保存"), isPresented: $credentialError) {
+            Button(tr("OK", "好"), role: .cancel) { }
+        } message: {
+            Text(tr("Check the API key and local file permissions, then try again.", "请检查 API Key 和本机文件权限后重试。"))
+        }
         .onAppear {
             preference = SettingsStore.shared.opencodeGoCredentialPreference
-            hasStoredKey = (OpenCodeGoAuth.loadFromKeychain() != nil)
+            OpenCodeGoAuth.retryLegacyAccess()
+            hasStoredKey = (OpenCodeGoAuth.loadStoredKey() != nil)
         }
     }
 
@@ -115,8 +122,8 @@ struct OpenCodeGoCredentialSheet: View {
     private var manualSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(tr(
-                "The API key is stored in the macOS Keychain and only used to check quota with OpenCode.",
-                "API Key 保存在 macOS 钥匙串中，仅用于向 OpenCode 查询额度。"
+                "The API key is stored in a private file on this Mac and only used to check quota with OpenCode.",
+                "API Key 保存在本机私有文件中，仅用于向 OpenCode 查询额度。"
             ))
             .font(.system(size: 11.5))
             .foregroundStyle(.secondary)
@@ -127,14 +134,15 @@ struct OpenCodeGoCredentialSheet: View {
                         Image(systemName: "checkmark.shield.fill")
                             .foregroundStyle(.green)
                             .font(.system(size: 12))
-                        Text(tr("API Key configured in Keychain", "Keychain 中已保存 API Key"))
+                        Text(tr("API Key saved", "已保存 API Key"))
                             .font(.system(size: 11.5))
                             .foregroundStyle(.secondary)
                         Spacer()
                         Button(tr("Remove", "清除")) {
-                            OpenCodeGoAuth.deleteFromKeychain()
-                            hasStoredKey = false
-                            manualKeyInput = ""
+                            if OpenCodeGoAuth.deleteStoredKey() {
+                                hasStoredKey = false
+                                manualKeyInput = ""
+                            } else { credentialError = true }
                         }
                         .buttonStyle(.borderless)
                         .font(.system(size: 11))
@@ -157,11 +165,13 @@ struct OpenCodeGoCredentialSheet: View {
 
     private func saveAndDismiss() {
         isSaving = true
-        SettingsStore.shared.opencodeGoCredentialPreference = preference
-
-        if preference == .manual && !manualKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            OpenCodeGoAuth.saveToKeychain(apiKey: manualKeyInput)
+        if preference == .manual && !manualKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !OpenCodeGoAuth.saveStoredKey(apiKey: manualKeyInput) {
+            isSaving = false
+            credentialError = true
+            return
         }
+        SettingsStore.shared.opencodeGoCredentialPreference = preference
 
         Task {
             await appState.loadOpenCodeGo()

@@ -133,8 +133,8 @@ private struct MoonshotAccountEditor: View {
             }
             .pickerStyle(.segmented)
             SecureField(account == nil ? "API Key" : tr("New API Key (leave blank to keep current)", "新 API Key（留空则保留当前 Key）"), text: $apiKey)
-            Text(tr("The key is stored in CCBar's Keychain and sent only to the selected region's official Moonshot balance endpoint.",
-                    "Key 保存在 CCBar 钥匙串中，只发送到所选地区的 Moonshot 官方余额接口。"))
+            Text(tr("The key is stored in a private file on this Mac and sent only to the selected region's official Moonshot balance endpoint.",
+                    "Key 保存在本机私有文件中，只发送到所选地区的 Moonshot 官方余额接口。"))
                 .font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let error {

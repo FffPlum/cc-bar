@@ -1,0 +1,42 @@
+name: Release Build
+
+# 在发布 tag 之前检查 Release 编译与打包，使用与正式发布相同的 runner 和脚本。
+on:
+  push:
+    branches: [develop, 'feature/**', 'release/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # ARM hosted runner 容量不足时会在编译前失败；Intel runner 交叉编译 arm64。
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 选择最新 Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: 构建并打包 Release
+        env:
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          CCBAR_SIGN_IDENTITY: '-'
+          CCBAR_BUILD_ARCH: arm64
+        run: ./scripts/build.sh
+
+      - name: 保存验证产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCBar-Release-Build-${{ github.run_number }}
+          path: |
+            dist/CCBar.dmg
+            dist/CCBar.app.zip
+          if-no-files-found: error
+          retention-days: 7

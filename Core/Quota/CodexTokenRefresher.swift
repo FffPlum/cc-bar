@@ -29,7 +29,7 @@ nonisolated enum CodexTokenRefresher {
 
     /// 续期成功后,新 token 该落到哪里。
     /// - `codexAuthJSON`:回写 `~/.codex/auth.json`,默认账号(与 codex CLI 共享)用。
-    /// - `importedAccount(id:)`:回写到 Keychain (ImportedCodexStore),用户手动导入的副账号用,
+    /// - `importedAccount(id:)`:回写到 CCBar 私有文件 (ImportedCodexStore),用户手动导入的副账号用,
     ///   绝不触碰 `~/.codex/auth.json`。
     enum WriteBack: Sendable, Hashable {
         case codexAuthJSON
@@ -136,6 +136,14 @@ nonisolated enum CodexTokenRefresher {
         writeBack: WriteBack
     ) async throws -> Refreshed {
         var refreshToken = initialRefresh
+        let lease: KimiRefreshLease?
+        if case .importedAccount(let id) = writeBack {
+            lease = try await ImportedCodexStore.acquireRefreshLease(accountId: id)
+        } else { lease = nil }
+        defer { withExtendedLifetime(lease) {} }
+        if case .importedAccount = writeBack, peekStored(writeBack: writeBack) == nil {
+            throw QuotaError.missingToken
+        }
 
         // 1) 拿锁后先 *重读* 一次存储:`codex` CLI(或 cc-bar 的另一个入口)
         //    可能在我们排队等锁时已经刷新过并写回了新值。拿陈腐的 refresh_token
@@ -160,6 +168,15 @@ nonisolated enum CodexTokenRefresher {
             using: refreshToken,
             fallbackIdToken: fallbackIdToken
         )
+
+        // A removal or a newer login during the request must not be overwritten.
+        if case .importedAccount = writeBack {
+            guard let latest = peekStored(writeBack: writeBack) else { throw QuotaError.missingToken }
+            if latest.refreshToken != refreshToken {
+                return Refreshed(accessToken: latest.accessToken,
+                    refreshToken: latest.refreshToken ?? "", idToken: latest.idToken)
+            }
+        }
 
         // 3) 落盘。此时服务端已经轮换,旧 token 作废——写回失败绝不能静默,
         //    否则盘上留着废票,下次启动直接登录失效。

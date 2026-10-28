@@ -37,7 +37,7 @@ nonisolated struct CursorAuthSession: Sendable, Equatable {
 /// 只读采用 Cursor.app 的当前登录态。
 ///
 /// 只读取 `cursorAuth/accessToken`；不读取 refresh token，不调用 OAuth，
-/// 不写 Cursor SQLite，也不把凭据保存到 cc-bar 的 Keychain、设置或缓存。
+/// 不写 Cursor SQLite；已授权的解密密钥保存在 CCBar 的私有文件。
 ///
 /// Cursor 服务端实验 `cursor_auth_token_encryption_at_rest` 打开后（3.27 起按账号灰度），
 /// 这一项改存为 `cursor-safe-storage:v1:<base64>`，需要经钥匙串 `Cursor Safe Storage`
@@ -62,9 +62,10 @@ nonisolated enum CursorAuth {
     /// `security` 的退出码取 OSStatus 低 8 位：51 = errSecAuthFailed（授权框点「拒绝」），
     /// 128 = errSecUserCanceled。
     private static let securityDeniedExitCodes: Set<Int32> = [51, 128]
-    /// 派生出的 AES 密钥，进程内缓存，不落盘。用户只点「允许」（不是「始终允许」）时，
-    /// 每次调用 `security` 都会再弹一次，缓存把它限制在每次启动最多一次。
+    /// 派生出的 AES 密钥在验证后保存到本机私有文件，避免每次启动重复授权。
     private static let cachedKey = OSAllocatedUnfairLock<Data?>(initialState: nil)
+    private static let privateKeyStore = PrivateCredentialFileStore(directory:
+        ImportedCodexStore.fileURL().deletingLastPathComponent().appendingPathComponent("external_auth_keys", isDirectory: true))
     /// 串行化钥匙串读取：授权框等用户响应时，并发的读取排队等结果，不叠出第二个框。
     private static let keychainReadLock = NSLock()
     /// 需要读钥匙串、但用户还没看过授权说明时登记，由 AppState 取走后弹说明框。
@@ -197,6 +198,14 @@ nonisolated enum CursorAuth {
             // Cursor 重装后会换一把密钥，缓存的旧密钥解不开；丢掉它，下面重读一次。
             cachedKey.withLock { $0 = nil }
         }
+        if !AppRuntime.isRunningUnitTests, !hasUserDeniedAccess, let key = privateKeyStore.load(accountID: "cursor-safe-storage",
+            legacy: { nil }, validate: { $0.count == kCCKeySizeAES128 }) {
+            if let token = decryptAccessToken(ciphertext: ciphertext, key: key) {
+                cachedKey.withLock { $0 = key }
+                return token
+            }
+            privateKeyStore.delete(accountID: "cursor-safe-storage")
+        }
         guard allowKeychainRead else {
             throw CursorAuthError.keychainAccessRequired(denied: hasUserDeniedAccess)
         }
@@ -204,6 +213,10 @@ nonisolated enum CursorAuth {
         // 刚读到的密钥也解不开时保留缓存：密钥是当前的，问题在数据，重读钥匙串只会多弹框。
         guard let token = decryptAccessToken(ciphertext: ciphertext, key: key) else {
             throw CursorAuthError.undecryptable
+        }
+        if !AppRuntime.isRunningUnitTests {
+            do { try privateKeyStore.save(key, accountID: "cursor-safe-storage") }
+            catch { AppLog.warn(.credentials, "Cursor local authorization could not be saved: \(Redact.error(error))") }
         }
         return token
     }

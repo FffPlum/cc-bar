@@ -8,24 +8,22 @@ struct KimiManagedAccountsSection: View {
         let accounts = appState.kimiManagedAccounts.filter { $0.visibleInPopover && !appState.kimiManagedMirrorsCLI($0) }
         VStack(spacing: 0) {
             ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
-                if index > 0 { Divider().padding(.horizontal, 16) }
+                if index > 0 { Divider().padding(.leading, 28).padding(.trailing, 16) }
                 ServiceBlockView(
                     app: .kimi,
-                    title: "Kimi Code",
-                    subtitle: appState.kimiManagedSubtitle(account),
+                    subtitle: SettingsStore.shared.privacyMode
+                        ? "\(appState.kimiManagedDisplayName(account)) · \(appState.kimiManagedSubtitle(account))"
+                        : appState.kimiManagedSubtitle(account),
                     tint: .purple,
-                    logoName: "kimi",
-                    fallback: "K",
                     snapshot: appState.kimiManagedQuotas[account.id],
                     error: appState.kimiManagedErrors[account.id],
                     periodSpend: nil,
                     periodIsBillingCycle: false,
                     todayCost: nil,
-                    serviceStatus: appState.displayedKimiServiceStatus,
                     showsCost: false,
                     accountEdition: account.region.displayName,
                     isKimiCurrentAccount: appState.kimiManagedMirrorsCLI(account),
-                    showsProviderHeader: false
+                    followsVendorHeader: index == 0 && appState.kimiAccount == nil
                 )
             }
         }

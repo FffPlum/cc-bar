@@ -8,17 +8,17 @@ struct MoonshotBalancesSection: View {
         VStack(spacing: 0) {
             AccountVendorHeader(title: "Moonshot API")
             ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
-                if index > 0 { Divider().padding(.horizontal, 16) }
-                row(account)
+                if index > 0 { Divider().padding(.leading, 28).padding(.trailing, 16) }
+                row(account, followsVendorHeader: index == 0)
             }
         }
     }
 
-    private func row(_ account: MoonshotAccount) -> some View {
+    private func row(_ account: MoonshotAccount, followsVendorHeader: Bool) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(appState.moonshotDisplayName(account))
-                    .font(.system(size: 12, weight: .medium)).lineLimit(1)
+                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                 Text(account.region.displayName)
                     .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize()
                 Spacer(minLength: 0)
@@ -54,7 +54,8 @@ struct MoonshotBalancesSection: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.top, followsVendorHeader ? 4 : 14)
+        .padding(.bottom, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
