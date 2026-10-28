@@ -195,27 +195,27 @@ struct PopoverRootView: View {
                     if index > 0 {
                         Divider().padding(.horizontal, 16)
                     }
-                    if provider.app == .kimi,
-                       appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty
+                    if provider.app != .kimi || appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty
                         || appState.kimiManagedAccounts.contains(where: \.visibleInPopover) {
                         AccountVendorHeader(title: provider.title, logoName: provider.logoName,
-                                            status: appState.displayedKimiServiceStatus)
+                                            fallback: provider.fallback, tint: provider.app.tintColor,
+                                            status: provider.app == .kimi ? appState.displayedKimiServiceStatus : serviceStatus(for: provider.app))
                     }
                     if provider.app != .kimi || appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty {
                         primaryServiceBlock(provider)
                     }
 
                     if provider.app == .codex && hasOtherCodexAfterDedup {
-                        Divider().padding(.horizontal, 16)
-                        OtherCodexAccountsSection(dedupPrimary: true)
+                        Divider().padding(.leading, 28).padding(.trailing, 16)
+                        OtherCodexAccountsSection(dedupPrimary: true, showsVendorHeader: false)
                     }
                     if provider.app == .kimi && appState.kimiManagedAccounts.contains(where: { $0.visibleInPopover && !appState.kimiManagedMirrorsCLI($0) }) {
-                        if appState.kimiAccount != nil { Divider().padding(.horizontal, 16) }
+                        if appState.kimiAccount != nil { Divider().padding(.leading, 28).padding(.trailing, 16) }
                         KimiManagedAccountsSection()
                     }
                 }
                 if appState.moonshotAccounts.contains(where: \.visibleInPopover) {
-                    Divider().padding(.horizontal, 16)
+                    if !providers.isEmpty || hasImported { Divider().padding(.horizontal, 16) }
                     MoonshotBalancesSection()
                 }
             }
@@ -227,40 +227,32 @@ struct PopoverRootView: View {
         var parts: [String] = []
         let email: String?
         let plan: String?
-        let fallback: String
         switch app {
         case .codex:
             email = appState.codexAccount?.email
             plan = appState.codexPlanName
-            fallback = "OpenAI"
         case .claude:
             email = appState.claudeDisplayEmail
             plan = appState.claudePlanName
-            fallback = "Anthropic"
         case .antigravity:
             email = appState.antigravityAccount?.email
             plan = appState.quotaSnapshot(for: .antigravity)?.planType ?? appState.antigravityAccount?.planType
-            fallback = "Google"
         case .cursor:
             email = appState.cursorAccount?.email
             plan = appState.quotaSnapshot(for: .cursor)?.planType
-            fallback = "Cursor"
         case .commandCode:
             email = appState.commandCodeAccount?.email ?? appState.commandCodeAccount?.login
             plan = appState.commandCodeAccount?.planType ?? appState.quotaSnapshot(for: .commandCode)?.planType
-            fallback = "Command Code"
         case .kimi:
             return appState.kimiDisplaySubtitle
         case .opencodeGo:
-            // Go 没有可读的账号信息，副标题只显示 vendor。
+            // Go 没有可读的账号信息，无需重复服务名称。
             email = nil
             plan = nil
-            fallback = "OpenCode"
         }
         // 每个服务只有一个主账号，隐私模式直接不显示邮箱，不必换成「账号 NN」。
         if !privacy, let email, !email.isEmpty { parts.append(email) }
         if let plan, !plan.isEmpty { parts.append(plan) }
-        if parts.isEmpty { parts.append(fallback) }
         return parts.joined(separator: " · ")
     }
 
@@ -270,21 +262,17 @@ struct PopoverRootView: View {
         let snap = appState.quotaSnapshot(for: provider.app)
         return ServiceBlockView(
             app: provider.app,
-            title: provider.title,
             subtitle: providerSubtitle(for: provider.app),
             tint: provider.app.tintColor,
-            logoName: provider.logoName,
-            fallback: provider.fallback,
             snapshot: snap,
             error: providerDisplayError(for: provider.app),
             periodSpend: periodSpend(for: provider.app),
             periodIsBillingCycle: cursorCycleBounds(for: provider.app) != nil,
             todayCost: todayCost(for: provider.app),
-            serviceStatus: serviceStatus(for: provider.app),
             showsCost: provider.showsCost,
             accountEdition: provider.app == .kimi ? appState.kimiCLIRegion?.displayName : nil,
             isKimiCurrentAccount: provider.app == .kimi && appState.kimiAccount != nil,
-            showsProviderHeader: provider.app != .kimi
+            followsVendorHeader: true
         )
     }
 
@@ -516,12 +504,14 @@ struct PopoverRootView: View {
 struct AccountVendorHeader: View {
     let title: String
     var logoName: String? = nil
+    var fallback = "K"
+    var tint: Color = .purple
     var status: ServiceStatus? = nil
 
     var body: some View {
         HStack(spacing: 9) {
             if let logoName {
-                ServiceTile(logoName: logoName, fallback: "K", tint: .purple)
+                ServiceTile(logoName: logoName, fallback: fallback, tint: tint)
             } else {
                 Image(systemName: "key.fill")
                     .font(.system(size: 16))
@@ -540,31 +530,32 @@ struct AccountVendorHeader: View {
 
 struct ServiceBlockView: View {
     let app: QuotaApp
-    let title: String
     let subtitle: String
     let tint: Color
-    let logoName: String
-    let fallback: String
     let snapshot: QuotaSnapshot?
     let error: String?
     let periodSpend: Decimal?
     /// true 时第二项费用是本计费周期（本期），否则是自然周（本周）。
     let periodIsBillingCycle: Bool
     let todayCost: Decimal?
-    let serviceStatus: ServiceStatus?
     let showsCost: Bool
     var accountEdition: String? = nil
     var isKimiCurrentAccount = false
-    var showsProviderHeader = true
+    var isLoading = false
+    var followsVendorHeader = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if showsProviderHeader {
-                headerRow
-            } else {
+            if !subtitle.isEmpty || accountEdition != nil || isKimiCurrentAccount {
                 accountHeader
             }
-            if snapshot?.isEmptyKimiQuota == true {
+            if isLoading && snapshot == nil {
+                HStack(spacing: 5) {
+                    ProgressView().controlSize(.small)
+                    Text(tr("Loading…", "加载中…"))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            } else if snapshot?.isEmptyKimiQuota == true {
                 Text(tr("No quota data available", "暂无额度数据"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -586,45 +577,19 @@ struct ServiceBlockView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.top, followsVendorHeader ? 4 : 14)
+        .padding(.bottom, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var headerRow: some View {
-        HStack(spacing: 9) {
-            ServiceTile(logoName: logoName, fallback: fallback, tint: tint)
-
-            if let accountEdition {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(title).font(.system(size: 13, weight: .semibold))
-                        if isKimiCurrentAccount { KimiCurrentAccountBadge() }
-                        Text(accountEdition).font(.system(size: 10)).foregroundStyle(.secondary)
-                    }
-                    Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            } else {
-                headerLabels
-            }
-
-            Spacer(minLength: 0)
-
-            if let status = serviceStatus {
-                ServiceStatusDot(status: status, title: title)
-            }
-        }
     }
 
     private var accountHeader: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(subtitle)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .help(subtitle)
             if isKimiCurrentAccount { KimiCurrentAccountBadge() }
             if let accountEdition {
                 Text(accountEdition)
@@ -633,23 +598,6 @@ struct ServiceBlockView: View {
                     .fixedSize()
             }
             Spacer(minLength: 0)
-        }
-    }
-
-    /// Other services keep the existing inline title and account presentation.
-    private var headerLabels: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .kerning(-0.1)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .layoutPriority(1)
-            Text(subtitle)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
         }
     }
 
