@@ -335,7 +335,17 @@ extension KimiQuotaClient {
         auth: KimiAuthSession,
         session: URLSession? = nil
     ) async -> KimiUserInfo? {
-        guard [KimiCredentials.defaultBaseURL, KimiCredentials.globalBaseURL].contains(auth.baseURL) else { return nil }
+        try? await fetchUserInfoResult(auth: auth, session: session).get()
+    }
+
+    /// 返回错误供启动流程识别 429；原有调用方仍可只读取可选资料。
+    static func fetchUserInfoResult(
+        auth: KimiAuthSession,
+        session: URLSession? = nil
+    ) async -> Result<KimiUserInfo, QuotaError> {
+        guard [KimiCredentials.defaultBaseURL, KimiCredentials.globalBaseURL].contains(auth.baseURL) else {
+            return .failure(.decode("unsupported Kimi endpoint"))
+        }
         var request = URLRequest(url: auth.baseURL.appendingPathComponent("me"))
         request.httpMethod = "GET"
         request.setValue("Bearer \(auth.accessToken)", forHTTPHeaderField: "Authorization")
@@ -345,18 +355,21 @@ extension KimiQuotaClient {
 
         do {
             let (body, response) = try await NetworkProxy.data(for: request, session: session)
-            guard let http = response as? HTTPURLResponse,
-                  (200...299).contains(http.statusCode),
-                  let root = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
-            else { return nil }
-            return KimiUserInfo(
+            guard let http = response as? HTTPURLResponse else { return .failure(.transport("non-http response")) }
+            guard (200...299).contains(http.statusCode) else {
+                return .failure(.http(http.statusCode, "Kimi profile request failed"))
+            }
+            guard let root = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
+                return .failure(.decode("invalid Kimi profile"))
+            }
+            return .success(KimiUserInfo(
                 userID: stringField(root["user_id"]) ?? stringField(root["sub"]),
                 email: root["email"] as? String,
                 nickname: root["nickname"] as? String,
                 userLevelName: root["user_level_name"] as? String
-            )
+            ))
         } catch {
-            return nil
+            return .failure(.from(transport: error))
         }
     }
 

@@ -12,6 +12,7 @@ struct OnboardingView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
     @State private var step: Int = 0
+    @State private var installedClients: Set<QuotaApp>?
 
     var body: some View {
         ZStack {
@@ -26,14 +27,19 @@ struct OnboardingView: View {
         .frame(width: 620, height: 520)
         .background(.regularMaterial)
         .animation(.easeInOut(duration: 0.25), value: step)
+        .task {
+            installedClients = await Task.detached(priority: .utility) {
+                OnboardingClientDetection.installedClients()
+            }.value
+        }
     }
 
     @ViewBuilder
     private var stepContent: some View {
         switch step {
         case 0: WelcomeStep(onContinue: next)
-        case 1: DetectAccountsStep(onBack: prev, onContinue: next)
-        case 2: ConfigureStep(onBack: prev, onContinue: next)
+        case 1: DetectAccountsStep(installedClients: installedClients, onBack: prev, onContinue: next)
+        case 2: ConfigureStep(installedClients: installedClients, onBack: prev, onContinue: next)
         default: ReadyStep(onClose: finish, onOpenStats: openStats)
         }
     }
@@ -149,14 +155,13 @@ private struct AppIconBlock: View {
 private struct DetectAccountsStep: View {
     @Environment(AppState.self) private var appState
     @State private var hasMoreAccountsBelow = false
+    let installedClients: Set<QuotaApp>?
     let onBack: () -> Void
     let onContinue: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(anyDetected
-                 ? tr("We found these accounts", "检测到以下账号")
-                 : tr("No services found yet. They'll be detected after you sign in.", "暂未检测到服务，登录后会自动识别"))
+            Text(tr("Services and accounts", "服务与账号"))
                 .font(.system(size: 18, weight: .bold))
                 .kerning(-0.3)
 
@@ -229,7 +234,7 @@ private struct DetectAccountsStep: View {
                 tint: .codexAccent,
                 logoName: "codex",
                 fallback: "C",
-                isDetected: appState.codexAccount != nil
+                status: status(for: .codex, signedIn: appState.codexAccount != nil)
             ),
             DetectedAccountRow(
                 app: .claude,
@@ -241,7 +246,8 @@ private struct DetectAccountsStep: View {
                 tint: .claudeAccent,
                 logoName: "claude",
                 fallback: "K",
-                isDetected: appState.claudeAccount != nil
+                status: status(for: .claude, signedIn: appState.claudeAccount != nil,
+                               needsAuthorization: appState.claudeDesktopAccessDenied)
             ),
             DetectedAccountRow(
                 app: .antigravity,
@@ -253,7 +259,7 @@ private struct DetectAccountsStep: View {
                 tint: .antigravityAccent,
                 logoName: "antigravity",
                 fallback: "A",
-                isDetected: appState.antigravityAccount != nil
+                status: status(for: .antigravity, signedIn: appState.antigravityAccount != nil)
             ),
             DetectedAccountRow(
                 app: .cursor,
@@ -265,7 +271,8 @@ private struct DetectAccountsStep: View {
                 tint: .cursorAccent,
                 logoName: "cursor",
                 fallback: "C",
-                isDetected: appState.cursorAccount != nil || appState.cursorKeychainAccessRequired
+                status: status(for: .cursor, signedIn: appState.cursorAccount != nil,
+                               needsAuthorization: appState.cursorKeychainAccessRequired)
             ),
             DetectedAccountRow(
                 app: .commandCode,
@@ -277,7 +284,7 @@ private struct DetectAccountsStep: View {
                 tint: QuotaApp.commandCode.tintColor,
                 logoName: "commandcode",
                 fallback: "⌘",
-                isDetected: appState.commandCodeAccount != nil
+                status: status(for: .commandCode, signedIn: appState.commandCodeAccount != nil)
             ),
             DetectedAccountRow(
                 app: .kimi,
@@ -289,14 +296,21 @@ private struct DetectAccountsStep: View {
                 tint: QuotaApp.kimi.tintColor,
                 logoName: "kimi",
                 fallback: "K",
-                isDetected: appState.hasKimiSubscriptionAccount
+                status: status(for: .kimi, signedIn: appState.hasKimiSubscriptionAccount)
             )
         ]
     }
 
     private var orderedAccountRows: [DetectedAccountRow] {
         let rows = accountRows
-        return rows.filter { $0.isDetected } + rows.filter { !$0.isDetected }
+        return AccountDetectionStatus.allCases.flatMap { status in rows.filter { $0.status == status } }
+    }
+
+    private func status(for app: QuotaApp, signedIn: Bool, needsAuthorization: Bool = false) -> AccountDetectionStatus {
+        if signedIn { return .signedIn }
+        if needsAuthorization { return .needsAuthorization }
+        guard let installedClients else { return .checking }
+        return installedClients.contains(app) ? .installed : .notFound
     }
 
     private var codexSource: String {
@@ -348,9 +362,51 @@ private struct DetectAccountsStep: View {
         return appState.hasKimiSubscriptionAccount ? "CCBar" : "—"
     }
 
-    private var anyDetected: Bool {
-        accountRows.contains { $0.isDetected }
+}
+
+/// Local executable or app presence is separate from account credential detection.
+enum OnboardingClientDetection {
+    nonisolated static func installedClients(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        standardDirectories: [URL]? = nil,
+        applicationDirectories: [URL]? = nil
+    ) -> Set<QuotaApp> {
+        let fm = FileManager.default
+        let path = environment["PATH"] ?? ""
+        let nvmPath = environment["NVM_DIR"].flatMap { $0.hasPrefix("/") ? $0 : nil }
+            ?? home.appendingPathComponent(".nvm").path
+        let nodeVersions = URL(fileURLWithPath: nvmPath).appendingPathComponent("versions/node")
+        let nodeDirectories = (try? fm.contentsOfDirectory(at: nodeVersions, includingPropertiesForKeys: nil,
+                                                           options: [.skipsHiddenFiles])) ?? []
+        var directories = path.split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }
+        let standard = standardDirectories ?? [home.appendingPathComponent(".local/bin"),
+                                                URL(fileURLWithPath: "/opt/homebrew/bin"),
+                                                URL(fileURLWithPath: "/usr/local/bin"),
+                                                URL(fileURLWithPath: "/usr/bin")]
+        directories.append(contentsOf: standard.map(\.path))
+        directories.append(contentsOf: nodeDirectories.map { $0.appendingPathComponent("bin").path })
+        func hasCommand(_ name: String) -> Bool {
+            directories.contains { fm.isExecutableFile(atPath: URL(fileURLWithPath: $0).appendingPathComponent(name).path) }
+        }
+        func hasApp(_ name: String) -> Bool {
+            (applicationDirectories ?? [URL(fileURLWithPath: "/Applications"), home.appendingPathComponent("Applications")])
+                .contains { fm.fileExists(atPath: $0.appendingPathComponent(name).path) }
+        }
+        var found: Set<QuotaApp> = []
+        if hasCommand("codex") || hasApp("Codex.app") { found.insert(.codex) }
+        if hasCommand("claude") { found.insert(.claude) }
+        if hasCommand("agy") || fm.isExecutableFile(atPath: home.appendingPathComponent(".gemini/bin/agy").path)
+            || hasApp("Antigravity.app") { found.insert(.antigravity) }
+        if hasApp("Cursor.app") || hasCommand("cursor") { found.insert(.cursor) }
+        if hasCommand("commandcode") { found.insert(.commandCode) }
+        if hasCommand("kimi") || hasCommand("kimi-code") { found.insert(.kimi) }
+        return found
     }
+}
+
+private enum AccountDetectionStatus: CaseIterable {
+    case signedIn, needsAuthorization, installed, checking, notFound
 }
 
 private struct ScrollDownHint: View {
@@ -390,6 +446,7 @@ private struct ScrollDownHint: View {
 }
 
 private struct DetectedAccountRow: View {
+    @Environment(AppState.self) private var appState
     let app: QuotaApp
     let title: String
     let subtitle: String
@@ -399,11 +456,11 @@ private struct DetectedAccountRow: View {
     let tint: Color
     let logoName: String
     let fallback: String
-    let isDetected: Bool
+    let status: AccountDetectionStatus
 
     var body: some View {
         HStack(spacing: 12) {
-            CheckmarkBox(checked: isDetected)
+            CheckmarkBox(checked: status == .signedIn)
             ServiceTile(logoName: logoName, fallback: fallback, tint: tint, size: 28, logoSize: 15, cornerRadius: 7)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -416,17 +473,33 @@ private struct DetectedAccountRow: View {
                 }
                 // 邮箱优先完整显示；凭据来源（Cursor 的路径很长）只占一行，放不下从中间截断。
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    Text(email.map { PrivacyDisplay.isEnabled ? PrivacyDisplay.account("primary:\(app.rawValue)") : $0 }
-                         ?? (isDetected ? tr("Detected", "已检测到") : tr("Not detected", "未检测到")))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .layoutPriority(1)
-                    PrivacySensitiveText(text: " · \(source)")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    if isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.75)
+                            .frame(width: 14, height: 14)
+                            .accessibilityHidden(true)
+                            .padding(.trailing, 4)
+                        Text(tr("Loading account information…", "账户信息加载中…"))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text(status == .signedIn
+                             ? (email.map { PrivacyDisplay.isEnabled ? PrivacyDisplay.account("primary:\(app.rawValue)") : $0 } ?? statusText)
+                             : statusText)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                        if status == .signedIn && source != "—" {
+                            PrivacySensitiveText(text: " · \(source)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
                 }
             }
 
@@ -435,11 +508,27 @@ private struct DetectedAccountRow: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .ccPanel(cornerRadius: 12)
-        .opacity(isDetected ? 1 : 0.6)
+        .opacity(status == .notFound && !isLoading ? 0.6 : 1)
+    }
+
+    private var isLoading: Bool {
+        appState.startupAccountLoading.contains(app)
+            || appState.accountProfileLoading.contains(app)
+            || status == .checking
+    }
+
+    private var statusText: String {
+        switch status {
+        case .signedIn: tr("Detected", "已检测到")
+        case .needsAuthorization: tr("Authorization required", "需要授权")
+        case .installed: tr("Installed · No sign-in detected", "已安装 · 未检测到登录")
+        case .checking: tr("Checking…", "正在检测…")
+        case .notFound: tr("Client not found", "未发现客户端")
+        }
     }
 
     private var subtitleText: String {
-        if let plan, !plan.isEmpty { return "\(subtitle) · \(plan)" }
+        if status == .signedIn, let plan, !plan.isEmpty { return "\(subtitle) · \(plan)" }
         return subtitle
     }
 }
@@ -489,12 +578,11 @@ private struct CredentialInfoCard: View {
 
 private struct ConfigureStep: View {
     @Environment(AppState.self) private var appState
+    let installedClients: Set<QuotaApp>?
     let onBack: () -> Void
     let onContinue: () -> Void
 
     var body: some View {
-        @Bindable var settings = SettingsStore.shared
-
         VStack(alignment: .leading, spacing: 0) {
             Text(tr("Choose your view", "选择你想看到的方式"))
                 .font(.system(size: 18, weight: .bold))
@@ -505,46 +593,7 @@ private struct ConfigureStep: View {
                              chineseTitle: "菜单栏",
                              subtitle: "Show enabled providers next to the menu bar icon.",
                              chineseSubtitle: "在菜单栏图标旁显示百分比") {
-                    VStack(alignment: .trailing, spacing: 8) {
-                        HStack(spacing: 12) {
-                            Toggle("Codex", isOn: Binding(get: { settings.menuBarShowCodex }, set: { settings.menuBarShowCodex = $0 }))
-                                .toggleStyle(.switch)
-                                .tint(.green)
-                            Toggle("Claude Code", isOn: Binding(get: { settings.menuBarShowClaude }, set: { settings.menuBarShowClaude = $0 }))
-                                .toggleStyle(.switch)
-                                .tint(.green)
-                        }
-                        HStack(spacing: 12) {
-                            Toggle("Cursor", isOn: Binding(
-                                get: { settings.isProviderShownInMenuBar(.cursor) },
-                                set: { shown in
-                                    settings.setProviderShownInMenuBar(shown, for: .cursor)
-                                    if shown {
-                                        settings.setServiceEnabled(true, for: .cursor)
-                                        Task {
-                                            await appState.refreshQuotas(reason: .userInitiated)
-                                        }
-                                    }
-                                }
-                            ))
-                            .toggleStyle(.switch)
-                            .tint(.green)
-                            Toggle("Command Code", isOn: Binding(
-                                get: { settings.isProviderShownInMenuBar(.commandCode) },
-                                set: { shown in
-                                    settings.setProviderShownInMenuBar(shown, for: .commandCode)
-                                    if shown {
-                                        settings.setServiceEnabled(true, for: .commandCode)
-                                        Task {
-                                            await appState.refreshQuotas(reason: .userInitiated)
-                                        }
-                                    }
-                                }
-                            ))
-                            .toggleStyle(.switch)
-                            .tint(.green)
-                        }
-                    }
+                    menuBarOptions
                 }
 
                 ConfigureRow(title: "Floating HUD",
@@ -552,9 +601,9 @@ private struct ConfigureStep: View {
                              subtitle: "Pin a small percentage HUD to your desktop.",
                              chineseSubtitle: "在桌面置顶显示剩余百分比") {
                     Toggle(tr("On", "开启"), isOn: Binding(
-                        get: { settings.floatingEnabled },
+                        get: { SettingsStore.shared.floatingEnabled },
                         set: { v in
-                            settings.floatingEnabled = v
+                            SettingsStore.shared.floatingEnabled = v
                             FloatingPanelController.shared.sync()
                         }
                     ))
@@ -574,6 +623,90 @@ private struct ConfigureStep: View {
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 28)
+    }
+
+    private var signedInProviders: [QuotaProviderDescriptor] {
+        guard let installedClients else { return [] }
+        return SettingsStore.shared.orderedMenuBarProviders.filter { provider in
+            installedClients.contains(provider.app) && hasAccount(for: provider.app)
+        }
+    }
+
+    private func hasAccount(for app: QuotaApp) -> Bool {
+        switch app {
+        case .codex: appState.codexAccount != nil
+        case .claude: appState.claudeAccount != nil
+        case .antigravity: appState.antigravityAccount != nil
+        case .cursor: appState.cursorAccount != nil
+        case .commandCode: appState.commandCodeAccount != nil
+        case .kimi: appState.hasKimiSubscriptionAccount
+        case .opencodeGo: false // 引导页不检测该客户端。
+        }
+    }
+
+    @ViewBuilder
+    private var menuBarOptions: some View {
+        if signedInProviders.isEmpty {
+            if installedClients == nil || !appState.startupAccountLoading.isEmpty {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small).accessibilityHidden(true)
+                    Text(tr("Checking services…", "正在检测服务…"))
+                }
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            } else {
+                Text(tr("No signed-in apps found", "未发现已登录的应用"))
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+        } else {
+            let columns = signedInProviders.count == 1
+                ? [GridItem(.fixed(152))]
+                : [GridItem(.fixed(152), spacing: 12), GridItem(.fixed(152))]
+            LazyVGrid(columns: columns,
+                      alignment: .trailing, spacing: 8) {
+                ForEach(signedInProviders, id: \.app) { provider in
+                    HStack(spacing: 8) {
+                        Text(provider.title)
+                            .font(.system(size: 13))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .frame(width: 90, alignment: .trailing)
+                        Toggle(provider.title, isOn: menuBarBinding(for: provider.app))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .tint(.green)
+                            .fixedSize()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+        }
+    }
+
+    private func menuBarBinding(for app: QuotaApp) -> Binding<Bool> {
+        Binding {
+            let settings = SettingsStore.shared
+            guard settings.isProviderEnabled(app) else { return false }
+            if app == .kimi {
+                let cliVisible = appState.kimiAccount != nil && settings.isProviderShownInMenuBar(.kimi)
+                return cliVisible || appState.kimiManagedAccounts.contains(where: \.showInMenuBar)
+            }
+            return settings.isProviderShownInMenuBar(app)
+        } set: { shown in
+            let settings = SettingsStore.shared
+            settings.setProviderShownInMenuBar(shown, for: app)
+            if app == .kimi {
+                for account in appState.kimiManagedAccounts where account.showInMenuBar != shown {
+                    appState.updateKimiManagedAccount(id: account.id) { $0.showInMenuBar = shown }
+                }
+            }
+            let needsRefresh = shown && (!settings.isProviderEnabled(app) || app == .kimi)
+            if shown && !settings.isProviderEnabled(app) {
+                settings.setServiceEnabled(true, for: app)
+            }
+            if needsRefresh {
+                Task { await appState.refreshQuotas(reason: .userInitiated) }
+            }
+        }
     }
 }
 
