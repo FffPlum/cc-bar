@@ -1142,17 +1142,27 @@ final class UsageService {
             requestedCycleIDs: affectedCycleIDs,
             failedApps: failedApps
         )
+        // 分步合并并明确类型，避免 Release 编译器对长数组拼接表达式推断超时。
+        var entries: [UsageEntry] = claude.entries
+        entries.append(contentsOf: codex.entries)
+        entries.append(contentsOf: pi.entries)
+        entries.append(contentsOf: opencode.entries)
+        if let dsh { entries.append(contentsOf: dsh.entries) }
+        entries.append(contentsOf: kimiEntries)
+        let exactEntries: [UsageEntry] = entries.filter { !failedApps.contains($0.app) }
+
+        var sourceApps: Set<UsageApp> = [.claude, .codex, .kimi]
+        sourceApps.formUnion(CycleUsageAggregator.otherAgentSourceApps)
+        sourceApps.subtract(failedApps)
+        if dshFrozen { sourceApps.remove(.dsh) }
+
         await commitCycleAggregation(
-            exactEntries: (claude.entries + codex.entries + pi.entries + opencode.entries + (dsh?.entries ?? []) + kimiEntries)
-                .filter { !failedApps.contains($0.app) },
+            exactEntries: exactEntries,
             cycles: cycles,
             accountSegments: accountSegments,
             failedApps: failedApps,
             rebuildRange: rebuildableCycleIDs,
-            sourceApps: Set<UsageApp>([.claude, .codex, .kimi])
-                .union(CycleUsageAggregator.otherAgentSourceApps)
-                .subtracting(failedApps)
-                .subtracting(dshFrozen ? [.dsh] : [])
+            sourceApps: sourceApps
         )
         // 全过程计时：commitCycleAggregation 自己的日志只计聚合与落盘，不含前面的日志重扫。
         let finished = Date()

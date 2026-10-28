@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-15
+    # 与 Release Build 保持一致，避免依赖 ARM hosted runner 容量。
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +48,7 @@ jobs:
       - name: 构建并打包(ad-hoc 签名,无需证书)
         env:
           SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          CCBAR_BUILD_ARCH: arm64
         run: ./scripts/build.sh
 
       - name: 签名更新包、更新日志和 appcast

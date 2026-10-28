@@ -9,6 +9,8 @@
 #   SPARKLE_PUBLIC_ED_KEY="公钥" scripts/build.sh
 #                               # 产物输出到 ./dist/CCBar.dmg 和 ./dist/CCBar.app.zip
 #   scripts/build.sh <输出目录>
+#   CCBAR_BUILD_ARCH=arm64 scripts/build.sh
+#                               # 显式指定目标架构，支持在 Intel CI 上交叉编译
 #
 set -euo pipefail
 
@@ -18,6 +20,20 @@ cd "$REPO_ROOT"
 BUILD_DIR="$REPO_ROOT/build"
 OUT_DIR="${1:-$REPO_ROOT/dist}"
 APP="$BUILD_DIR/Build/Products/Release/CCBar.app"
+
+# 未指定时保留工程默认行为；CI 明确目标架构，避免产物随 runner 架构改变。
+BUILD_ARCH="${CCBAR_BUILD_ARCH:-}"
+XCODE_BUILD_ARGS=(build)
+case "$BUILD_ARCH" in
+  "") ;;
+  arm64|x86_64)
+    XCODE_BUILD_ARGS+=(-destination 'generic/platform=macOS' "ARCHS=$BUILD_ARCH" ONLY_ACTIVE_ARCH=NO)
+    ;;
+  *)
+    echo "CCBAR_BUILD_ARCH 只支持 arm64 或 x86_64" >&2
+    exit 1
+    ;;
+esac
 
 # Local private keys remain in Keychain. CI never consumes a workstation config.
 # An explicitly configured but unavailable identity must not fall back to ad-hoc.
@@ -72,9 +88,15 @@ xcodebuild \
   -derivedDataPath "$BUILD_DIR" \
   CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
   SPARKLE_PUBLIC_ED_KEY="$SPARKLE_PUBLIC_ED_KEY" \
-  build
+  "${XCODE_BUILD_ARGS[@]}"
 
 [[ -d "$APP" ]] || { echo "❌ 构建产物未找到: $APP" >&2; exit 1; }
+APP_ARCHS="$(lipo -archs "$APP/Contents/MacOS/CCBar")"
+echo "==> 主程序架构: $APP_ARCHS"
+if [[ -n "$BUILD_ARCH" && "$APP_ARCHS" != "$BUILD_ARCH" ]]; then
+  echo "❌ 主程序架构与 CCBAR_BUILD_ARCH=$BUILD_ARCH 不一致" >&2
+  exit 1
+fi
 
 echo "==> [3/4] 签名并校验"
 xattr -cr "$APP"
