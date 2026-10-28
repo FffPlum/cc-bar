@@ -1376,14 +1376,14 @@ struct SettingsRootView: View {
             tr("Quota: reads the sign-in from the Cursor app (decrypted with the Cursor Safe Storage key in Keychain when Cursor encrypts it) and asks Cursor for remaining quota. Read-only; your sign-in is not changed.",
                "额度：读取 Cursor 应用的登录状态（Cursor 加密保存时，用钥匙串里的 Cursor Safe Storage 密钥解密），向 Cursor 查询剩余额度。只读取，不改动登录。")
         case .commandCode:
-            tr("Quota: reads Command Code's local credentials or the ones you entered (stored in Keychain), and asks Command Code for remaining quota.",
-               "额度：读取 Command Code 的本机凭据或手动填写的凭据（保存在钥匙串），向 Command Code 查询剩余额度。")
+            tr("Quota: reads Command Code's local credentials or the ones you entered (stored in a private local file), and asks Command Code for remaining quota.",
+               "额度：读取 Command Code 的本机凭据或手动填写的凭据（保存在本机私有文件中），向 Command Code 查询剩余额度。")
         case .kimi:
             tr("Quota: reads your existing Kimi Code CLI sign-in and asks Kimi for remaining quota. Expired access tokens are renewed automatically and saved back to the CLI credential file.",
                "额度：读取已有 Kimi Code CLI 登录，向 Kimi 查询剩余额度。访问令牌过期时自动续期，并同步更新 CLI 凭据文件。")
         case .opencodeGo:
-            tr("Quota: reads the OpenCode Go API key from OpenCode, Pi, the OPENCODE_API_KEY environment variable, or the one you entered (stored in Keychain), and asks OpenCode for remaining quota.",
-               "额度：读取 OpenCode、Pi 中的 OpenCode Go API Key、环境变量 OPENCODE_API_KEY 或手动填写的 Key（保存在钥匙串），向 OpenCode 查询剩余额度。")
+            tr("Quota: reads the OpenCode Go API key from OpenCode, Pi, the OPENCODE_API_KEY environment variable, or the one you entered (stored in a private local file), and asks OpenCode for remaining quota.",
+               "额度：读取 OpenCode、Pi 中的 OpenCode Go API Key、环境变量 OPENCODE_API_KEY 或手动填写的 Key（保存在本机私有文件中），向 OpenCode 查询剩余额度。")
         }
     }
 

@@ -153,6 +153,12 @@ struct ImportedCodexAccountsView: View {
                 .frame(width: ServiceRowMetrics.destination * 2, height: 1)
 
             Menu {
+                if ImportedCodexStore.isLegacyAccessBlocked(accountId: account.id) {
+                    Button(tr("Retry Keychain Access…", "重试钥匙串访问…")) {
+                        ImportedCodexStore.retryLegacyAccess(accountId: account.id)
+                        Task { await appState.refreshQuotas(reason: .userInitiated) }
+                    }
+                }
                 Button(tr("Reset Credits…", "额度重置次数…")) {
                     selectedResetAccount = account
                 }

@@ -564,6 +564,134 @@ final class KimiManagedAccountTests: XCTestCase {
         XCTAssertTrue(state.displayedKimiServiceStatus?.isStale ?? false)
     }
 
+    func testManagedTokensMigrateOnceIntoPrivateFilesAndNeverRestoreDeletedTokens() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ccbar-kimi-files-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let backend = CountingManagedKeychain()
+        let tokens = regressionTokens()
+        backend.state.withLock { $0.data["test:account"] = try? JSONEncoder().encode(tokens) }
+        let legacy = KimiKeychainStore(keychain: CachedManagedKeychain(service: "test", backend: backend, defaults: nil))
+        let store = KimiFileTokenStore(directory: root, legacy: legacy)
+        XCTAssertEqual(store.load(accountID: "account"), tokens)
+        XCTAssertEqual(backend.state.withLock { $0.reads }, 1)
+        let credential = root.appendingPathComponent(KimiManagedAccount.digest("account") + ".json")
+        let directoryMode = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: root.path)[.posixPermissions] as? NSNumber)
+        let fileMode = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: credential.path)[.posixPermissions] as? NSNumber)
+        XCTAssertEqual(directoryMode.intValue & 0o777, 0o700)
+        XCTAssertEqual(fileMode.intValue & 0o777, 0o600)
+        let restarted = KimiFileTokenStore(directory: root, legacy: legacy)
+        XCTAssertEqual(restarted.load(accountID: "account"), tokens)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: credential.path)
+        XCTAssertNil(restarted.load(accountID: "account"), "Insecure file permissions must be rejected")
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: credential.path)
+        XCTAssertEqual(restarted.load(accountID: "account"), tokens)
+        XCTAssertEqual(backend.state.withLock { $0.reads }, 1)
+        try FileManager.default.removeItem(at: credential)
+        XCTAssertNil(restarted.load(accountID: "account"))
+        XCTAssertEqual(backend.state.withLock { $0.reads }, 1, "An old Keychain token must not be resurrected")
+        try restarted.save(tokens, accountID: "account")
+        restarted.delete(accountID: "account")
+        XCTAssertNil(restarted.load(accountID: "account"))
+        XCTAssertEqual(backend.state.withLock { $0.reads }, 1)
+    }
+
+    func testManagedTokenMigrationCanRetryDeniedKeychainAccess() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ccbar-kimi-files-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let backend = CountingManagedKeychain()
+        let tokens = regressionTokens()
+        backend.state.withLock { $0.readStatus = errSecUserCanceled; $0.data["test:account"] = try? JSONEncoder().encode(tokens) }
+        let legacy = KimiKeychainStore(keychain: CachedManagedKeychain(service: "test", backend: backend, defaults: nil))
+        let store = KimiFileTokenStore(directory: root, legacy: legacy)
+        XCTAssertNil(store.load(accountID: "account"))
+        XCTAssertTrue(store.isAccessBlocked(accountID: "account"))
+        backend.state.withLock { $0.readStatus = nil }
+        store.retryAccess(accountID: "account")
+        XCTAssertEqual(store.load(accountID: "account"), tokens)
+        XCTAssertFalse(store.isAccessBlocked(accountID: "account"))
+        XCTAssertEqual(backend.state.withLock { $0.reads }, 2)
+    }
+
+    func testManagedTokenRefreshLeaseSerializesStores() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ccbar-kimi-files-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = KimiFileTokenStore(directory: root)
+        let second = KimiFileTokenStore(directory: root)
+        var lease = try await first.acquireRefreshLease(accountID: "account")
+        XCTAssertNotNil(lease)
+        let acquired = expectation(description: "second store acquired lease")
+        let task = Task { @MainActor in
+            let secondLease = try await second.acquireRefreshLease(accountID: "account")
+            XCTAssertNotNil(secondLease)
+            acquired.fulfill()
+        }
+        try await Task.sleep(nanoseconds: 150_000_000)
+        lease = nil
+        await fulfillment(of: [acquired], timeout: 2)
+        try await task.value
+    }
+
+    func testWaitingManagedRefreshAdoptsTokenRotatedByAnotherStore() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ccbar-kimi-files-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = KimiFileTokenStore(directory: root)
+        let second = KimiFileTokenStore(directory: root)
+        let account = KimiManagedAccount(id: "account", region: .china, userID: "user")
+        try first.save(regressionTokens(expired: true), accountID: account.id)
+        var lease = try await first.acquireRefreshLease(accountID: account.id)
+        XCTAssertNotNil(lease)
+        let session = oauthSession()
+        defer { KimiManagedOAuthProtocol.handler = nil; session.invalidateAndCancel() }
+        KimiManagedOAuthProtocol.handler = { _ in
+            XCTFail("A rotated token must be adopted without another refresh request")
+            throw URLError(.badServerResponse)
+        }
+        let pending = Task { @MainActor in
+            await KimiManagedTokenRefresher.ensureFresh(account: account, force: true, tokenStore: second, session: session)
+        }
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let rotated = KimiManagedTokens(accessToken: "rotated", refreshToken: "rotated-refresh", expiresAt: nil)
+        try first.save(rotated, accountID: account.id)
+        lease = nil
+        guard case .success(let result) = await pending.value else { return XCTFail("Expected rotated credentials") }
+        XCTAssertEqual(result, rotated)
+    }
+
+    func testMoonshotKeyMigratesOnceToPrivateFileAndDoesNotRestoreAfterRemoval() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ccbar-moonshot-files-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let backend = CountingManagedKeychain()
+        backend.state.withLock { $0.data["moonshot:account"] = Data("key-test-123456".utf8) }
+        let legacy = MoonshotKeychainStore(keychain: CachedManagedKeychain(service: "moonshot", backend: backend, defaults: nil))
+        let store = MoonshotFileStore(directory: root, legacy: legacy)
+        XCTAssertEqual(store.load(accountID: "account"), "key-test-123456")
+        let path = root.appendingPathComponent(KimiManagedAccount.digest("account") + ".json")
+        let mode = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: path.path)[.posixPermissions] as? NSNumber)
+        XCTAssertEqual(mode.intValue & 0o777, 0o600)
+        try store.save("replacement-key-123", accountID: "account")
+        XCTAssertEqual(store.load(accountID: "account"), "replacement-key-123")
+        store.delete(accountID: "account")
+        XCTAssertNil(store.load(accountID: "account"))
+        XCTAssertEqual(backend.state.withLock { $0.reads }, 1)
+    }
+
+    func testPrivateCredentialNamespacesStaySeparateAndRejectInvalidLegacyData() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ccbar-provider-files-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = PrivateCredentialFileStore(directory: root.appendingPathComponent("codex"))
+        let second = PrivateCredentialFileStore(directory: root.appendingPathComponent("command-code"))
+        let validator: (Data) -> Bool = { !$0.isEmpty }
+        XCTAssertNil(first.load(accountID: "primary", legacy: { Data() }, validate: validator))
+        XCTAssertFalse(first.hasLocalState(accountID: "primary"))
+        try first.save(Data("first".utf8), accountID: "primary")
+        try second.save(Data("second".utf8), accountID: "primary")
+        XCTAssertEqual(first.load(accountID: "primary", legacy: { nil }, validate: validator), Data("first".utf8))
+        XCTAssertEqual(second.load(accountID: "primary", legacy: { nil }, validate: validator), Data("second".utf8))
+        XCTAssertTrue(first.delete(accountID: "primary"))
+        XCTAssertNil(first.load(accountID: "primary", legacy: { Data("old".utf8) }, validate: validator))
+        XCTAssertEqual(second.load(accountID: "primary", legacy: { nil }, validate: validator), Data("second".utf8))
+    }
+
     func testKimiCachedRefreshPausesDeniedAccessAndRejectsReplacedCredentials() async throws {
         let (state, root) = try isolatedState()
         defer { try? FileManager.default.removeItem(at: root) }

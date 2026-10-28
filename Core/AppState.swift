@@ -161,7 +161,7 @@ final class AppState {
     // MARK: 导入的 Codex 副账号
     //
     // 用户手动粘贴 auth.json 添加的"其他账号"。与默认账号(`~/.codex/auth.json`)解耦,
-    // 允许重复出现,token 走 Keychain (见 ImportedCodexStore)。
+    // 允许重复出现,token 存入私有文件 (见 ImportedCodexStore)。
     // - `importedCodexAccounts` 元数据列表,保持添加顺序。
     // - `importedCodexQuotas / Sources / Errors / RefreshStates` 按 account.id 索引,
     //   只在该账号 `visibleInPopover` 为 true 时才刷新与展示。
@@ -182,8 +182,8 @@ final class AppState {
     @ObservationIgnored var kimiManagedRequestIDs: [String: UUID] = [:]
     @ObservationIgnored var kimiDeviceLoginTask: Task<Void, Never>?
     @ObservationIgnored var kimiDeviceLoginID: UUID?
-    @ObservationIgnored var kimiTokenStore: any KimiTokenStore = KimiKeychainStore()
-    @ObservationIgnored var moonshotAPIKeyStore: any MoonshotAPIKeyStore = MoonshotKeychainStore()
+    @ObservationIgnored var kimiTokenStore: any KimiTokenStore = KimiFileTokenStore()
+    @ObservationIgnored var moonshotAPIKeyStore: any MoonshotAPIKeyStore = MoonshotFileStore()
     @ObservationIgnored var accountPersistenceDirectory: URL?
     var kimiManagedOperationError: String?
     var moonshotOperationError: String?
@@ -1144,7 +1144,7 @@ final class AppState {
         reloadImportedCodexAccounts()
     }
 
-    /// 删除:同步清 Keychain、元数据、运行时状态与缓存。
+    /// 删除:同步清私有凭据文件、元数据、运行时状态与缓存。
     func removeImportedCodexAccount(id: String) {
         guard !isPreparingForTermination else { return }
         ImportedCodexStore.deleteTokens(accountId: id)
@@ -1214,7 +1214,8 @@ final class AppState {
         defer { importedCodexRefreshStates[account.id]?.inFlight = false }
 
         guard let tokens = ImportedCodexStore.loadTokens(accountId: account.id) else {
-            markImportedCodexFailure(id: account.id, message: QuotaError.missingToken.userMessage)
+            markImportedCodexFailure(id: account.id, message: ImportedCodexStore.isLegacyAccessBlocked(accountId: account.id)
+                ? ManagedKeychainError.pausedMessage : QuotaError.missingToken.userMessage)
             return
         }
         let isPAT = account.isPersonalAccessToken == true
@@ -1770,8 +1771,8 @@ final class AppState {
         let alert = NSAlert()
         alert.messageText = tr("Allow Reading Claude Desktop Sign-in", "允许读取 Claude 桌面版登录")
         alert.informativeText = tr(
-            "CCBar reads Claude Desktop's sign-in through the system's security tool to query your quota. macOS will then ask whether \"security\" can access \"Claude Safe Storage\" — choose \"Always Allow\" and CCBar updates won't ask again.",
-            "CCBar 通过系统自带的 security 工具读取 Claude 桌面版的登录状态来查询额度。接下来系统会询问「security」能否访问「Claude Safe Storage」，请选「始终允许」，之后更新 CCBar 不再询问。"
+            "CCBar uses the system security tool to read Claude Desktop sign-in. The verified decryption key is saved in a private local file so you won't be asked each time. Other processes running as your user can also read it.",
+            "CCBar 通过系统工具读取 Claude 桌面版登录。验证成功后，解密密钥会保存在本机私有文件中，避免每次询问；当前用户的其他进程也可能读取该文件。"
         )
         alert.alertStyle = .informational
         alert.addButton(withTitle: tr("Continue", "继续"))
@@ -1995,8 +1996,8 @@ final class AppState {
         let alert = NSAlert()
         alert.messageText = tr("Allow Reading Cursor Sign-in", "允许读取 Cursor 登录")
         alert.informativeText = tr(
-            "Cursor encrypts its sign-in. CCBar reads it through the system's security tool to query your quota and usage. macOS will then ask whether \"security\" can access \"Cursor Safe Storage\" — choose \"Always Allow\" and CCBar updates won't ask again.",
-            "Cursor 会加密保存登录状态，CCBar 通过系统自带的 security 工具读取它来查询额度和用量。接下来系统会询问「security」能否访问「Cursor Safe Storage」，请选「始终允许」，之后更新 CCBar 不再询问。"
+            "Cursor encrypts its sign-in. CCBar uses the system security tool to read it and saves the verified decryption key in a private local file so you won't be asked each time. Other processes running as your user can also read it.",
+            "Cursor 会加密保存登录状态。CCBar 通过系统工具读取登录，验证成功后将解密密钥保存在本机私有文件中，避免每次询问；当前用户的其他进程也可能读取该文件。"
         )
         alert.alertStyle = .informational
         alert.addButton(withTitle: tr("Continue", "继续"))
@@ -2076,7 +2077,7 @@ final class AppState {
         saveQuotaCache()
     }
 
-    /// 只读 OpenCode / Pi 的 auth.json、环境变量或 cc-bar 钥匙串里的手动 key。
+    /// 只读 OpenCode / Pi 的 auth.json、环境变量或 CCBar 私有文件里的手动 key。
     /// key 变化（含启动时与缓存的账号键不一致）先清掉旧快照，避免新 key 显示旧额度。
     func loadOpenCodeGo(allowDuringTermination: Bool = false) async {
         guard beginStateOperation(allowDuringTermination: allowDuringTermination) else { return }

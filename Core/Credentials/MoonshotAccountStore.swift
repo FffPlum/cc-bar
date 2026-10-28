@@ -57,6 +57,29 @@ nonisolated struct MoonshotKeychainStore: MoonshotAPIKeyStore {
 
 }
 
+nonisolated struct MoonshotFileStore: MoonshotAPIKeyStore {
+    private let files: PrivateCredentialFileStore
+    private let legacy: any MoonshotAPIKeyStore
+    init(directory: URL = MoonshotAccountStore.fileURL().deletingLastPathComponent()
+        .appendingPathComponent("moonshot_api_credentials", isDirectory: true),
+         legacy: any MoonshotAPIKeyStore = MoonshotKeychainStore()) {
+        files = PrivateCredentialFileStore(directory: directory)
+        self.legacy = legacy
+    }
+    func load(accountID: String) -> String? {
+        guard let data = files.load(accountID: accountID,
+            legacy: { legacy.load(accountID: accountID).map { Data($0.utf8) } },
+            validate: { String(data: $0, encoding: .utf8).map { !$0.isEmpty } ?? false }) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+    func save(_ apiKey: String, accountID: String) throws { try files.save(Data(apiKey.utf8), accountID: accountID) }
+    func delete(accountID: String) { files.delete(accountID: accountID) }
+    func isAccessBlocked(accountID: String) -> Bool {
+        !files.hasLocalState(accountID: accountID) && legacy.isAccessBlocked(accountID: accountID)
+    }
+    func retryAccess(accountID: String) { legacy.retryAccess(accountID: accountID) }
+}
+
 nonisolated enum MoonshotAccountStore {
     private struct Payload: Codable {
         var version = 1

@@ -7,7 +7,7 @@ enum KimiManagedTokenRefresher {
     static func ensureFresh(
         account: KimiManagedAccount,
         force: Bool = false,
-        tokenStore: any KimiTokenStore = KimiKeychainStore(),
+        tokenStore: any KimiTokenStore = KimiFileTokenStore(),
         session: URLSession? = nil,
         now: Date = Date(),
         isCurrent: @MainActor () -> Bool = { true }
@@ -18,6 +18,15 @@ enum KimiManagedTokenRefresher {
         if !force, initial.expiresAt.map({ $0.timeIntervalSince(now) > 30 }) ?? true {
             return .success(initial)
         }
+        let lease: KimiRefreshLease?
+        do { lease = try await tokenStore.acquireRefreshLease(accountID: account.id) }
+        catch { return .failure(.from(transport: error)) }
+        defer { withExtendedLifetime(lease) {} }
+        guard isCurrent(), !Task.isCancelled, let current = tokenStore.load(accountID: account.id) else {
+            return .failure(.missingToken)
+        }
+        // Another CCBar process may have rotated the token while we waited.
+        if current != initial { return .success(current) }
         var request = URLRequest(url: account.region.oauthHost.appendingPathComponent("api/oauth/token"))
         request.httpMethod = "POST"
         request.timeoutInterval = 10

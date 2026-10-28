@@ -8,7 +8,7 @@ import SwiftUI
 // 设计见 docs/技术实现.md "导入账号" 一节。
 
 /// 元数据,持久化到 Application Support/CCBar/imported_codex_accounts.json。
-/// Token 三件套不在这里,走 Keychain (见 ImportedCodexStore)。
+/// Token 三件套不在这里,存于私有凭据文件 (见 ImportedCodexStore)。
 nonisolated struct ImportedCodexAccount: Sendable, Equatable, Codable, Identifiable {
     /// 复合身份:`{chatgpt_account_id}:{chatgpt_user_id}`。
     /// 仅有 chatgpt_account_id (老数据 / 没拿到 user_id) 时退化为单段。
