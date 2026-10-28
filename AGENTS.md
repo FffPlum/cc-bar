@@ -125,12 +125,39 @@ xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destinat
 - 打包好的 DMG 和 zip 上传到 GitHub Release 即可分发；不要直接替换用户本机 `/Applications/CCBar.app`——那是覆盖用户正在使用的安装，属于有风险操作，要打包验证就在 `dist/` 或临时目录里查看，不要动 `/Applications`。
 - 完整背景说明见 [README.md](README.md#从源码构建) 和 [docs/打包发布.md](docs/打包发布.md)（该文档里的 Archive / Developer ID 流程只是给需要公证发布给别人用的场景保留的可选项，日常打包不要用）。
 
+### 发布说明模板
+
+参考 [CodexBar v0.82.0 发布说明](https://github.com/steipete/CodexBar/releases/tag/v0.82.0) 的「亮点 → 新增 → 改进 → 修复」结构，结合本项目应用内更新窗口编写 `release-notes/vX.Y.Z.md`：
+
+```markdown
+## 本版亮点
+
+- 概括本版最重要、用户可感知的变化
+
+## 新增
+
+- 服务或功能名称：说明新增能力、入口和用户可以做什么
+
+## 改进
+
+- 服务或功能名称：说明体验或已有行为如何变化
+
+## 修复
+
+- 服务或功能名称：说明修复前用户遇到的具体问题
+```
+
+- 亮点先概括最重要的 1～3 项变化；后续按类型列出具体细节。没有内容的分类省略，只有一项变化时可以只保留「本版亮点」；不要为了凑分类虚构内容。
+- 每条围绕一项用户可感知的变化，按影响排序；写清涉及的服务、入口、前后变化以及必要的默认值或升级注意事项。不罗列内部重构、CI、文件、提交或版本号。
+- 使用应用内窗口支持的 `##` 标题、`- ` 列表、普通段落和行内 Markdown；不使用图片、表格或嵌套列表。不强制照搬参考项目的 PR 链接和贡献者致谢；如需提及，仅在信息真实且对用户有帮助时使用。
+- 没有用户可感知的变化时写 `本版为内部维护更新，功能与上一版一致。`。完成后按 [release-notes/README.md](release-notes/README.md) 自检并维护近期新功能。
+
 ### 标准发布流程（用户说「发版」「提交代码、版本号+1、构建打包」或「升级版本、tag，提交推送」时）
 
 这是用户预先授权的固定发布指令，出现这句话（或明显同义的表述，如「发布一下」「发个新版本」）时按下面四步顺序执行，**不用逐步等确认**。`发版` 是首选的最短触发词；tag 推送成功后，立即汇报新版本号、提交、Actions / Release 链接和本版更新说明全文即可。
 
 1. **提交代码并创建发布分支**：把当前工作区未提交的改动按仓库惯例的 commit message 风格提交（可用 `git-commit-messages` skill；无关改动分开提交，不要混在一起）。将准备发布的功能合并到 `develop`，从最新的 `develop` 创建并切换到 `release/vX.Y.Z`；后续发布修补、更新说明和版本号改动都提交到该发布分支。
-2. **编写用户更新说明**：对比上一个 `v*` tag 与当前代码、提交和文档，只提炼真实、用户可感知的新增功能、问题修复、体验优化和必要注意事项；不要罗列 commit、文件、重构、CI 或版本号。创建 `release-notes/vX.Y.Z.md`，先读 [release-notes/README.md](release-notes/README.md)，按其中的撰写流程和自检问题写：开头一句话说出本版最主要的变化，下面不分组列出条目，每条一行；不用分类组头、`#` 标题和图片，不加安装说明等每版重复的固定段落。再按同一文档「近期新功能」一节检查并更新 `release-notes/highlights.md`。Release 正文由本版说明加 `highlights.md` 拼成，Release 标题沿用默认的 tag 名。
+2. **编写用户更新说明**：对比上一个 `v*` tag 与当前代码、提交和文档，只提炼真实、用户可感知的新增功能、问题修复、体验优化和必要注意事项；不要罗列 commit、文件、重构、CI 或版本号。创建 `release-notes/vX.Y.Z.md`，按上方「发布说明模板」及 [release-notes/README.md](release-notes/README.md) 的撰写流程和自检问题编写，不加安装说明等每版重复的固定段落。再按同一文档「近期新功能」一节检查并更新 `release-notes/highlights.md`。Release 正文由本版说明加 `highlights.md` 拼成，Release 标题沿用默认的 tag 名。
 3. **版本号 +1**：修改 `ccbar.xcodeproj/project.pbxproj` 里两处 `MARKETING_VERSION`（Debug/Release 配置各一处，要同时改），patch 位 +1（如 `1.0.0` → `1.0.1`），除非用户明确要求升 minor/major。把版本号、`release-notes/vX.Y.Z.md` 和改动过的 `release-notes/highlights.md` 一起单独提交，message 形如 `chore: 发布 vX.Y.Z`。
 4. **经 PR 合并发布分支并触发远程构建发布**：推送 `release/vX.Y.Z` 并创建目标为 `main` 的 Pull Request。完成自查后，通过 GitHub 执行 squash 合并，不直接推送 main。拉取合并后的 `origin/main`，在该发布提交上创建 `vX.Y.Z` 标签。将发布分支合并回 `develop`，并把新的 main 发布提交合入 develop，使后续发布有共同基点；这些合并只发生在 develop。推送 develop 和 tag，由 tag 触发 [.github/workflows/release.yml](.github/workflows/release.yml)，由 GitHub 的 macOS runner 自动运行 `scripts/build.sh`、读取同名更新说明，并将 `dist/CCBar.dmg`、`dist/CCBar.app.zip`、`dist/appcast.xml`、`dist/release-notes.md` 与 `dist/version.json`（新版读取签名 appcast，version.json 保留给旧客户端；均由 workflow 生成，本地打包不产出）挂到 GitHub Release。完成后删除已合并的本地、远端发布分支：
    ```bash
