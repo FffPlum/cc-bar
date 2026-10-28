@@ -2399,7 +2399,6 @@ final class AppState {
         }
         claudeProfileAttempt = (accessToken, Date(), false)
         let accountKey = claudeProfileAccountKey(account)
-        let result = await ClaudeQuotaClient.fetchProfile(accessToken: accessToken)
         let requestID = UUID()
         claudeProfileRequestID = requestID
         accountProfileLoading.insert(.claude)
@@ -2409,6 +2408,7 @@ final class AppState {
                 accountProfileLoading.remove(.claude)
             }
         }
+        let result = await ClaudeQuotaClient.fetchProfile(accessToken: accessToken)
         // 请求期间换了号或组织就丢弃结果。
         guard let current = claudeAccount, claudeProfileAccountKey(current) == accountKey,
               current.accessToken == accessToken else { return }
@@ -2424,8 +2424,8 @@ final class AppState {
                 AppLog.info(.credentials, "claude profile returned no recognizable plan")
             }
         case .failure(let err):
-            AppLog.info(.credentials, "claude profile fetch failed: \(Redact.message(err.userMessage))")
             if err.isRateLimited { markClaudeFailure(err.userMessage, error: err) }
+            AppLog.info(.credentials, "claude profile fetch failed: \(Redact.message(err.userMessage))")
         }
     }
 
