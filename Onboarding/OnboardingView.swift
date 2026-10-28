@@ -411,29 +411,42 @@ private enum AccountDetectionStatus: CaseIterable {
 
 private struct ScrollDownHint: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var lowered = false
     let isVisible: Bool
 
     var body: some View {
-        Group {
-            if isVisible && !reduceMotion {
-                hintContent
-                    .phaseAnimator([false, true]) { hint, lowered in
-                        hint.offset(y: lowered ? 4 : 0)
-                    } animation: { lowered in
-                        .smooth(duration: lowered ? 0.7 : 0.45, extraBounce: 0)
-                            .delay(lowered ? 0.6 : 0.15)
+        hintContent
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .offset(y: lowered ? 4 : 0)
+            .frame(maxWidth: .infinity)
+            .frame(height: 20)
+            .opacity(isVisible ? 1 : 0)
+            .animation(.easeOut(duration: 0.2), value: isVisible)
+            .accessibilityElement(children: .combine)
+            .accessibilityHidden(!isVisible)
+            .task(id: isVisible && !reduceMotion) {
+                guard isVisible && !reduceMotion else {
+                    if reduceMotion {
+                        lowered = false
+                    } else {
+                        withAnimation(.smooth(duration: 0.2, extraBounce: 0)) { lowered = false }
                     }
-            } else {
-                hintContent
+                    return
+                }
+                for _ in 0..<3 {
+                    do { try await Task.sleep(for: .milliseconds(600)) }
+                    catch { return }
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.smooth(duration: 0.35, extraBounce: 0)) { lowered = true }
+                    do { try await Task.sleep(for: .milliseconds(500)) }
+                    catch { return }
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.smooth(duration: 0.3, extraBounce: 0)) { lowered = false }
+                    do { try await Task.sleep(for: .milliseconds(300)) }
+                    catch { return }
+                }
             }
-        }
-        .font(.system(size: 11))
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity)
-        .frame(height: 20)
-        .opacity(isVisible ? 1 : 0)
-        .accessibilityElement(children: .combine)
-        .accessibilityHidden(!isVisible)
     }
 
     private var hintContent: some View {
@@ -460,7 +473,7 @@ private struct DetectedAccountRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            CheckmarkBox(checked: status == .signedIn)
+            CheckmarkBox(checked: status == .signedIn, unavailable: (status == .installed || status == .notFound) && !isLoading)
             ServiceTile(logoName: logoName, fallback: fallback, tint: tint, size: 28, logoSize: 15, cornerRadius: 7)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -535,9 +548,10 @@ private struct DetectedAccountRow: View {
 
 private struct CheckmarkBox: View {
     let checked: Bool
+    let unavailable: Bool
 
     var body: some View {
-        Image(systemName: checked ? "checkmark.circle.fill" : "circle")
+        Image(systemName: checked ? "checkmark.circle.fill" : (unavailable ? "minus.circle.fill" : "circle"))
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(checked ? Color.accentColor : Color.secondary.opacity(0.35))
     }
