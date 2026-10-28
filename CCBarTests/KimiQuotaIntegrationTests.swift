@@ -6,6 +6,31 @@ import os
 
 @MainActor
 final class KimiQuotaIntegrationTests: XCTestCase {
+    func testOnboardingFindsNVMClientsWithoutShellPath() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let bin = home.appendingPathComponent(".nvm/versions/node/v22.0.0/bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        for name in ["codex", "kimi"] {
+            let file = bin.appendingPathComponent(name)
+            try Data("#!/bin/sh\n".utf8).write(to: file)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        }
+        let detected = OnboardingClientDetection.installedClients(
+            home: home, environment: ["PATH": "/usr/bin:/bin"], standardDirectories: [], applicationDirectories: []
+        )
+        XCTAssertTrue(detected.contains(.codex))
+        XCTAssertTrue(detected.contains(.kimi))
+        XCTAssertFalse(detected.contains(.claude))
+
+        try FileManager.default.removeItem(at: bin.appendingPathComponent("kimi"))
+        let afterRemoval = OnboardingClientDetection.installedClients(
+            home: home, environment: ["PATH": "/usr/bin:/bin"], standardDirectories: [], applicationDirectories: []
+        )
+        XCTAssertTrue(afterRemoval.contains(.codex))
+        XCTAssertFalse(afterRemoval.contains(.kimi))
+    }
+
     func testProviderParticipatesInAllThreeDisplaysAndRefreshPlan() throws {
         let provider = try XCTUnwrap(QuotaProviderDescriptor.descriptor(for: .kimi))
         XCTAssertEqual(provider.app.usageApp, .kimi)
@@ -155,6 +180,61 @@ final class KimiQuotaIntegrationTests: XCTestCase {
         XCTAssertEqual(state.kimiAccount?.accountKey, replacement.accountKey)
         XCTAssertTrue(state.quotaHistory.lastSamples.isEmpty)
         XCTAssertTrue(state.quotaCycles.records.isEmpty)
+    }
+
+    func testProfileRequestIsDeduplicatedAndShowsLoading() async {
+        let state = AppState()
+        state.kimiAccount = account()
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        await state.loadKimiProfileIfNeeded { auth in
+            await MainActor.run { XCTAssertTrue(state.accountProfileLoading.contains(.kimi)) }
+            await state.loadKimiProfileIfNeeded { _ in
+                calls.withLock { $0 += 1 }
+                return .failure(.transport("unexpected duplicate"))
+            }
+            return .success(KimiUserInfo(userID: auth.userID, nickname: "Fixture"))
+        }
+        XCTAssertEqual(calls.withLock { $0 }, 0)
+        XCTAssertEqual(state.kimiNickname, "Fixture")
+        XCTAssertFalse(state.accountProfileLoading.contains(.kimi))
+    }
+
+    func testProfileDiscardsOldAccountAndRetriesAfterTokenChanges() async {
+        let state = AppState()
+        let original = account()
+        state.kimiAccount = original
+        var updated = original
+        updated.accessToken = "fixture-new-access-token"
+        let renewed = updated
+        await state.loadKimiProfileIfNeeded { _ in
+            await MainActor.run { state.kimiAccount = renewed }
+            return .success(KimiUserInfo(userID: original.userID, nickname: "Stale"))
+        }
+        XCTAssertNil(state.kimiNickname)
+        await state.loadKimiProfileIfNeeded { auth in
+            .success(KimiUserInfo(userID: auth.userID, nickname: "Current"))
+        }
+        XCTAssertEqual(state.kimiNickname, "Current")
+        XCTAssertFalse(state.accountProfileLoading.contains(.kimi))
+    }
+
+    func testProfileRateLimitSurvivesConcurrentQuotaSuccess() async {
+        let state = AppState()
+        state.kimiAccount = account()
+        let expected = snapshot(used: 0.3)
+        await state.loadKimiQuota(reason: .userInitiated, fetch: { _ in
+            await state.loadKimiProfileIfNeeded { _ in .failure(.http(429, "rate limited")) }
+            return .success(expected)
+        }, refresh: { auth, _ in .success(auth) })
+        XCTAssertEqual(state.kimiQuota, expected)
+        XCTAssertTrue(state.kimiRefreshState.backoffUntil.map { $0 > Date() } == true)
+        XCTAssertNotNil(state.kimiQuotaError)
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        await state.loadKimiQuota(reason: .userInitiated, fetch: { _ in
+            calls.withLock { $0 += 1 }
+            return .success(expected)
+        }, refresh: { auth, _ in .success(auth) })
+        XCTAssertEqual(calls.withLock { $0 }, 0)
     }
 
     func testCachedKimiWindowsRoundTripAndMonthlyAlertsRemainDistinct() throws {

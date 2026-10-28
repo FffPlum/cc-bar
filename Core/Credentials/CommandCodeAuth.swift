@@ -49,13 +49,17 @@ struct CommandCodeAuthSession: Sendable, Equatable {
 enum CommandCodeAuth {
     private static let keychainService = "com.fffplum.ccbar.command-code"
     private static let keychainAccount = "primary"
+    private static let legacy = CachedManagedKeychain(service: keychainService)
+    private static let credentials = PrivateCredentialFileStore(directory:
+        ImportedCodexStore.fileURL().deletingLastPathComponent()
+            .appendingPathComponent("command-code_credentials", isDirectory: true))
 
     static func load(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         preference: CommandCodeCredentialPreference = .automatic
     ) -> CommandCodeAuthSession? {
         if preference == .manual {
-            if let manualKey = loadFromKeychain(), let token = sanitizeToken(manualKey) {
+            if let manualKey = loadStoredKey(), let token = sanitizeToken(manualKey) {
                 return CommandCodeAuthSession(accessToken: token, source: .manualKeychain)
             }
             return nil
@@ -81,8 +85,8 @@ enum CommandCodeAuth {
             return session
         }
 
-        // 5. 自动降级读取 Keychain 手动配置
-        if let manualKey = loadFromKeychain(), let token = sanitizeToken(manualKey) {
+        // 5. 自动降级读取 CCBar 手动配置
+        if let manualKey = loadStoredKey(), let token = sanitizeToken(manualKey) {
             return CommandCodeAuthSession(accessToken: token, source: .manualKeychain)
         }
 
@@ -154,47 +158,23 @@ enum CommandCodeAuth {
         return nil
     }
 
-    // MARK: - Keychain 存取
+    // MARK: - CCBar 管理的凭据
 
-    static func loadFromKeychain() -> String? {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: keychainService,
-            kSecAttrAccount: keychainAccount,
-            kSecReturnData: true,
-            kSecMatchLimit: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else { return nil }
+    static func loadStoredKey() -> String? {
+        guard let data = credentials.load(accountID: keychainAccount,
+            legacy: { legacy.load(account: keychainAccount) },
+            validate: { String(data: $0, encoding: .utf8).flatMap { sanitizeToken($0) } != nil }) else { return nil }
         return String(data: data, encoding: .utf8)
     }
-
     @discardableResult
-    static func saveToKeychain(apiKey: String) -> Bool {
-        guard let token = sanitizeToken(apiKey),
-              let data = token.data(using: .utf8) else { return false }
-        deleteFromKeychain()
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: keychainService,
-            kSecAttrAccount: keychainAccount,
-            kSecValueData: data,
-            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
-        ]
-        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+    static func saveStoredKey(apiKey: String) -> Bool {
+        guard let key = sanitizeToken(apiKey) else { return false }
+        do { try credentials.save(Data(key.utf8), accountID: keychainAccount); return true }
+        catch { return false }
     }
-
     @discardableResult
-    static func deleteFromKeychain() -> Bool {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: keychainService,
-            kSecAttrAccount: keychainAccount,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
-    }
+    static func deleteStoredKey() -> Bool { credentials.delete(accountID: keychainAccount) }
+    static func retryLegacyAccess() { legacy.retryAccess(account: keychainAccount) }
 
     // MARK: - Token 清洗
 

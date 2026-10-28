@@ -136,7 +136,12 @@ final class AppState {
         return parts.isEmpty ? tr("Signed in", "已登录") : parts.joined(separator: " · ")
     }
     @ObservationIgnored private var kimiRefreshID: UUID?
-    @ObservationIgnored private var kimiProfileAttempt: (accountKey: String, at: Date)?
+    @ObservationIgnored private var kimiProfileAttempt: (accountKey: String, token: String, at: Date)?
+    /// 启动时每个服务的本机账号读取及引导页所需资料是否仍在进行。
+    private(set) var startupAccountLoading: Set<QuotaApp> = []
+    private(set) var accountProfileLoading: Set<QuotaApp> = []
+    @ObservationIgnored private var kimiProfileRequestID: UUID?
+    @ObservationIgnored private var claudeProfileRequestID: UUID?
 
     var codexError: String?
     var claudeError: String?
@@ -156,7 +161,7 @@ final class AppState {
     // MARK: 导入的 Codex 副账号
     //
     // 用户手动粘贴 auth.json 添加的"其他账号"。与默认账号(`~/.codex/auth.json`)解耦,
-    // 允许重复出现,token 走 Keychain (见 ImportedCodexStore)。
+    // 允许重复出现,token 存入私有文件 (见 ImportedCodexStore)。
     // - `importedCodexAccounts` 元数据列表,保持添加顺序。
     // - `importedCodexQuotas / Sources / Errors / RefreshStates` 按 account.id 索引,
     //   只在该账号 `visibleInPopover` 为 true 时才刷新与展示。
@@ -177,8 +182,8 @@ final class AppState {
     @ObservationIgnored var kimiManagedRequestIDs: [String: UUID] = [:]
     @ObservationIgnored var kimiDeviceLoginTask: Task<Void, Never>?
     @ObservationIgnored var kimiDeviceLoginID: UUID?
-    @ObservationIgnored var kimiTokenStore: any KimiTokenStore = KimiKeychainStore()
-    @ObservationIgnored var moonshotAPIKeyStore: any MoonshotAPIKeyStore = MoonshotKeychainStore()
+    @ObservationIgnored var kimiTokenStore: any KimiTokenStore = KimiFileTokenStore()
+    @ObservationIgnored var moonshotAPIKeyStore: any MoonshotAPIKeyStore = MoonshotFileStore()
     @ObservationIgnored var accountPersistenceDirectory: URL?
     var kimiManagedOperationError: String?
     var moonshotOperationError: String?
@@ -496,29 +501,29 @@ final class AppState {
         loadKimiManagedAccounts()
         loadMoonshotAccounts()
         await usageService.bootstrap(appState: self)
-        await loadCodex()
+        let showingOnboarding = !SettingsStore.shared.didCompleteOnboarding
+        startupAccountLoading = [.codex, .claude, .antigravity, .cursor, .commandCode, .kimi]
+        if showingOnboarding { shouldShowOnboarding = true }
+
+        // 只读本机凭据的服务可以并行；可能涉及钥匙串提示的服务仍按原顺序执行。
+        async let codex: Void = loadStartupCodex()
+        async let antigravity: Void = loadStartupAntigravity()
+        async let kimi: Void = loadStartupKimi(showingOnboarding: showingOnboarding)
         maybeShowKeychainPrompt()
         await loadClaude()
         handleClaudeDesktopAccessRequest()
-        await loadAntigravity()
-        // 新安装时 Antigravity 只在检测到凭据时保持默认开启，未登录的机器不显示空卡片。
-        if SettingsStore.shared.isFreshInstall, antigravityAccount == nil {
-            // 额度和用量一起关：只关额度时，下次启动的开关合并会按「任一项开着」把它重新打开。
-            SettingsStore.shared.setServiceEnabled(false, for: .antigravity)
-        }
+        startStartupClaudeProfile(showingOnboarding: showingOnboarding)
         // Cursor 只读本机 SQLite，用于账号页和 Onboarding 的登录态检测；
         // 是否请求其远端额度仍由 Provider / Stats 开关控制。
         await loadCursor()
         handleCursorAccessRequest()
+        startupAccountLoading.remove(.cursor)
         await loadCommandCode(allowDuringTermination: true)
+        startupAccountLoading.remove(.commandCode)
         await loadOpenCodeGo(allowDuringTermination: true)
-        await loadKimi(allowDuringTermination: true)
+        _ = await (codex, antigravity, kimi)
         recordCachedQuotaCycleObservations()
         logCredentialSummary()
-
-        if !SettingsStore.shared.didCompleteOnboarding {
-            shouldShowOnboarding = true
-        }
 
         let settings = SettingsStore.shared
         scheduler.start(
@@ -554,6 +559,56 @@ final class AppState {
         }
         // 批次 C：bootstrap 期间标脏的额度文件统一落盘
         scheduleQuotaPersistenceFlush()
+    }
+
+    private func loadStartupCodex() async {
+        defer { startupAccountLoading.remove(.codex) }
+        await loadCodex()
+    }
+
+    private func loadStartupAntigravity() async {
+        defer { startupAccountLoading.remove(.antigravity) }
+        await loadAntigravity()
+        // 新安装且无凭据时关闭额度与用量；已装机用户保留原设置。
+        if SettingsStore.shared.isFreshInstall, antigravityAccount == nil {
+            SettingsStore.shared.setServiceEnabled(false, for: .antigravity)
+        }
+    }
+
+    private func loadStartupKimi(showingOnboarding: Bool) async {
+        await loadKimi(allowDuringTermination: true)
+        // 引导页可立即获取有效 CLI 登录的资料，无需等待其他服务的额度请求。
+        // 已过期凭据留给原来的额度刷新流程续期，避免抢占 CLI 的凭据锁。
+        guard showingOnboarding,
+              (SettingsStore.shared.isProviderEnabled(.kimi) || SettingsStore.shared.isFreshInstall),
+              let auth = kimiAccount, auth.expiresAt.map({ $0.timeIntervalSinceNow > 30 }) ?? true
+        else { startupAccountLoading.remove(.kimi); return }
+        Task { [weak self] in
+            guard let self else { return }
+            guard self.beginStateOperation() else { self.startupAccountLoading.remove(.kimi); return }
+            defer {
+                self.startupAccountLoading.remove(.kimi)
+                self.activeStateOperations -= 1
+            }
+            await self.loadKimiProfileIfNeeded()
+        }
+    }
+
+    private func startStartupClaudeProfile(showingOnboarding: Bool) {
+        guard showingOnboarding, SettingsStore.shared.isProviderEnabled(.claude),
+              claudeRefreshState.backoffUntil.map({ $0 > Date() }) != true,
+              let account = claudeAccount, let token = account.accessToken,
+              account.expiresAt.map({ $0.timeIntervalSinceNow > 30 }) ?? true
+        else { startupAccountLoading.remove(.claude); return }
+        Task { [weak self] in
+            guard let self else { return }
+            guard self.beginStateOperation() else { self.startupAccountLoading.remove(.claude); return }
+            defer {
+                self.startupAccountLoading.remove(.claude)
+                self.activeStateOperations -= 1
+            }
+            await self.refreshClaudeProfileIfNeeded(account: account, accessToken: token)
+        }
     }
 
     /// 设置变更后，把刷新间隔同步到 Scheduler
@@ -1089,7 +1144,7 @@ final class AppState {
         reloadImportedCodexAccounts()
     }
 
-    /// 删除:同步清 Keychain、元数据、运行时状态与缓存。
+    /// 删除:同步清私有凭据文件、元数据、运行时状态与缓存。
     func removeImportedCodexAccount(id: String) {
         guard !isPreparingForTermination else { return }
         ImportedCodexStore.deleteTokens(accountId: id)
@@ -1159,7 +1214,8 @@ final class AppState {
         defer { importedCodexRefreshStates[account.id]?.inFlight = false }
 
         guard let tokens = ImportedCodexStore.loadTokens(accountId: account.id) else {
-            markImportedCodexFailure(id: account.id, message: QuotaError.missingToken.userMessage)
+            markImportedCodexFailure(id: account.id, message: ImportedCodexStore.isLegacyAccessBlocked(accountId: account.id)
+                ? ManagedKeychainError.pausedMessage : QuotaError.missingToken.userMessage)
             return
         }
         let isPAT = account.isPersonalAccessToken == true
@@ -1715,8 +1771,8 @@ final class AppState {
         let alert = NSAlert()
         alert.messageText = tr("Allow Reading Claude Desktop Sign-in", "允许读取 Claude 桌面版登录")
         alert.informativeText = tr(
-            "CCBar reads Claude Desktop's sign-in through the system's security tool to query your quota. macOS will then ask whether \"security\" can access \"Claude Safe Storage\" — choose \"Always Allow\" and CCBar updates won't ask again.",
-            "CCBar 通过系统自带的 security 工具读取 Claude 桌面版的登录状态来查询额度。接下来系统会询问「security」能否访问「Claude Safe Storage」，请选「始终允许」，之后更新 CCBar 不再询问。"
+            "CCBar uses the system security tool to read Claude Desktop sign-in. The verified decryption key is saved in a private local file so you won't be asked each time. Other processes running as your user can also read it.",
+            "CCBar 通过系统工具读取 Claude 桌面版登录。验证成功后，解密密钥会保存在本机私有文件中，避免每次询问；当前用户的其他进程也可能读取该文件。"
         )
         alert.alertStyle = .informational
         alert.addButton(withTitle: tr("Continue", "继续"))
@@ -1940,8 +1996,8 @@ final class AppState {
         let alert = NSAlert()
         alert.messageText = tr("Allow Reading Cursor Sign-in", "允许读取 Cursor 登录")
         alert.informativeText = tr(
-            "Cursor encrypts its sign-in. CCBar reads it through the system's security tool to query your quota and usage. macOS will then ask whether \"security\" can access \"Cursor Safe Storage\" — choose \"Always Allow\" and CCBar updates won't ask again.",
-            "Cursor 会加密保存登录状态，CCBar 通过系统自带的 security 工具读取它来查询额度和用量。接下来系统会询问「security」能否访问「Cursor Safe Storage」，请选「始终允许」，之后更新 CCBar 不再询问。"
+            "Cursor encrypts its sign-in. CCBar uses the system security tool to read it and saves the verified decryption key in a private local file so you won't be asked each time. Other processes running as your user can also read it.",
+            "Cursor 会加密保存登录状态。CCBar 通过系统工具读取登录，验证成功后将解密密钥保存在本机私有文件中，避免每次询问；当前用户的其他进程也可能读取该文件。"
         )
         alert.alertStyle = .informational
         alert.addButton(withTitle: tr("Continue", "继续"))
@@ -2021,7 +2077,7 @@ final class AppState {
         saveQuotaCache()
     }
 
-    /// 只读 OpenCode / Pi 的 auth.json、环境变量或 cc-bar 钥匙串里的手动 key。
+    /// 只读 OpenCode / Pi 的 auth.json、环境变量或 CCBar 私有文件里的手动 key。
     /// key 变化（含启动时与缓存的账号键不一致）先清掉旧快照，避免新 key 显示旧额度。
     func loadOpenCodeGo(allowDuringTermination: Bool = false) async {
         guard beginStateOperation(allowDuringTermination: allowDuringTermination) else { return }
@@ -2180,14 +2236,28 @@ final class AppState {
         }
     }
 
-    private func loadKimiProfileIfNeeded() async {
+    func loadKimiProfileIfNeeded(
+        fetch: @Sendable (KimiAuthSession) async -> Result<KimiUserInfo, QuotaError> = { await KimiQuotaClient.fetchUserInfoResult(auth: $0) }
+    ) async {
         guard let auth = kimiAccount, kimiRefreshState.backoffUntil.map({ $0 > Date() }) != true else { return }
-        if let attempt = kimiProfileAttempt, attempt.accountKey == auth.accountKey,
+        if let attempt = kimiProfileAttempt, attempt.accountKey == auth.accountKey, attempt.token == auth.accessToken,
            Date().timeIntervalSince(attempt.at) < (kimiPlanName == nil ? 3600 : 6 * 3600) { return }
-        kimiProfileAttempt = (auth.accountKey, Date())
-        if let profile = await KimiQuotaClient.fetchUserInfo(auth: auth),
-           kimiAccount?.accountKey == auth.accountKey, kimiAccount?.accessToken == auth.accessToken,
-           auth.userID == nil || profile.userID == auth.userID {
+        kimiProfileAttempt = (auth.accountKey, auth.accessToken, Date())
+        let requestID = UUID()
+        kimiProfileRequestID = requestID
+        accountProfileLoading.insert(.kimi)
+        defer {
+            if kimiProfileRequestID == requestID {
+                kimiProfileRequestID = nil
+                accountProfileLoading.remove(.kimi)
+            }
+        }
+        let result = await fetch(auth)
+        guard kimiAccount?.accountKey == auth.accountKey, kimiAccount?.accessToken == auth.accessToken else { return }
+        if case .failure(let error) = result, error.isRateLimited {
+            markKimiFailure(error.userMessage, error: error)
+        }
+        if case .success(let profile) = result, auth.userID == nil || profile.userID == auth.userID {
             kimiEmail = profile.email
             kimiNickname = profile.nickname
             kimiPlanName = profile.userLevelName
@@ -2322,7 +2392,7 @@ final class AppState {
         }
     }
 
-    /// 额度取数成功后按需查一次 profile（套餐与邮箱）。失败只记日志，不影响额度状态，也不参与 429 退避。
+    /// 按需查 profile（套餐与邮箱）；429 与额度请求共用退避，其余失败不影响已有额度。
     private func refreshClaudeProfileIfNeeded(account: ClaudeAccount, accessToken: String) async {
         if let attempt = claudeProfileAttempt, attempt.token == accessToken {
             let interval = attempt.succeeded ? claudeProfileRefreshInterval : claudeProfileRetryInterval
@@ -2330,9 +2400,19 @@ final class AppState {
         }
         claudeProfileAttempt = (accessToken, Date(), false)
         let accountKey = claudeProfileAccountKey(account)
+        let requestID = UUID()
+        claudeProfileRequestID = requestID
+        accountProfileLoading.insert(.claude)
+        defer {
+            if claudeProfileRequestID == requestID {
+                claudeProfileRequestID = nil
+                accountProfileLoading.remove(.claude)
+            }
+        }
         let result = await ClaudeQuotaClient.fetchProfile(accessToken: accessToken)
         // 请求期间换了号或组织就丢弃结果。
-        guard let current = claudeAccount, claudeProfileAccountKey(current) == accountKey else { return }
+        guard let current = claudeAccount, claudeProfileAccountKey(current) == accountKey,
+              current.accessToken == accessToken else { return }
         switch result {
         case .success(let profile):
             claudeProfile = (accountKey, profile)
@@ -2345,6 +2425,7 @@ final class AppState {
                 AppLog.info(.credentials, "claude profile returned no recognizable plan")
             }
         case .failure(let err):
+            if err.isRateLimited { markClaudeFailure(err.userMessage, error: err) }
             AppLog.info(.credentials, "claude profile fetch failed: \(Redact.message(err.userMessage))")
         }
     }
@@ -2879,12 +2960,13 @@ final class AppState {
         let mergedSnapshot = snapshot.preservingFutureResetDates(from: claudeQuota, now: updatedAt)
         claudeQuota = mergedSnapshot
         claudeQuotaSource = source
-        claudeQuotaError = nil
         claudeRefreshState.lastSuccessAt = updatedAt
-        claudeRefreshState.lastError = nil
-        claudeRefreshState.lastErrorIsNetwork = false
-        if source == .api {
-            claudeRefreshState.backoffUntil = nil
+        // 并行 profile 已返回 429 时，较早发出的额度请求成功不能解除退避。
+        if claudeRefreshState.backoffUntil.map({ $0 > updatedAt }) != true {
+            claudeQuotaError = nil
+            claudeRefreshState.lastError = nil
+            claudeRefreshState.lastErrorIsNetwork = false
+            if source == .api { claudeRefreshState.backoffUntil = nil }
         }
         claudeRefreshState.source = source
         let accountKey = QuotaHistoryAccountKey.claudePrimary(
@@ -2975,11 +3057,14 @@ final class AppState {
         let mergedSnapshot = snapshot.preservingFutureResetDates(from: kimiQuota, now: updatedAt)
         kimiQuota = mergedSnapshot
         kimiQuotaSource = source
-        kimiQuotaError = nil
         kimiRefreshState.lastSuccessAt = updatedAt
-        kimiRefreshState.lastError = nil
-        kimiRefreshState.lastErrorIsNetwork = false
-        kimiRefreshState.backoffUntil = nil
+        // 保留并行账号资料请求刚触发的 429 退避。
+        if kimiRefreshState.backoffUntil.map({ $0 > updatedAt }) != true {
+            kimiQuotaError = nil
+            kimiRefreshState.lastError = nil
+            kimiRefreshState.lastErrorIsNetwork = false
+            kimiRefreshState.backoffUntil = nil
+        }
         kimiRefreshState.source = source
         quotaCache.kimi = QuotaCacheRecord(
             snapshot: mergedSnapshot,

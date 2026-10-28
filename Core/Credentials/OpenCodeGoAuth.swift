@@ -30,10 +30,14 @@ nonisolated struct OpenCodeGoAuthSession: Sendable, Equatable {
 }
 
 /// OpenCode Go 的 API key 与 OpenCode / Pi 里 `opencode-go` provider 用的是同一个，
-/// 只读这些文件，不写回。手动填写的 key 存在 cc-bar 自己的钥匙串项。
+/// 只读这些文件，不写回。手动填写的 key 存在 CCBar 的私有文件。
 nonisolated enum OpenCodeGoAuth {
     private static let keychainService = "com.fffplum.ccbar.opencode-go"
     private static let keychainAccount = "primary"
+    private static let legacy = CachedManagedKeychain(service: keychainService)
+    private static let credentials = PrivateCredentialFileStore(directory:
+        ImportedCodexStore.fileURL().deletingLastPathComponent()
+            .appendingPathComponent("opencode-go_credentials", isDirectory: true))
     private static let providerKey = "opencode-go"
 
     static func load(
@@ -42,7 +46,7 @@ nonisolated enum OpenCodeGoAuth {
         preference: OpenCodeGoCredentialPreference = .automatic
     ) -> OpenCodeGoAuthSession? {
         if preference == .manual {
-            if let manualKey = loadFromKeychain(), let key = sanitizeKey(manualKey) {
+            if let manualKey = loadStoredKey(), let key = sanitizeKey(manualKey) {
                 return OpenCodeGoAuthSession(apiKey: key, source: .manualKeychain)
             }
             return nil
@@ -63,8 +67,8 @@ nonisolated enum OpenCodeGoAuth {
             return OpenCodeGoAuthSession(apiKey: key, source: .environment)
         }
 
-        // 4. 自动降级读取 Keychain 手动配置
-        if let manualKey = loadFromKeychain(), let key = sanitizeKey(manualKey) {
+        // 4. 自动降级读取 CCBar 手动配置
+        if let manualKey = loadStoredKey(), let key = sanitizeKey(manualKey) {
             return OpenCodeGoAuthSession(apiKey: key, source: .manualKeychain)
         }
 
@@ -94,47 +98,23 @@ nonisolated enum OpenCodeGoAuth {
         return sanitizeKey(json[providerKey] as? String)
     }
 
-    // MARK: - Keychain 存取
+    // MARK: - CCBar 管理的凭据
 
-    static func loadFromKeychain() -> String? {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: keychainService,
-            kSecAttrAccount: keychainAccount,
-            kSecReturnData: true,
-            kSecMatchLimit: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else { return nil }
+    static func loadStoredKey() -> String? {
+        guard let data = credentials.load(accountID: keychainAccount,
+            legacy: { legacy.load(account: keychainAccount) },
+            validate: { String(data: $0, encoding: .utf8).flatMap { sanitizeKey($0) } != nil }) else { return nil }
         return String(data: data, encoding: .utf8)
     }
-
     @discardableResult
-    static func saveToKeychain(apiKey: String) -> Bool {
-        guard let key = sanitizeKey(apiKey),
-              let data = key.data(using: .utf8) else { return false }
-        deleteFromKeychain()
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: keychainService,
-            kSecAttrAccount: keychainAccount,
-            kSecValueData: data,
-            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
-        ]
-        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+    static func saveStoredKey(apiKey: String) -> Bool {
+        guard let key = sanitizeKey(apiKey) else { return false }
+        do { try credentials.save(Data(key.utf8), accountID: keychainAccount); return true }
+        catch { return false }
     }
-
     @discardableResult
-    static func deleteFromKeychain() -> Bool {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: keychainService,
-            kSecAttrAccount: keychainAccount,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
-    }
+    static func deleteStoredKey() -> Bool { credentials.delete(accountID: keychainAccount) }
+    static func retryLegacyAccess() { legacy.retryAccess(account: keychainAccount) }
 
     // MARK: - Key 清洗
 

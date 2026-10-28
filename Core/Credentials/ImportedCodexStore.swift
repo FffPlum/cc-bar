@@ -5,10 +5,7 @@ import Security
 //
 // 持久化"其他 Codex 账号"。
 // - 元数据 → Application Support/CCBar/imported_codex_accounts.json (原子写,版本号兜底)。
-// - Token 三件套 → macOS Keychain,service = ImportedCodexStore.keychainService,
-//   account = account_id;value 为 JSON {access,refresh,id}。
-// 用 SecItem 直接读写本进程自己的 Keychain 条目,不弹用户授权(与读 Claude/Codex CLI 凭据的
-// `/usr/bin/security` 通道完全分离)。
+// - Token 三件套 → CCBar 的用户私有文件；旧钥匙串项目首次读取后迁移。
 
 nonisolated struct ImportedCodexTokens: Sendable, Equatable, Codable {
     var accessToken: String
@@ -60,68 +57,35 @@ enum ImportedCodexStore {
             .appendingPathComponent(fileName, isDirectory: false)
     }
 
-    // MARK: - Token (Keychain)
+    // MARK: - CCBar-managed credentials
+
+    nonisolated private static let legacy = CachedManagedKeychain(service: keychainService)
+    nonisolated private static let credentials = PrivateCredentialFileStore(
+        directory: fileURL().deletingLastPathComponent().appendingPathComponent("imported_codex_credentials", isDirectory: true)
+    )
 
     nonisolated static func loadTokens(accountId: String) -> ImportedCodexTokens? {
-        var query = baseQuery(account: accountId)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data,
-              let tokens = try? JSONDecoder().decode(ImportedCodexTokens.self, from: data)
-        else { return nil }
-        return tokens
+        guard let data = credentials.load(accountID: accountId, legacy: { legacy.load(account: accountId) },
+            validate: { (try? JSONDecoder().decode(ImportedCodexTokens.self, from: $0)) != nil }) else { return nil }
+        return try? JSONDecoder().decode(ImportedCodexTokens.self, from: data)
     }
-
     nonisolated static func saveTokens(_ tokens: ImportedCodexTokens, accountId: String) throws {
-        let data = try JSONEncoder().encode(tokens)
-
-        // 先尝试 update,失败再 add — 经典的 upsert 模式。
-        var attributesToUpdate: [String: Any] = [kSecValueData as String: data]
-        attributesToUpdate[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-
-        let updateStatus = SecItemUpdate(
-            baseQuery(account: accountId) as CFDictionary,
-            attributesToUpdate as CFDictionary
-        )
-        if updateStatus == errSecSuccess { return }
-        if updateStatus != errSecItemNotFound {
-            throw KeychainError.unexpected(updateStatus)
-        }
-
-        var addQuery = baseQuery(account: accountId)
-        addQuery[kSecValueData as String] = data
-        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            throw KeychainError.unexpected(addStatus)
-        }
+        try credentials.save(JSONEncoder().encode(tokens), accountID: accountId)
     }
-
-    /// 镜像主账号时只在内容变化后写 Keychain，避免每轮额度刷新重复 SecItemUpdate。
     @discardableResult
-    nonisolated static func saveTokensIfChanged(
-        _ tokens: ImportedCodexTokens,
-        accountId: String
-    ) throws -> Bool {
+    nonisolated static func saveTokensIfChanged(_ tokens: ImportedCodexTokens, accountId: String) throws -> Bool {
         if loadTokens(accountId: accountId) == tokens { return false }
         try saveTokens(tokens, accountId: accountId)
         return true
     }
-
-    nonisolated static func deleteTokens(accountId: String) {
-        SecItemDelete(baseQuery(account: accountId) as CFDictionary)
+    nonisolated static func deleteTokens(accountId: String) { credentials.delete(accountID: accountId) }
+    nonisolated static func acquireRefreshLease(accountId: String) async throws -> KimiRefreshLease? {
+        try await credentials.acquireRefreshLease(accountID: accountId)
     }
-
-    private nonisolated static func baseQuery(account: String) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: account
-        ]
+    nonisolated static func isLegacyAccessBlocked(accountId: String) -> Bool {
+        !credentials.hasLocalState(accountID: accountId) && legacy.isAccessBlocked(account: accountId)
     }
+    nonisolated static func retryLegacyAccess(accountId: String) { legacy.retryAccess(account: accountId) }
 
     enum KeychainError: Error, CustomStringConvertible {
         case unexpected(OSStatus)

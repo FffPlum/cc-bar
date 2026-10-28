@@ -63,6 +63,8 @@ nonisolated enum ClaudeDesktopAuth {
     /// 派生出的 AES 密钥,进程内缓存。用户只点「允许」(不是「始终允许」)时,
     /// 每次调用 `security` 都会再弹一次,缓存把它限制在每次启动最多一次。
     private static let cachedKey = OSAllocatedUnfairLock<Data?>(initialState: nil)
+    private static let privateKeyStore = PrivateCredentialFileStore(directory:
+        ImportedCodexStore.fileURL().deletingLastPathComponent().appendingPathComponent("external_auth_keys", isDirectory: true))
     /// 串行化钥匙串读取:授权框等用户响应时,并发的刷新排队等结果,不叠出第二个框。
     private static let keychainReadLock = NSLock()
     /// 需要读钥匙串、但用户还没看过授权说明时登记,由 AppState 取走后弹说明框。
@@ -223,6 +225,11 @@ nonisolated enum ClaudeDesktopAuth {
         // 排队期间可能已有别的调用读到。
         if let key = cachedKey.withLock({ $0 }) { return key }
         guard !hasUserDeniedAccess else { return nil }
+        if !AppRuntime.isRunningUnitTests, let key = privateKeyStore.load(accountID: "claude-safe-storage", legacy: { nil },
+            validate: { $0.count == kCCKeySizeAES128 }) {
+            cachedKey.withLock { $0 = key }
+            return key
+        }
         guard hasExplainedAccess else {
             explanationRequest.withLock { $0 = true }
             AppLog.info(.credentials, "Claude Desktop keychain access not explained yet; waiting for the explanation dialog")
@@ -347,6 +354,13 @@ nonisolated enum ClaudeDesktopAuth {
         // Claude Desktop 重装后会换一把密钥,缓存的旧密钥解不开;丢掉它,下次重新读。
         if entries.isEmpty, undecryptable {
             cachedKey.withLock { $0 = nil }
+            if !AppRuntime.isRunningUnitTests { privateKeyStore.delete(accountID: "claude-safe-storage") }
+        } else if !entries.isEmpty, !AppRuntime.isRunningUnitTests {
+            do {
+                if privateKeyStore.load(accountID: "claude-safe-storage", legacy: { nil }, validate: { $0.count == kCCKeySizeAES128 }) != key {
+                    try privateKeyStore.save(key, accountID: "claude-safe-storage")
+                }
+            } catch { AppLog.warn(.credentials, "Claude local authorization could not be saved: \(Redact.error(error))") }
         }
         return entries.isEmpty ? nil : entries
     }

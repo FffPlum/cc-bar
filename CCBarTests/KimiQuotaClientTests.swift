@@ -750,6 +750,14 @@ final class KimiQuotaClientTests: XCTestCase {
         XCTAssertNil(info, "/me 失败不阻止额度展示")
     }
 
+    func testFetchUserInfoResultPreservesRateLimit() async {
+        let session = makeAuthSession()
+        MockKimiURLProtocol.handler = { _ in (self.httpResponse(status: 429), Data()) }
+        let result = await KimiQuotaClient.fetchUserInfoResult(auth: session, session: mockSession())
+        guard case .failure(let error) = result else { return XCTFail("expected rate limit") }
+        XCTAssertTrue(error.isRateLimited)
+    }
+
     func testModelDisplayNameOnlyRemovesExactLeadingKimiCodePrefix() {
         XCTAssertEqual(ModelDisplayName.text("kimi-code/k3.1-pro"), "k3.1-pro")
         XCTAssertEqual(ModelDisplayName.text("kimi-code/"), "")
