@@ -18,14 +18,14 @@ struct OtherCodexAccountsSection: View {
         if !accounts.isEmpty {
             VStack(spacing: 0) {
                 if showsVendorHeader {
-                    AccountVendorHeader(title: "Codex", logoName: "codex", fallback: "C", tint: .codexAccent)
+                    AccountVendorHeader(title: "Codex", logoName: "codex", fallback: "C", tint: QuotaApp.codex.tintColor)
                 }
                 ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
                     if index > 0 { Divider().padding(.leading, 28).padding(.trailing, 16) }
                     ServiceBlockView(
                         app: .codex,
                         subtitle: accountSubtitle(account),
-                        tint: .codexAccent,
+                        tint: QuotaApp.codex.tintColor,
                         snapshot: appState.importedCodexQuota(for: account),
                         error: appState.importedCodexError(for: account),
                         periodSpend: nil,

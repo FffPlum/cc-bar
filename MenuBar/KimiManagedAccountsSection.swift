@@ -14,7 +14,7 @@ struct KimiManagedAccountsSection: View {
                     subtitle: SettingsStore.shared.privacyMode
                         ? "\(appState.kimiManagedDisplayName(account)) · \(appState.kimiManagedSubtitle(account))"
                         : appState.kimiManagedSubtitle(account),
-                    tint: .purple,
+                    tint: QuotaApp.kimi.tintColor,
                     snapshot: appState.kimiManagedQuotas[account.id],
                     error: appState.kimiManagedErrors[account.id],
                     periodSpend: nil,
