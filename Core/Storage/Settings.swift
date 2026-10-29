@@ -265,6 +265,18 @@ final class SettingsStore {
         didSet { saveBrandColorPreferences() }
     }
 
+    /// 最近确认的颜色跨服务共用，按最近使用顺序保存。
+    private(set) var recentBrandColors: [String] {
+        didSet { defaults.set(recentBrandColors, forKey: Keys.recentBrandColors) }
+    }
+
+    func recordRecentBrandColor(_ hex: String) {
+        let value = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard (value.count == 7 || value.count == 9), value.first == "#",
+              value.dropFirst().allSatisfy({ "0123456789ABCDEF".contains($0) }) else { return }
+        recentBrandColors = Array(([value] + recentBrandColors.filter { $0 != value }).prefix(5))
+    }
+
     func colorMode(for brand: ServiceBrand) -> BrandColorMode {
         brandColorPreferences[brand, default: .brand].mode
     }
@@ -283,6 +295,10 @@ final class SettingsStore {
         var preference = brandColorPreferences[brand, default: .brand]
         preference.customHex = hex
         brandColorPreferences[brand] = preference
+    }
+
+    func applyCustomBrandColor(_ hex: String, for brand: ServiceBrand) {
+        brandColorPreferences[brand] = BrandColorPreference(mode: .custom, customHex: hex)
     }
 
     func resetBrandColors() {
@@ -428,6 +444,9 @@ final class SettingsStore {
         }
         useInstalledAppIcons = defaults.object(forKey: Keys.useInstalledAppIcons) as? Bool ?? false
         brandColorPreferences = Self.loadBrandColorPreferences(defaults: defaults)
+        recentBrandColors = Array((defaults.stringArray(forKey: Keys.recentBrandColors) ?? [])
+            .filter { ($0.count == 7 || $0.count == 9) && $0.first == "#" && $0.dropFirst().allSatisfy { "0123456789ABCDEF".contains($0) } }
+            .prefix(5))
         // 悬浮窗
         floatingEnabled = defaults.object(forKey: Keys.floatingEnabled) as? Bool ?? false
         // 刷新
@@ -844,6 +863,7 @@ final class SettingsStore {
         static let menuBarWindow = "ccbar.settings.menuBarWindow"
         static let useInstalledAppIcons = "ccbar.settings.useInstalledAppIcons"
         static let brandColorPreferences = "ccbar.settings.brandColorPreferences.v1"
+        static let recentBrandColors = "ccbar.settings.recentBrandColors.v1"
         static let floatingEnabled = "ccbar.settings.floatingEnabled"
         static let floatingShowCodex = "ccbar.settings.floatingShowCodex"
         static let floatingShowClaude = "ccbar.settings.floatingShowClaude"

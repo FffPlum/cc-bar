@@ -11,13 +11,27 @@ struct OnboardingView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var step: Int = 0
+    @State private var isMovingForward = true
+    @State private var outgoingStep: Int?
+    @State private var slideProgress: CGFloat = 0
     @State private var installedClients: Set<QuotaApp>?
 
     var body: some View {
         ZStack {
-            stepContent
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
+            ZStack {
+                ForEach(visibleSteps, id: \.self) { page in
+                    stepContent(for: page)
+                        .frame(width: 620, height: 520)
+                        .offset(x: pageOffset(for: page))
+                        .opacity(pageOpacity(for: page))
+                        .allowsHitTesting(outgoingStep == nil && page == step)
+                        .accessibilityHidden(page != step)
+                }
+            }
+            .frame(width: 620, height: 520)
+            .clipped()
 
             VStack {
                 Spacer()
@@ -26,17 +40,43 @@ struct OnboardingView: View {
         }
         .frame(width: 620, height: 520)
         .background(.regularMaterial)
-        .animation(.easeInOut(duration: 0.25), value: step)
         .task {
             installedClients = await Task.detached(priority: .utility) {
                 OnboardingClientDetection.installedClients()
             }.value
         }
+        .task(id: step) {
+            guard outgoingStep != nil else { return }
+            withAnimation(.easeInOut(duration: 0.25), completionCriteria: .logicallyComplete) {
+                slideProgress = 1
+            } completion: {
+                outgoingStep = nil
+                slideProgress = 0
+            }
+        }
+    }
+
+    private var visibleSteps: [Int] {
+        if let outgoingStep { return [outgoingStep, step] }
+        return [step]
+    }
+
+    private func pageOffset(for page: Int) -> CGFloat {
+        guard outgoingStep != nil, !reduceMotion else { return 0 }
+        let direction: CGFloat = isMovingForward ? 1 : -1
+        return page == step
+            ? direction * 620 * (1 - slideProgress)
+            : -direction * 620 * slideProgress
+    }
+
+    private func pageOpacity(for page: Int) -> Double {
+        guard outgoingStep != nil, reduceMotion else { return 1 }
+        return Double(page == step ? slideProgress : 1 - slideProgress)
     }
 
     @ViewBuilder
-    private var stepContent: some View {
-        switch step {
+    private func stepContent(for page: Int) -> some View {
+        switch page {
         case 0: WelcomeStep(onContinue: next)
         case 1: DetectAccountsStep(installedClients: installedClients, onBack: prev, onContinue: next)
         case 2: ConfigureStep(installedClients: installedClients, onBack: prev, onContinue: next)
@@ -55,8 +95,21 @@ struct OnboardingView: View {
         }
     }
 
-    private func next() { step = min(step + 1, 3) }
-    private func prev() { step = max(step - 1, 0) }
+    private func next() {
+        move(to: step + 1)
+    }
+
+    private func prev() {
+        move(to: step - 1)
+    }
+
+    private func move(to destination: Int) {
+        guard outgoingStep == nil, (0...3).contains(destination), destination != step else { return }
+        isMovingForward = destination > step
+        slideProgress = 0
+        outgoingStep = step
+        step = destination
+    }
 
     private func finish() {
         SettingsStore.shared.didCompleteOnboarding = true

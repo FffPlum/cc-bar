@@ -1729,9 +1729,12 @@ private struct OverviewCompositionPanel: View {
     let onSelectService: (UsageApp) -> Void
     let navigate: (StatsNavigationRequest.Target) -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dimension: CompositionDimension = .service
     @State private var expandedProvider: ModelProvider?
     @State private var expandedModel: String?
+    @State private var hoveredServiceID: String?
 
     var body: some View {
         let rows = model.composition[dimension] ?? []
@@ -1753,7 +1756,7 @@ private struct OverviewCompositionPanel: View {
                 VStack(alignment: .leading, spacing: 10) {
                     CompositionShareBar(segments: rows.map {
                         CompositionShareBar.Segment(id: $0.id, role: $0.color, share: model.share(of: $0.totals))
-                    }, height: 8)
+                    }, height: 8, highlightedID: dimension == .service ? hoveredServiceID : nil)
 
                     VStack(spacing: 0) {
                         columnHeader
@@ -1791,10 +1794,12 @@ private struct OverviewCompositionPanel: View {
         .onChange(of: scope) { _, _ in
             expandedProvider = nil
             expandedModel = nil
+            hoveredServiceID = nil
         }
         .onChange(of: dimension) { _, _ in
             expandedProvider = nil
             expandedModel = nil
+            hoveredServiceID = nil
         }
     }
 
@@ -1811,6 +1816,8 @@ private struct OverviewCompositionPanel: View {
                 rowView(row)
             }
         }
+        // 给首尾行和左右边缘的柔光留出空间，避免被滚动区域裁成硬边。
+        .padding(dimension == .service ? CCSpacing.xs : 0)
     }
 
     /// 列名行，列宽与 `rowContent` 一致。
@@ -1828,6 +1835,7 @@ private struct OverviewCompositionPanel: View {
         }
         .font(.system(size: 10.5))
         .foregroundStyle(.tertiary)
+        .padding(.horizontal, dimension == .service ? CCSpacing.m2 + CCSpacing.xs : 0)
         .padding(.bottom, 4)
     }
 
@@ -1872,14 +1880,17 @@ private struct OverviewCompositionPanel: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .zIndex(hoveredServiceID == row.id ? 1 : 0)
     }
 
     private func rowContent(_ row: CompositionRow, isExpanded: Bool) -> some View {
         // 未归属与不参与排名的灰色行（「其他」提供商、特殊项目）用次级样式。
         let isSecondary = row.kind != .item || row.color == .rest
+        let isHovered = dimension == .service && hoveredServiceID == row.id
         return HStack(spacing: 8) {
             if case .service(let app) = row.color {
                 ServiceTile(app: app, size: 18)
+                    .scaleEffect(isHovered && !reduceMotion ? 1.08 : 1)
             } else {
                 CompositionSwatch(role: row.color, size: 8)
             }
@@ -1944,7 +1955,36 @@ private struct OverviewCompositionPanel: View {
             .frame(width: 10, height: 10)
         }
         .padding(.vertical, 6)
+        .padding(.horizontal, dimension == .service ? CCSpacing.m2 : 0)
+        .background {
+            if dimension == .service {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(LinearGradient(
+                        colors: [.white.opacity(colorScheme == .dark ? 0.07 : 0.6),
+                                 .white.opacity(colorScheme == .dark ? 0.025 : 0.15)],
+                        startPoint: .top, endPoint: .bottom
+                    ))
+                    .shadow(color: .white.opacity(colorScheme == .dark ? 0.1 : 0.45), radius: 4)
+                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.08 : 0.035), radius: 3, y: 1)
+                    .opacity(isHovered ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
+        }
         .contentShape(Rectangle())
+        .onHover { hovering in
+            guard dimension == .service, case .service = row.color else { return }
+            // 只给指针反馈加动画；切换维度/范围等操作仍即时重置。
+            withAnimation(.timingCurve(0.23, 1, 0.32, 1, duration: 0.16)) {
+                if hovering {
+                    hoveredServiceID = row.id
+                } else if hoveredServiceID == row.id {
+                    hoveredServiceID = nil
+                }
+            }
+        }
+        .onDisappear {
+            if hoveredServiceID == row.id { hoveredServiceID = nil }
+        }
     }
 
     private func providerModelRow(_ row: ProviderModelRow) -> some View {
@@ -2262,10 +2302,13 @@ struct CompositionShareBar: View {
 
     let segments: [Segment]
     var height: CGFloat = 6
+    var highlightedID: String? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { proxy in
             let visible = segments.filter { $0.share > 0 }
+            let hasHighlight = visible.contains { $0.id == highlightedID }
             let total = visible.reduce(0) { $0 + $1.share }
             let spacing: CGFloat = 2
             let available = max(0, proxy.size.width - spacing * CGFloat(max(0, visible.count - 1)))
@@ -2274,6 +2317,12 @@ struct CompositionShareBar: View {
                     CompositionFill(role: segment.role)
                         .frame(width: total > 0 ? max(1, available * segment.share / total) : 0)
                         .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+                        .opacity(hasHighlight && segment.id != highlightedID ? 0.45 : 1)
+                        .scaleEffect(x: hasHighlight && segment.id == highlightedID && !reduceMotion ? 1.015 : 1,
+                                     y: hasHighlight && segment.id == highlightedID && !reduceMotion ? 1.3 : 1)
+                        .shadow(color: .white.opacity(hasHighlight && segment.id == highlightedID ? 0.35 : 0), radius: 3)
+                        .shadow(color: .black.opacity(hasHighlight && segment.id == highlightedID ? 0.06 : 0), radius: 2, y: 1)
+                        .zIndex(hasHighlight && segment.id == highlightedID ? 1 : 0)
                 }
             }
         }

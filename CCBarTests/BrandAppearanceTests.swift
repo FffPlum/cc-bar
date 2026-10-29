@@ -107,6 +107,53 @@ final class BrandAppearanceTests: XCTestCase {
         }
     }
 
+    func testRecentBrandColorsPersistDeduplicatedAndLimitedToFive() throws {
+        try withIsolatedDefaults { defaults in
+            let settings = SettingsStore(defaults: defaults)
+            for color in ["#111111", "#222222", "#333333", "#444444", "#555555", "#666666", "#222222"] {
+                settings.recordRecentBrandColor(color)
+            }
+            settings.recordRecentBrandColor("#INVALID")
+            let expected = ["#222222", "#666666", "#555555", "#444444", "#333333"]
+            XCTAssertEqual(settings.recentBrandColors, expected)
+            XCTAssertEqual(SettingsStore(defaults: defaults).recentBrandColors, expected)
+        }
+    }
+
+    func testTransparentCustomColorAndHistoryPersist() throws {
+        try withIsolatedDefaults { defaults in
+            let settings = SettingsStore(defaults: defaults)
+            settings.applyCustomBrandColor("#12345680", for: .kimi)
+            settings.recordRecentBrandColor("#12345680")
+
+            let restored = SettingsStore(defaults: defaults)
+            XCTAssertEqual(restored.colorMode(for: .kimi), .custom)
+            XCTAssertEqual(restored.customColorHex(for: .kimi), "#12345680")
+            XCTAssertEqual(restored.recentBrandColors, ["#12345680"])
+            let color = BrandColorResolver.color(for: .kimi, settings: restored)
+            XCTAssertEqual(BrandColorResolver.hexString(for: color), "#12345680")
+        }
+    }
+
+    func testColorInputFormatsValidateRangesAndTransparency() throws {
+        guard case .hex(let hex) = try XCTUnwrap(BrandColorResolver.parseInput(" #12ab3480 ", format: .hex)) else {
+            return XCTFail("Expected hexadecimal color")
+        }
+        XCTAssertEqual(hex, "12AB3480")
+        guard case .rgb(let red, let green, let blue) = try XCTUnwrap(BrandColorResolver.parseInput("255, 128, 0", format: .rgb)) else {
+            return XCTFail("Expected RGB color")
+        }
+        XCTAssertEqual([red, green, blue], [255, 128, 0])
+        guard case .hsb(let hue, let saturation, let brightness) = try XCTUnwrap(BrandColorResolver.parseInput("360, 50, 75", format: .hsb)) else {
+            return XCTFail("Expected HSB color")
+        }
+        XCTAssertEqual([hue, saturation, brightness], [360, 50, 75])
+        XCTAssertNil(BrandColorResolver.parseInput("#1234567", format: .hex))
+        XCTAssertNil(BrandColorResolver.parseInput("256, 0, 0", format: .rgb))
+        XCTAssertNil(BrandColorResolver.parseInput("0, 101, 0", format: .hsb))
+        XCTAssertNil(BrandColorResolver.parseInput("NaN, 0, 0", format: .rgb))
+    }
+
     func testBrandColorModeAndCustomHexPersist() throws {
         try withIsolatedDefaults { defaults in
             let settings = SettingsStore(defaults: defaults)

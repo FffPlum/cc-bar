@@ -74,7 +74,8 @@ struct PopoverRootView: View {
                 Circle()
                     .fill(state.color)
                     .frame(width: 7, height: 7)
-                    .help(headerStateTooltip(state))
+                    .accessibilityLabel(headerStateTooltip(state))
+                    .nativeHover(headerStateTooltip(state), delayNanoseconds: 100_000_000)
                     .padding(.trailing, 4)
             }
 
@@ -88,7 +89,8 @@ struct PopoverRootView: View {
             .buttonStyle(PopoverIconButtonStyle())
             // 不加 disabled:按钮永远可点;AppState.refreshNow() 内部已经做了
             // in-flight 去重,不会重复发请求。刷新真正开始时由 isRefreshing 驱动转圈。
-            .help(tr("Refresh now", "立即刷新"))
+            .accessibilityLabel(tr("Refresh now", "立即刷新"))
+            .nativeHover(tr("Refresh now", "立即刷新"), delayNanoseconds: 100_000_000)
 
             Button { activateAndOpenMain(tab: .stats) } label: {
                 Image(systemName: "chart.bar.xaxis")
@@ -96,7 +98,8 @@ struct PopoverRootView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(PopoverIconButtonStyle())
-            .help(tr("Open Statistics", "查看统计"))
+            .accessibilityLabel(tr("Open Statistics", "查看统计"))
+            .nativeHover(tr("Open Statistics", "查看统计"), delayNanoseconds: 100_000_000)
 
             Button { activateAndOpenMain(tab: .settings) } label: {
                 Image(systemName: "gearshape")
@@ -104,7 +107,8 @@ struct PopoverRootView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(PopoverIconButtonStyle())
-            .help(tr("Settings", "设置"))
+            .accessibilityLabel(tr("Settings", "设置"))
+            .nativeHover(tr("Settings", "设置"), delayNanoseconds: 100_000_000)
 
             Button { NSApp.terminate(nil) } label: {
                 Image(systemName: "power")
@@ -112,7 +116,8 @@ struct PopoverRootView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(PopoverIconButtonStyle())
-            .help(tr("Quit", "退出"))
+            .accessibilityLabel(tr("Quit", "退出"))
+            .nativeHover(tr("Quit", "退出"), delayNanoseconds: 100_000_000)
         }
         .padding(.top, 14)
         .padding(.horizontal, 12)
@@ -589,8 +594,7 @@ struct ServiceBlockView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .help(subtitle)
-            if isKimiCurrentAccount { KimiCurrentAccountBadge() }
+            if isKimiCurrentAccount { KimiCurrentAccountBadge(usesQuickHover: true) }
             if let accountEdition {
                 Text(accountEdition)
                     .font(.system(size: 10))
@@ -869,14 +873,14 @@ private final class QuickHoverPresentation: ObservableObject {
     private var pinned = false
     private var pending: Task<Void, Never>?
 
-    func hover(_ inside: Bool, content: Bool = false) {
+    func hover(_ inside: Bool, content: Bool = false, delayNanoseconds: UInt64 = 150_000_000) {
         if content { contentHovered = inside } else { anchorHovered = inside }
         pending?.cancel()
         pending = nil
         if anchorHovered || contentHovered {
             guard !isPresented else { return }
             pending = Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: 150_000_000)
+                try? await Task.sleep(nanoseconds: delayNanoseconds)
                 guard !Task.isCancelled, let self, self.anchorHovered || self.contentHovered else { return }
                 self.isPresented = true
             }
@@ -917,7 +921,7 @@ struct ServiceStatusDot: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text("\(title): \(status.isStale ? tr("Status unknown", "状态未知") : status.indicator.componentLabel)"))
-        .onHover { presentation.hover($0) }
+        .onHover { presentation.hover($0, delayNanoseconds: 100_000_000) }
         .onDisappear { presentation.reset() }
         .popover(isPresented: $presentation.isPresented, arrowEdge: .bottom) {
             ServiceStatusDetailView(status: status, title: title)
@@ -975,11 +979,15 @@ private struct ServiceStatusDetailView: View {
 
 private struct NativeHoverPopover: ViewModifier {
     let text: String
+    let delayNanoseconds: UInt64
     @StateObject private var presentation = QuickHoverPresentation()
 
     func body(content: Content) -> some View {
         content
-            .onHover { if !text.isEmpty { presentation.hover($0) } }
+            .onHover { if !text.isEmpty { presentation.hover($0, delayNanoseconds: delayNanoseconds) } }
+            .onChange(of: text) { _, newValue in
+                if newValue.isEmpty { presentation.reset() }
+            }
             .onDisappear { presentation.reset() }
             .popover(isPresented: $presentation.isPresented, arrowEdge: .bottom) {
                 Text(text).font(.system(size: 11.5)).padding(12)
@@ -991,7 +999,7 @@ private struct NativeHoverPopover: ViewModifier {
 }
 
 extension View {
-    func nativeHover(_ text: String) -> some View {
-        modifier(NativeHoverPopover(text: text))
+    func nativeHover(_ text: String, delayNanoseconds: UInt64 = 150_000_000) -> some View {
+        modifier(NativeHoverPopover(text: text, delayNanoseconds: delayNanoseconds))
     }
 }

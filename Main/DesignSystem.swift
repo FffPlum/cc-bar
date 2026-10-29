@@ -3,15 +3,22 @@ import AppKit
 
 /// Marks the identity used by the local Kimi Code CLI, independently of quota.
 struct KimiCurrentAccountBadge: View {
-    var body: some View {
-        Text(tr("In use by Kimi", "Kimi 在用"))
+    var usesQuickHover = false
+
+    @ViewBuilder var body: some View {
+        let badge = Text(tr("In use by Kimi", "Kimi 在用"))
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
             .overlay { Capsule().strokeBorder(Color.secondary.opacity(0.35), lineWidth: 0.5) }
             .fixedSize()
-            .help(tr("The account currently signed in to Kimi Code on this Mac", "Kimi Code 自己的登录"))
+        let help = tr("The account currently signed in to Kimi Code on this Mac", "Kimi Code 自己的登录")
+        if usesQuickHover {
+            badge.nativeHover(help, delayNanoseconds: 100_000_000)
+        } else {
+            badge.help(help)
+        }
     }
 }
 

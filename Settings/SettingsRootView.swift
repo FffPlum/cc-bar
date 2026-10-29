@@ -2352,7 +2352,8 @@ private struct BrandColorControl: View {
     let settings: SettingsStore
     @Environment(\.colorScheme) private var colorScheme
     @State private var showsEditor = false
-    @State private var hexDraft = ""
+    @State private var requestedMode: BrandColorMode = .brand
+    @State private var editorID = UUID()
 
     private var themeHex: String {
         colorScheme == .dark ? brand.defaultDarkHex : brand.defaultLightHex
@@ -2365,33 +2366,21 @@ private struct BrandColorControl: View {
             ?? BrandColorResolver.color(fromHex: themeHex) ?? .primary
     }
 
-    private var customMode: Binding<BrandColorMode> {
+    private var modeSelection: Binding<BrandColorMode> {
         Binding(get: { settings.colorMode(for: brand) }, set: { mode in
-            if mode == .custom, settings.customColorHex(for: brand) == nil {
-                settings.setCustomColorHex(themeHex, for: brand)
-            }
-            settings.setColorMode(mode, for: brand)
+            openEditor(mode: mode)
         })
     }
 
-    private var colorSelection: Binding<Color> {
-        Binding(get: { currentColor }, set: { color in
-            guard let hex = BrandColorResolver.hexString(for: color) else { return }
-            settings.setCustomColorHex(hex, for: brand)
-            settings.setColorMode(.custom, for: brand)
-            hexDraft = hex
-        })
-    }
-
-    private var validDraft: Bool {
-        let hex = hexDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
-        return digits.count == 6 && digits.allSatisfy(\.isHexDigit)
+    private func openEditor(mode: BrandColorMode) {
+        requestedMode = mode
+        editorID = UUID()
+        showsEditor = true
     }
 
     var body: some View {
         HStack(spacing: 10) {
-            Picker(tr("Color mode", "颜色模式"), selection: customMode) {
+            Picker(tr("Color mode", "颜色模式"), selection: modeSelection) {
                 Text(tr("Theme", "主题色")).tag(BrandColorMode.brand)
                 Text(tr("Custom", "自定义")).tag(BrandColorMode.custom)
             }
@@ -2399,13 +2388,10 @@ private struct BrandColorControl: View {
             .pickerStyle(.menu)
             .fixedSize()
 
-            Button {
-                customMode.wrappedValue = .custom
-                hexDraft = BrandColorResolver.hexString(for: currentColor) ?? themeHex
-                showsEditor = true
-            } label: {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(currentColor)
+            Button { openEditor(mode: settings.colorMode(for: brand)) } label: {
+                TransparencyCheckerboard()
+                    .overlay { currentColor }
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                     .frame(width: 32, height: 20)
                     .overlay {
                         RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -2417,38 +2403,403 @@ private struct BrandColorControl: View {
             .buttonStyle(.plain)
             .pointingHandCursor()
             .accessibilityLabel(tr("Edit service color", "编辑服务颜色"))
-            .help(tr("Choose a custom color", "选择自定义颜色"))
+            .help(tr("Choose a color", "选择颜色"))
             .popover(isPresented: $showsEditor) {
-                VStack(alignment: .leading, spacing: 12) {
-                    ColorPicker(tr("Custom color", "自定义颜色"), selection: colorSelection, supportsOpacity: false)
-                    HStack {
-                        TextField("#RRGGBB", text: $hexDraft)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                            .accessibilityLabel(tr("Hex color", "十六进制颜色"))
-                            .onSubmit { applyDraft() }
-                        Button(tr("Apply", "应用")) { applyDraft() }
-                            .disabled(!validDraft)
-                    }
-                    if !validDraft {
-                        Text(tr("Enter six hexadecimal digits, such as #1783FF.", "请输入六位十六进制颜色，如 #1783FF。"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Button(tr("Use theme color", "使用主题色")) {
-                        settings.setColorMode(.brand, for: brand)
-                        showsEditor = false
-                    }
+                BrandColorEditor(
+                    brand: brand, settings: settings, initialColor: currentColor,
+                    requestedMode: requestedMode, isPresented: $showsEditor
+                )
+                .id(editorID)
+            }
+        }
+    }
+}
+
+/// 所有选择先留在浮层内，只有确认后才更新设置和最近颜色。
+private struct BrandColorEditor: View {
+    let brand: ServiceBrand
+    let settings: SettingsStore
+    let initialColor: Color
+    let requestedMode: BrandColorMode
+    @Binding var isPresented: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var mode: BrandColorMode = .brand
+    @State private var hue: Double = 0
+    @State private var saturation: Double = 0
+    @State private var brightness: Double = 0
+    @State private var alpha: Double = 1
+    @State private var draftHex = "#000000"
+    @State private var baselineHex = "#000000"
+    @State private var baselineMode: BrandColorMode = .brand
+    @State private var input = ""
+    @State private var componentInputs = ["0", "0", "0"]
+    @State private var alphaInput = "100"
+    @State private var format: BrandColorInputFormat = .hex
+    @State private var inputValid = true
+    @State private var alphaInputValid = true
+
+    private var selectedColor: Color {
+        BrandColorResolver.color(fromHex: draftHex) ?? .black
+    }
+
+    private var themeHex: String {
+        colorScheme == .dark ? brand.defaultDarkHex : brand.defaultLightHex
+    }
+
+    private var themeColors: [String] {
+        var seen = Set<String>()
+        return ServiceBrand.allCases.compactMap { item in
+            let value = colorScheme == .dark ? item.defaultDarkHex : item.defaultLightHex
+            return seen.insert(value).inserted ? value : nil
+        }
+    }
+
+    private var hasChanges: Bool {
+        mode != baselineMode || (mode == .custom && draftHex != baselineHex)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            colorField
+            hueBar
+            opacityBar
+            paletteRow(tr("Theme colors", "主题色"), colors: themeColors)
+            paletteRow(tr("Recent colors", "最近使用"), colors: settings.recentBrandColors)
+            HStack(alignment: .top, spacing: 8) {
+                TransparencyCheckerboard()
+                    .overlay { selectedColor }
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .frame(width: 26, height: 26)
+                    .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(Color.primary.opacity(0.15), lineWidth: 0.5) }
+                Picker(tr("Format", "格式"), selection: $format) {
+                    ForEach(BrandColorInputFormat.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
-                .padding(16)
-                .frame(width: 260)
+                .labelsHidden().pickerStyle(.menu).fixedSize()
+                colorInputs
+            }
+            if !inputValid {
+                Text(inputHelp).font(.caption).foregroundStyle(.secondary)
+            }
+            if !alphaInputValid {
+                Text(tr("Enter an opacity from 0 to 100%.", "请输入 0–100% 的透明度。"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button(tr("Use theme color", "使用主题色")) {
+                    mode = .brand
+                    sync(from: BrandColorResolver.color(fromHex: themeHex) ?? .black)
+                }
+                .buttonStyle(.borderless)
+                Spacer()
+                if hasChanges {
+                    Button(tr("Apply", "应用")) { apply() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!inputValid || !alphaInputValid)
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 332)
+        .onAppear {
+            baselineMode = settings.colorMode(for: brand)
+            baselineHex = BrandColorResolver.hexString(for: initialColor) ?? themeHex
+            mode = requestedMode
+            let initialHex = requestedMode == .brand ? themeHex :
+                (baselineMode == .custom ? baselineHex : settings.customColorHex(for: brand) ?? baselineHex)
+            sync(from: BrandColorResolver.color(fromHex: initialHex) ?? initialColor)
+        }
+        .onChange(of: format) { _, _ in refreshInput() }
+    }
+
+    @ViewBuilder
+    private var colorInputs: some View {
+        switch format {
+        case .hex:
+            VStack(spacing: 4) {
+                TextField("#RRGGBB", text: Binding(
+                    get: { input },
+                    set: { input = $0; parseInput($0) }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+                .accessibilityLabel(tr("Hex color", "十六进制颜色"))
+                Text("RRGGBB / RRGGBBAA")
+                    .font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+        case .hsb:
+            HStack(spacing: 6) {
+                componentInput(0, label: "H °", name: tr("Hue, 0 to 360 degrees", "色相，0–360 度"))
+                componentInput(1, label: "S %", name: tr("Saturation, 0 to 100%", "饱和度，0–100%"))
+                componentInput(2, label: "B %", name: tr("Brightness, 0 to 100%", "亮度，0–100%"))
+            }
+        case .rgb:
+            HStack(spacing: 6) {
+                componentInput(0, label: "R", name: tr("Red, 0 to 255", "红色，0–255"))
+                componentInput(1, label: "G", name: tr("Green, 0 to 255", "绿色，0–255"))
+                componentInput(2, label: "B", name: tr("Blue, 0 to 255", "蓝色，0–255"))
             }
         }
     }
 
-    private func applyDraft() {
-        guard validDraft, let color = BrandColorResolver.color(fromHex: hexDraft) else { return }
-        colorSelection.wrappedValue = color
+    private func componentInput(_ index: Int, label: String, name: String) -> some View {
+        VStack(spacing: 4) {
+            TextField(label, text: Binding(
+                get: { componentInputs[index] },
+                set: { value in
+                    componentInputs[index] = value
+                    parseInput(componentInputs.joined(separator: ","))
+                }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 12, design: .monospaced))
+            .monospacedDigit()
+            .multilineTextAlignment(.center)
+            .accessibilityLabel(name)
+            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var inputHelp: String {
+        switch format {
+        case .hex: tr("Enter 6 or 8 hexadecimal digits.", "请输入 6 位或 8 位十六进制颜色。")
+        case .hsb: tr("H: 0–360°. S and B: 0–100%.", "H：0–360°；S、B：0–100%。")
+        case .rgb: tr("R, G and B must each be from 0 to 255.", "R、G、B 均需为 0–255。")
+        }
+    }
+
+    private var colorField: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                Rectangle().fill(Color(hue: hue, saturation: 1, brightness: 1))
+                Rectangle().fill(LinearGradient(colors: [.white, .clear], startPoint: .leading, endPoint: .trailing))
+                Rectangle().fill(LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom))
+                Circle().strokeBorder(.white, lineWidth: 2)
+                    .background(Circle().fill(Color(hue: hue, saturation: saturation, brightness: brightness)))
+                    .frame(width: 14, height: 14)
+                    .shadow(color: .black.opacity(0.45), radius: 2)
+                    .position(x: max(7, min(geo.size.width - 7, saturation * geo.size.width)),
+                              y: max(7, min(geo.size.height - 7, (1 - brightness) * geo.size.height)))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                saturation = min(1, max(0, value.location.x / max(geo.size.width, 1)))
+                brightness = 1 - min(1, max(0, value.location.y / max(geo.size.height, 1)))
+                updateDraft()
+            })
+            .accessibilityRepresentation {
+                VStack {
+                    Slider(value: componentBinding(.saturation), in: 0...1) { Text(tr("Saturation", "饱和度")) }
+                    Slider(value: componentBinding(.brightness), in: 0...1) { Text(tr("Brightness", "亮度")) }
+                }
+            }
+        }
+        .frame(height: 160)
+    }
+
+    private var hueBar: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(LinearGradient(
+                    colors: (0...12).map { Color(hue: Double($0) / 12, saturation: 1, brightness: 1) },
+                    startPoint: .leading, endPoint: .trailing))
+                Circle().fill(Color(hue: hue, saturation: 1, brightness: 1))
+                    .overlay(Circle().strokeBorder(.white, lineWidth: 2))
+                    .shadow(color: .black.opacity(0.3), radius: 1)
+                    .frame(width: 16, height: 16)
+                    .position(x: max(8, min(geo.size.width - 8, hue * geo.size.width)), y: geo.size.height / 2)
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                hue = min(1, max(0, value.location.x / max(geo.size.width, 1)))
+                updateDraft()
+            })
+            .accessibilityRepresentation {
+                Slider(value: componentBinding(.hue), in: 0...1) { Text(tr("Hue", "色相")) }
+            }
+        }
+        .frame(height: 16)
+    }
+
+    private var opacityBar: some View {
+        HStack(spacing: 8) {
+            Text(tr("Opacity", "透明度"))
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            Slider(value: componentBinding(.alpha), in: 0...1)
+                .accessibilityLabel(tr("Opacity", "透明度"))
+            TextField("100", text: Binding(
+                get: { alphaInput },
+                set: { alphaInput = $0; parseAlphaInput($0) }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11, design: .monospaced))
+            .monospacedDigit()
+            .multilineTextAlignment(.trailing)
+            .frame(width: 48)
+            .accessibilityLabel(tr("Opacity percentage", "透明度百分比"))
+            Text("%").font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+    }
+
+    private func paletteRow(_ title: String, colors: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
+            if colors.isEmpty {
+                Text(tr("No recent colors", "暂无最近颜色"))
+                    .font(.system(size: 11)).foregroundStyle(.tertiary)
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(22), spacing: 7), count: 9), alignment: .leading, spacing: 7) {
+                    ForEach(colors, id: \.self) { hex in
+                        Button {
+                            guard let color = BrandColorResolver.color(fromHex: hex) else { return }
+                            mode = .custom
+                            sync(from: color)
+                        } label: {
+                            TransparencyCheckerboard()
+                                .overlay { BrandColorResolver.color(fromHex: hex) ?? .clear }
+                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                .frame(width: 22, height: 22)
+                                .overlay { RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.18), lineWidth: 0.5) }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(title): \(hex)")
+                        .help(hex)
+                    }
+                }
+            }
+        }
+    }
+
+    private enum Component { case hue, saturation, brightness, alpha }
+
+    private func componentBinding(_ component: Component) -> Binding<Double> {
+        Binding(get: {
+            switch component {
+            case .hue: hue
+            case .saturation: saturation
+            case .brightness: brightness
+            case .alpha: alpha
+            }
+        }, set: { value in
+            switch component {
+            case .hue: hue = value
+            case .saturation: saturation = value
+            case .brightness: brightness = value
+            case .alpha: alpha = value
+            }
+            updateDraft()
+        })
+    }
+
+    private func sync(from color: Color, updateInput: Bool = true) {
+        guard let rgb = NSColor(color).usingColorSpace(.sRGB),
+              let hex = BrandColorResolver.hexString(for: color) else { return }
+        hue = Double(rgb.hueComponent)
+        saturation = Double(rgb.saturationComponent)
+        brightness = Double(rgb.brightnessComponent)
+        alpha = Double(rgb.alphaComponent)
+        draftHex = hex
+        if updateInput {
+            refreshInput()
+            refreshAlphaInput()
+        }
+    }
+
+    private func updateDraft(refreshInputs: Bool = true) {
+        let color = Color(hue: hue, saturation: saturation, brightness: brightness, opacity: alpha)
+        guard let hex = BrandColorResolver.hexString(for: color) else { return }
+        mode = .custom
+        draftHex = hex
+        if refreshInputs {
+            refreshInput()
+            refreshAlphaInput()
+        }
+    }
+
+    private func refreshInput() {
+        switch format {
+        case .hex: input = draftHex
+        case .hsb:
+            componentInputs = [hue * 360, saturation * 100, brightness * 100]
+                .map { String(Int($0.rounded())) }
+        case .rgb:
+            guard let color = NSColor(selectedColor).usingColorSpace(.sRGB) else { return }
+            componentInputs = [color.redComponent, color.greenComponent, color.blueComponent]
+                .map { String(Int(($0 * 255).rounded())) }
+        }
+        inputValid = true
+    }
+
+    private func refreshAlphaInput() {
+        alphaInput = String(Int((alpha * 100).rounded()))
+        alphaInputValid = true
+    }
+
+    private func parseAlphaInput(_ value: String) {
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let number = text.hasSuffix("%") ? String(text.dropLast()) : text
+        guard let percent = Double(number.trimmingCharacters(in: .whitespaces)),
+              percent.isFinite, (0...100).contains(percent) else {
+            alphaInputValid = false
+            return
+        }
+        alpha = percent / 100
+        alphaInputValid = true
+        updateDraft(refreshInputs: false)
+        // 保留正在编辑的分量和非法文本；仅同步有效 HEX 中的 alpha 字节。
+        if format == .hex, inputValid { refreshInput() }
+    }
+
+    private func parseInput(_ value: String) {
+        guard let parsed = BrandColorResolver.parseInput(value, format: format) else {
+            inputValid = false
+            return
+        }
+        switch parsed {
+        case .hex(let digits):
+            guard let color = BrandColorResolver.color(fromHex: digits) else { inputValid = false; return }
+            let resolved = digits.count == 6 ? color.opacity(alpha) : color
+            sync(from: resolved, updateInput: false)
+            if digits.count == 8 { refreshAlphaInput() }
+        case .rgb(let red, let green, let blue):
+            sync(from: Color(red: red / 255, green: green / 255, blue: blue / 255, opacity: alpha), updateInput: false)
+        case .hsb(let h, let s, let b):
+            hue = h / 360
+            saturation = s / 100
+            brightness = b / 100
+            draftHex = BrandColorResolver.hexString(for: Color(hue: hue, saturation: saturation, brightness: brightness, opacity: alpha)) ?? draftHex
+        }
+        mode = .custom
+        inputValid = true
+    }
+
+    private func apply() {
+        guard inputValid, alphaInputValid, hasChanges else { return }
+        if mode == .brand {
+            settings.setColorMode(.brand, for: brand)
+        } else {
+            settings.applyCustomBrandColor(draftHex, for: brand)
+            settings.recordRecentBrandColor(draftHex)
+        }
+        isPresented = false
+    }
+}
+
+/// 透明颜色的可见底板，大小由调用方决定。
+private struct TransparencyCheckerboard: View {
+    var body: some View {
+        Canvas { context, size in
+            let cell: CGFloat = 5
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
+            for row in 0..<Int(ceil(size.height / cell)) {
+                for column in 0..<Int(ceil(size.width / cell)) where (row + column).isMultiple(of: 2) {
+                    context.fill(Path(CGRect(x: CGFloat(column) * cell, y: CGFloat(row) * cell, width: cell, height: cell)),
+                                 with: .color(Color.gray.opacity(0.3)))
+                }
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 

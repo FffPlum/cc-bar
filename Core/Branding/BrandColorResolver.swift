@@ -1,7 +1,39 @@
 import AppKit
 import SwiftUI
 
+enum BrandColorInputFormat: String, CaseIterable {
+    case hex = "HEX", hsb = "HSB", rgb = "RGB"
+}
+
+enum BrandColorInputValue {
+    case hex(String)
+    case hsb(Double, Double, Double)
+    case rgb(Double, Double, Double)
+}
+
 enum BrandColorResolver {
+    static func parseInput(_ input: String, format: BrandColorInputFormat) -> BrandColorInputValue? {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if format == .hex {
+            let digits = text.hasPrefix("#") ? String(text.dropFirst()) : text
+            let value = digits.uppercased()
+            guard (value.count == 6 || value.count == 8),
+                  value.allSatisfy({ "0123456789ABCDEF".contains($0) }) else { return nil }
+            return .hex(value)
+        }
+        let parts = text.split(separator: ",", omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return nil }
+        let values = parts.compactMap { Double($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        guard values.count == 3, values.allSatisfy(\.isFinite) else { return nil }
+        if format == .rgb {
+            guard values.allSatisfy({ (0...255).contains($0) }) else { return nil }
+            return .rgb(values[0], values[1], values[2])
+        }
+        guard (0...360).contains(values[0]), (0...100).contains(values[1]),
+              (0...100).contains(values[2]) else { return nil }
+        return .hsb(values[0], values[1], values[2])
+    }
+
     static func color(for brand: ServiceBrand, preference: BrandColorPreference) -> Color {
         if preference.mode == .custom,
            let hex = preference.customHex,
@@ -47,7 +79,10 @@ enum BrandColorResolver {
         let r = Int((srgb.redComponent * 255).rounded())
         let g = Int((srgb.greenComponent * 255).rounded())
         let b = Int((srgb.blueComponent * 255).rounded())
-        return String(format: "#%02X%02X%02X", r, g, b)
+        let a = Int((srgb.alphaComponent * 255).rounded())
+        return a == 255
+            ? String(format: "#%02X%02X%02X", r, g, b)
+            : String(format: "#%02X%02X%02X%02X", r, g, b, a)
     }
 
     private static func adaptiveColor(lightHex: String, darkHex: String) -> Color {
