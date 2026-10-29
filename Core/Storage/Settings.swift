@@ -257,6 +257,38 @@ final class SettingsStore {
     // 菜单栏
     var menuBarWindow: MenuBarWindowChoice { didSet { defaults.set(menuBarWindow.rawValue, forKey: Keys.menuBarWindow) } }
 
+    var useInstalledAppIcons: Bool { didSet { defaults.set(useInstalledAppIcons, forKey: Keys.useInstalledAppIcons) } }
+
+    // 品牌识别色偏好，默认 `.brand`；用户可在设置里改为自定义色。
+    // 只影响品牌色解析，额度状态色 `statusColor` 与此无关。
+    var brandColorPreferences: [ServiceBrand: BrandColorPreference] {
+        didSet { saveBrandColorPreferences() }
+    }
+
+    func colorMode(for brand: ServiceBrand) -> BrandColorMode {
+        brandColorPreferences[brand, default: .brand].mode
+    }
+
+    func setColorMode(_ mode: BrandColorMode, for brand: ServiceBrand) {
+        var preference = brandColorPreferences[brand, default: .brand]
+        preference.mode = mode
+        brandColorPreferences[brand] = preference
+    }
+
+    func customColorHex(for brand: ServiceBrand) -> String? {
+        brandColorPreferences[brand, default: .brand].customHex
+    }
+
+    func setCustomColorHex(_ hex: String?, for brand: ServiceBrand) {
+        var preference = brandColorPreferences[brand, default: .brand]
+        preference.customHex = hex
+        brandColorPreferences[brand] = preference
+    }
+
+    func resetBrandColors() {
+        brandColorPreferences = [:]
+    }
+
     // 悬浮窗
     var floatingEnabled: Bool { didSet { defaults.set(floatingEnabled, forKey: Keys.floatingEnabled) } }
     var floatingShowCodex: Bool {
@@ -394,6 +426,8 @@ final class SettingsStore {
         } else {
             menuBarWindow = MenuBarWindowChoice(rawValue: mbWindowRaw) ?? .primary
         }
+        useInstalledAppIcons = defaults.object(forKey: Keys.useInstalledAppIcons) as? Bool ?? false
+        brandColorPreferences = Self.loadBrandColorPreferences(defaults: defaults)
         // 悬浮窗
         floatingEnabled = defaults.object(forKey: Keys.floatingEnabled) as? Bool ?? false
         // 刷新
@@ -633,6 +667,30 @@ final class SettingsStore {
         }
     }
 
+    private static func loadBrandColorPreferences(
+        defaults: UserDefaults
+    ) -> [ServiceBrand: BrandColorPreference] {
+        var result: [ServiceBrand: BrandColorPreference] = [:]
+        if let data = defaults.data(forKey: Keys.brandColorPreferences),
+           let stored = try? JSONDecoder().decode([String: BrandColorPreference].self, from: data) {
+            for (raw, preference) in stored {
+                if let brand = ServiceBrand(rawValue: raw) {
+                    result[brand] = preference
+                }
+            }
+        }
+        return result
+    }
+
+    private func saveBrandColorPreferences() {
+        let stored = Dictionary(uniqueKeysWithValues: brandColorPreferences.map {
+            ($0.key.rawValue, $0.value)
+        })
+        if let data = try? JSONEncoder().encode(stored) {
+            defaults.set(data, forKey: Keys.brandColorPreferences)
+        }
+    }
+
     // MARK: - Usage service visibility (Stats by-service)
 
     /// 该服务是否计入统计页(全站过滤:KPI / Token 拆分 / 按服务 / 按模型 / 每日用量 / 对话页)。
@@ -784,6 +842,8 @@ final class SettingsStore {
         static let menuBarShowCodex = "ccbar.settings.menuBarShowCodex"
         static let menuBarShowClaude = "ccbar.settings.menuBarShowClaude"
         static let menuBarWindow = "ccbar.settings.menuBarWindow"
+        static let useInstalledAppIcons = "ccbar.settings.useInstalledAppIcons"
+        static let brandColorPreferences = "ccbar.settings.brandColorPreferences.v1"
         static let floatingEnabled = "ccbar.settings.floatingEnabled"
         static let floatingShowCodex = "ccbar.settings.floatingShowCodex"
         static let floatingShowClaude = "ccbar.settings.floatingShowClaude"

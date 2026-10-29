@@ -132,8 +132,8 @@ private struct AppIconBlock: View {
             .fill(LinearGradient(
                 colors: [
                     Color(red: 0.29, green: 0.29, blue: 0.31),
-                    Color.codexAccent,
-                    Color.claudeAccent
+                    QuotaApp.codex.tintColor,
+                    QuotaApp.claude.tintColor
                 ],
                 startPoint: UnitPoint(x: 0, y: 0),
                 endPoint: UnitPoint(x: 1, y: 1)
@@ -231,7 +231,7 @@ private struct DetectAccountsStep: View {
                 plan: appState.codexPlanName,
                 email: appState.codexAccount?.email,
                 source: codexSource,
-                tint: .codexAccent,
+                tint: QuotaApp.codex.tintColor,
                 logoName: "codex",
                 fallback: "C",
                 status: status(for: .codex, signedIn: appState.codexAccount != nil)
@@ -243,7 +243,7 @@ private struct DetectAccountsStep: View {
                 plan: appState.claudePlanName,
                 email: appState.claudeDisplayEmail,
                 source: claudeSource,
-                tint: .claudeAccent,
+                tint: QuotaApp.claude.tintColor,
                 logoName: "claude",
                 fallback: "K",
                 status: status(for: .claude, signedIn: appState.claudeAccount != nil,
@@ -256,7 +256,7 @@ private struct DetectAccountsStep: View {
                 plan: appState.antigravityQuota?.planType ?? appState.antigravityAccount?.planType,
                 email: appState.antigravityAccount?.email,
                 source: "~/.gemini/jetski-standalone-oauth-token",
-                tint: .antigravityAccent,
+                tint: QuotaApp.antigravity.tintColor,
                 logoName: "antigravity",
                 fallback: "A",
                 status: status(for: .antigravity, signedIn: appState.antigravityAccount != nil)
@@ -268,7 +268,7 @@ private struct DetectAccountsStep: View {
                 plan: appState.cursorQuota?.planType,
                 email: appState.cursorAccount?.email,
                 source: "~/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
-                tint: .cursorAccent,
+                tint: QuotaApp.cursor.tintColor,
                 logoName: "cursor",
                 fallback: "C",
                 status: status(for: .cursor, signedIn: appState.cursorAccount != nil,

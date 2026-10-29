@@ -62,6 +62,7 @@ struct SettingsRootView: View {
     @State private var showDiagnosticsConfirm = false
     @State private var showQuotaAlertRebuildConfirm = false
     @State private var quotaNotificationSettingsOpened = false
+    @State private var showBrandColorsResetConfirm = false
 
     var body: some View {
         @Bindable var settings = SettingsStore.shared
@@ -108,6 +109,21 @@ struct SettingsRootView: View {
             Text(tr(
                 "Current low quotas will be recorded as already alerted. Alerts resume after recovery or reset. The original file is kept as a backup.",
                 "当前低额度先记录为已提醒，恢复或重置后再提醒。原记录文件保留为备份。"
+            ))
+        }
+        .confirmationDialog(
+            tr("Reset to Brand Colors?", "恢复品牌主题色？"),
+            isPresented: $showBrandColorsResetConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(tr("Reset", "恢复")) {
+                settings.resetBrandColors()
+            }
+            Button(tr("Cancel", "取消"), role: .cancel) {}
+        } message: {
+            Text(tr(
+                "Restore every service to its default brand color. Custom colors are discarded.",
+                "将所有服务恢复为默认品牌主题色，自定义颜色会被清除。"
             ))
         }
         .onAppear {
@@ -382,6 +398,18 @@ struct SettingsRootView: View {
             }
             InsetDivider()
             PrefsRow(
+                label: "Follow installed app icons",
+                chinese: "跟随已安装 App 图标",
+                desc: "When enabled, use the app icon for this service.",
+                chineseDesc: "启用后使用此服务对应 App 的图标"
+            ) {
+                Toggle("", isOn: Binding(get: { settings.useInstalledAppIcons }, set: { settings.useInstalledAppIcons = $0 }))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(.green)
+            }
+            InsetDivider()
+            PrefsRow(
                 label: "Privacy mode",
                 chinese: "隐私模式",
                 desc: "Hide account, project, and conversation names for screenshots. Usage numbers stay visible.",
@@ -393,6 +421,8 @@ struct SettingsRootView: View {
                     .tint(.green)
             }
         }
+
+        brandColorsGroup(settings: settings)
 
         PrefsGroup(
             title: "Statistics",
@@ -447,6 +477,77 @@ struct SettingsRootView: View {
                 .tint(.green)
             }
         }
+    }
+
+    // MARK: - Brand Colors
+
+    @ViewBuilder
+    private func brandColorsGroup(settings: SettingsStore) -> some View {
+        PrefsGroup(
+            title: "Brand Colors",
+            chinese: "品牌颜色",
+            desc: "Customize the color used to identify each service in charts and legends.",
+            chineseDesc: "自定义各服务在图表和图例中的识别色"
+        ) {
+            let brands = ServiceBrand.allCases
+            ForEach(brands.indices, id: \.self) { index in
+                brandColorRow(brands[index], settings: settings)
+                if index < brands.count - 1 {
+                    InsetDivider()
+                }
+            }
+            InsetDivider()
+            PrefsRow(
+                label: "Reset to Brand Colors",
+                chinese: "恢复品牌主题色",
+                desc: "Restore every service to its default brand color.",
+                chineseDesc: "将所有服务恢复为默认品牌主题色"
+            ) {
+                Button(tr("Reset", "恢复")) {
+                    showBrandColorsResetConfirm = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private func brandColorRow(_ brand: ServiceBrand, settings: SettingsStore) -> some View {
+        let (english, chinese) = brandDisplayName(brand)
+        let resolvedColor = BrandColorResolver.color(for: brand, settings: settings)
+
+        return PrefsRow(
+            label: english,
+            chinese: chinese,
+            leading: AnyView(
+                ServiceTile(
+                    logoName: brand.logoName,
+                    fallback: String(english.prefix(1)),
+                    tint: resolvedColor,
+                    size: 22,
+                    logoSize: 14,
+                    cornerRadius: 6
+                )
+            )
+        ) {
+            BrandColorControl(brand: brand, settings: settings)
+        }
+    }
+
+    private func brandDisplayName(_ brand: ServiceBrand) -> (english: String, chinese: String) {
+        let name: String
+        switch brand {
+        case .codex: name = "Codex"
+        case .claude: name = "Claude Code"
+        case .antigravity: name = "Antigravity"
+        case .cursor: name = "Cursor"
+        case .commandCode: name = "Command Code"
+        case .opencode: name = "OpenCode"
+        case .kimi: name = "Kimi Code"
+        case .pi: name = "Pi"
+        case .dsh: name = "DSH"
+        }
+        return (name, name)
     }
 
     // MARK: - Section 3: Data & Refresh
@@ -2245,6 +2346,112 @@ extension UsageIntervalChoice {
     }
 }
 
+/// 主题色与自定义色共用卡片；首次编辑从当前外观的主题色开始。
+private struct BrandColorControl: View {
+    let brand: ServiceBrand
+    let settings: SettingsStore
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var showsEditor = false
+    @State private var hexDraft = ""
+
+    private var themeHex: String {
+        colorScheme == .dark ? brand.defaultDarkHex : brand.defaultLightHex
+    }
+
+    private var currentColor: Color {
+        let hex = settings.colorMode(for: brand) == .custom
+            ? settings.customColorHex(for: brand) ?? themeHex : themeHex
+        return BrandColorResolver.color(fromHex: hex)
+            ?? BrandColorResolver.color(fromHex: themeHex) ?? .primary
+    }
+
+    private var customMode: Binding<BrandColorMode> {
+        Binding(get: { settings.colorMode(for: brand) }, set: { mode in
+            if mode == .custom, settings.customColorHex(for: brand) == nil {
+                settings.setCustomColorHex(themeHex, for: brand)
+            }
+            settings.setColorMode(mode, for: brand)
+        })
+    }
+
+    private var colorSelection: Binding<Color> {
+        Binding(get: { currentColor }, set: { color in
+            guard let hex = BrandColorResolver.hexString(for: color) else { return }
+            settings.setCustomColorHex(hex, for: brand)
+            settings.setColorMode(.custom, for: brand)
+            hexDraft = hex
+        })
+    }
+
+    private var validDraft: Bool {
+        let hex = hexDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        return digits.count == 6 && digits.allSatisfy(\.isHexDigit)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Picker(tr("Color mode", "颜色模式"), selection: customMode) {
+                Text(tr("Theme", "主题色")).tag(BrandColorMode.brand)
+                Text(tr("Custom", "自定义")).tag(BrandColorMode.custom)
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
+
+            Button {
+                customMode.wrappedValue = .custom
+                hexDraft = BrandColorResolver.hexString(for: currentColor) ?? themeHex
+                showsEditor = true
+            } label: {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(currentColor)
+                    .frame(width: 32, height: 20)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5)
+                    }
+                    .padding(4)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .pointingHandCursor()
+            .accessibilityLabel(tr("Edit service color", "编辑服务颜色"))
+            .help(tr("Choose a custom color", "选择自定义颜色"))
+            .popover(isPresented: $showsEditor) {
+                VStack(alignment: .leading, spacing: 12) {
+                    ColorPicker(tr("Custom color", "自定义颜色"), selection: colorSelection, supportsOpacity: false)
+                    HStack {
+                        TextField("#RRGGBB", text: $hexDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                            .accessibilityLabel(tr("Hex color", "十六进制颜色"))
+                            .onSubmit { applyDraft() }
+                        Button(tr("Apply", "应用")) { applyDraft() }
+                            .disabled(!validDraft)
+                    }
+                    if !validDraft {
+                        Text(tr("Enter six hexadecimal digits, such as #1783FF.", "请输入六位十六进制颜色，如 #1783FF。"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button(tr("Use theme color", "使用主题色")) {
+                        settings.setColorMode(.brand, for: brand)
+                        showsEditor = false
+                    }
+                }
+                .padding(16)
+                .frame(width: 260)
+            }
+        }
+    }
+
+    private func applyDraft() {
+        guard validDraft, let color = BrandColorResolver.color(fromHex: hexDraft) else { return }
+        colorSelection.wrappedValue = color
+    }
+}
+
 // MARK: - Reorder chrome
 //
 // 列表内拖动重排（Safari 标签页、控制中心那种）：整行起拖，抬起的就是这一行本身，
@@ -2272,6 +2479,21 @@ private struct ReorderFramesKey: PreferenceKey {
     static var defaultValue: [AnyHashable: CGRect] = [:]
     static func reduce(value: inout [AnyHashable: CGRect], nextValue: () -> [AnyHashable: CGRect]) {
         value.merge(nextValue()) { _, new in new }
+    }
+}
+
+/// offset 不参与测量；每次起拖均按当前顺序重新累加行高，包括厂商下的账户与添加入口。
+enum ReorderLayout {
+    static func frames<ID: Hashable>(for order: [ID], measurements: [AnyHashable: CGRect]) -> [ID: CGRect]? {
+        var result: [ID: CGRect] = [:]
+        var y: CGFloat = 0
+        for id in order {
+            guard let measured = measurements[AnyHashable(id)], measured.height > 0 else { return nil }
+            let rect = CGRect(x: 0, y: y, width: measured.width, height: measured.height)
+            result[id] = rect
+            y = rect.maxY
+        }
+        return result
     }
 }
 
@@ -2335,7 +2557,7 @@ struct ReorderableStack<ID: Hashable, Row: View>: View {
                     GeometryReader { geo in
                         Color.clear.preference(
                             key: ReorderFramesKey.self,
-                            value: [AnyHashable(id): geo.frame(in: .named(space))]
+                            value: [AnyHashable(id): CGRect(origin: .zero, size: geo.size)]
                         )
                     }
                 }
@@ -2353,8 +2575,8 @@ struct ReorderableStack<ID: Hashable, Row: View>: View {
             }
         }
         .onPreferenceChange(ReorderFramesKey.self) { measured in
-            // 拖动中用起拖时记下的位置，不跟着偏移刷新。
-            if session == nil { frames = measured }
+            // 只记录尺寸，不记录 offset 后的坐标；落位不改变尺寸时也不会留下旧位置。
+            frames = measured
         }
         // 嵌套的子列表把自己的位置留在内部，不往外层列表冒。
         .transformPreference(ReorderFramesKey.self) { $0 = [:] }
@@ -2485,11 +2707,7 @@ struct ReorderableStack<ID: Hashable, Row: View>: View {
     private func begin(_ id: ID) -> Bool {
         let order = Array(ids.prefix(movableCount))
         guard let from = order.firstIndex(of: id) else { return false }
-        var snapshot: [ID: CGRect] = [:]
-        for item in order {
-            guard let rect = frames[AnyHashable(item)] else { return false }
-            snapshot[item] = rect
-        }
+        guard let snapshot = ReorderLayout.frames(for: order, measurements: frames) else { return false }
         var still = Transaction()
         still.disablesAnimations = true
         withTransaction(still) {

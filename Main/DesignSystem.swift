@@ -91,40 +91,23 @@ struct PrivacySensitiveText: View {
 
 // MARK: - Product accent colors
 //
-// Provider 识别色定义在 Asset Catalog (*Accent)。
-// Xcode 自动从 .xcassets 生成对应 Color,通过 QuotaApp.tintColor 统一访问。
+// 服务识别色来自 ServiceBrand 的默认浅/深色，并可被用户在设置里覆盖为自定义色。
+// 统一经 BrandColorResolver 解析；额度状态色 `statusColor` 与此无关。
 // 见 docs/设计风格.md §4.2。
 
 extension QuotaApp {
+    @MainActor
     var tintColor: Color {
-        switch self {
-        case .codex: .codexAccent
-        case .claude: .claudeAccent
-        case .antigravity: .antigravityAccent
-        case .cursor: .cursorAccent
-        case .commandCode: Color(red: 24 / 255, green: 24 / 255, blue: 27 / 255)
-        case .opencodeGo: .opencodeAccent
-        case .kimi: .purple
-        }
+        BrandColorResolver.color(for: brand, settings: SettingsStore.shared)
     }
 }
 
 // MARK: - UsageApp 识别色与名称
 
 extension UsageApp {
+    @MainActor
     var tintColor: Color {
-        switch self {
-        case .codex: .codexAccent
-        case .claude: .claudeAccent
-        case .cursor: .cursorAccent
-        case .pi: .piAccent
-        case .opencode: .opencodeAccent
-        // DSH 识别色取官方主题强调蓝（dsh-client-ui-theme 的 deepseek-500 / 深色 deepseek-400，
-        // Asset Catalog : DshAccent），用于图表 / 色块；tile 走官方品牌主色黑底，不用此色。
-        case .dsh: .dshAccent
-        case .antigravity: .antigravityAccent
-        case .kimi: .purple
-        }
+        BrandColorResolver.color(for: brand, settings: SettingsStore.shared)
     }
 
     var displayName: String {
@@ -346,27 +329,62 @@ struct ServiceMark: View {
 // Popover 服务行左侧、Onboarding 账号列表、设置服务卡片，以及主窗口统计 / 对话 / 周期里
 // 标识服务的位置（小号，经 `init(app:size:)`）都用。图表图例与悬停提示仍用 ServiceMark 色块对应图表颜色。
 
+enum ServiceIconKind {
+    case installedApp
+    case favicon
+    case brand
+}
+
+struct ResolvedServiceIcon {
+    let kind: ServiceIconKind
+    let image: NSImage
+    let fillsTile: Bool
+}
+
+enum ServiceIconResolver {
+    // MARK: 新路径（生产）：ServiceBrand 元数据 + InstalledAppIconLocator
+
+    static func resolve(
+        brand: ServiceBrand,
+        useInstalledAppIcons: Bool,
+        installedAppImage: (ServiceBrand) -> NSImage? = { InstalledAppIconLocator.image(for: $0) },
+        faviconImage: (String) -> NSImage? = { LogoCache.faviconImage(named: $0) },
+        brandImage: (String) -> NSImage? = { LogoCache.image(named: $0) }
+    ) -> ResolvedServiceIcon? {
+        if useInstalledAppIcons, let image = installedAppImage(brand) {
+            return ResolvedServiceIcon(kind: .installedApp, image: image, fillsTile: true)
+        }
+        if let image = faviconImage(brand.logoName) {
+            return ResolvedServiceIcon(
+                kind: .favicon,
+                image: image,
+                fillsTile: brand.faviconFillsTile
+            )
+        }
+        if let image = brandImage(brand.logoName) {
+            return ResolvedServiceIcon(kind: .brand, image: image, fillsTile: false)
+        }
+        return nil
+    }
+
+    /// `logoName` 便捷入口，供 `ServiceTile` 等仍以资源名调用；无法识别时返回 nil（走字母兜底）。
+    static func resolve(logoName: String, useInstalledAppIcons: Bool) -> ResolvedServiceIcon? {
+        guard let brand = ServiceBrand(logoName: logoName) else { return nil }
+        return resolve(brand: brand, useInstalledAppIcons: useInstalledAppIcons)
+    }
+
+}
+
 struct ServiceTile: View {
-    /// 资源名,对应 Resources/Logos/ 下的 svg。
     let logoName: String
-    /// 备用字母(SVG 加载失败时显示)。
     let fallback: String
-    /// 背景填充色(服务识别色)。Codex 走 OpenAI 官方观感(白底黑 logo)、DSH / Cursor 走固定深色底,会忽略此值。
     let tint: Color
-    /// tile 尺寸,默认 Popover 用 22pt。
     var size: CGFloat = 22
-    /// 内 logo 尺寸,默认 14pt。
     var logoSize: CGFloat = 14
-    /// 圆角半径,默认 6pt。
     var cornerRadius: CGFloat = 6
 
-    /// Codex 的 tile 还原 OpenAI 官方品牌图标:白底黑 logo + 极细边框。
-    /// 其余地方(文字色、环形、图表)的 `Color.codexAccent` 仍是石墨灰,不受影响。
     private var isOpenAIBrand: Bool { logoName == "codex" }
 
-    /// 固定深色底 + 白色 logo,不随外观切换:
-    /// - DSH:官方品牌主色(dsh-client-ui-theme `brand-primary` 浅色值 #0F1115),图表里的 `Color.dshAccent` 仍是官方强调蓝;
-    /// - Cursor:`CursorAccent` 深色值是近白,直接当底色会吞掉白色 logo,所以 tile 固定用它的浅色值 #2C2C2E。
     private var fixedDarkBackground: Color? {
         switch logoName {
         case "dsh": Color(red: 15 / 255, green: 17 / 255, blue: 21 / 255)
@@ -376,15 +394,60 @@ struct ServiceTile: View {
         }
     }
 
-    private var background: Color {
+    private var brandBackground: Color {
         if isOpenAIBrand { return .white }
         return fixedDarkBackground ?? tint
     }
-    private var foreground: Color { isOpenAIBrand ? .black : .white }
+    private var brandForeground: Color { isOpenAIBrand ? .black : .white }
 
+    @ViewBuilder
     var body: some View {
+        let icon = ServiceIconResolver.resolve(
+            logoName: logoName,
+            useInstalledAppIcons: SettingsStore.shared.useInstalledAppIcons
+        )
+        if let icon, icon.kind != .brand {
+            officialIconTile(icon)
+        } else {
+            brandTile
+        }
+    }
+
+    @ViewBuilder
+    private func officialIconTile(_ icon: ResolvedServiceIcon) -> some View {
+        if icon.fillsTile {
+            Image(nsImage: icon.image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay {
+                    if isOpenAIBrand {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .strokeBorder(Color.black.opacity(0.12), lineWidth: 0.5)
+                    }
+                }
+        } else {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(.white)
+                .frame(width: size, height: size)
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(Color.black.opacity(0.12), lineWidth: 0.5)
+                }
+                .overlay {
+                    Image(nsImage: icon.image)
+                        .resizable()
+                        .renderingMode(.original)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: logoSize, height: logoSize)
+                }
+        }
+    }
+
+    private var brandTile: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(background)
+            .fill(brandBackground)
             .frame(width: size, height: size)
             .overlay {
                 if isOpenAIBrand {
@@ -392,27 +455,28 @@ struct ServiceTile: View {
                         .strokeBorder(Color.black.opacity(0.12), lineWidth: 0.5)
                 }
             }
-            .overlay(logoView)
+            .overlay(brandLogoView)
     }
 
     @ViewBuilder
-    private var logoView: some View {
+    private var brandLogoView: some View {
         if let nsImage = LogoCache.image(named: logoName) {
             Image(nsImage: nsImage)
                 .resizable()
                 .renderingMode(logoName == "kimi" ? .original : .template)
-                .foregroundStyle(foreground)
+                .foregroundStyle(brandForeground)
                 .frame(width: logoSize, height: logoSize)
         } else {
             Text(fallback)
                 .font(.system(size: logoSize * 0.7, weight: .semibold))
-                .foregroundStyle(foreground)
+                .foregroundStyle(brandForeground)
         }
     }
 }
 
 extension ServiceTile {
     /// 主窗口里标识用量服务的小号 tile（取代原来的 ServiceMark 色块），logo 尺寸与圆角按 tile 尺寸等比缩放。
+    @MainActor
     init(app: UsageApp, size: CGFloat) {
         self.init(
             logoName: app.logoName,
@@ -426,17 +490,31 @@ extension ServiceTile {
 }
 
 private enum LogoCache {
-    private static let cache = NSCache<NSString, NSImage>()
+    private static let brandCache = NSCache<NSString, NSImage>()
+    private static let faviconCache = NSCache<NSString, NSImage>()
 
     static func image(named name: String) -> NSImage? {
-        if let cached = cache.object(forKey: name as NSString) { return cached }
-        guard let url = ["svg", "png", "ico"].compactMap({
-            Bundle.main.url(forResource: name, withExtension: $0)
-        }).first, let image = NSImage(contentsOf: url)
-        else { return nil }
+        if let cached = brandCache.object(forKey: name as NSString) { return cached }
+        guard let image = bundledImage(named: name, extensions: ["svg", "png", "ico"]) else { return nil }
         image.isTemplate = name != "kimi"
-        cache.setObject(image, forKey: name as NSString)
+        brandCache.setObject(image, forKey: name as NSString)
         return image
+    }
+
+    static func faviconImage(named name: String) -> NSImage? {
+        let resourceName = "favicon-\(name)"
+        if let cached = faviconCache.object(forKey: resourceName as NSString) { return cached }
+        guard let image = bundledImage(named: resourceName, extensions: ["png", "svg", "ico"]) else { return nil }
+        image.isTemplate = false
+        faviconCache.setObject(image, forKey: resourceName as NSString)
+        return image
+    }
+
+    private static func bundledImage(named name: String, extensions: [String]) -> NSImage? {
+        guard let url = extensions.compactMap({
+            Bundle.main.url(forResource: name, withExtension: $0)
+        }).first else { return nil }
+        return NSImage(contentsOf: url)
     }
 }
 

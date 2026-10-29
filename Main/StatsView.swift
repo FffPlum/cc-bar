@@ -1816,7 +1816,7 @@ private struct OverviewCompositionPanel: View {
     /// 列名行，列宽与 `rowContent` 一致。
     private var columnHeader: some View {
         HStack(spacing: 8) {
-            Color.clear.frame(width: 8, height: 1)
+            Color.clear.frame(width: dimension == .service ? 18 : 8, height: 1)
             Text(dimension.label)
             Spacer(minLength: 8)
             Text("Tokens").frame(width: 86, alignment: .trailing)
@@ -1878,7 +1878,11 @@ private struct OverviewCompositionPanel: View {
         // 未归属与不参与排名的灰色行（「其他」提供商、特殊项目）用次级样式。
         let isSecondary = row.kind != .item || row.color == .rest
         return HStack(spacing: 8) {
-            CompositionSwatch(role: row.color, size: 8)
+            if case .service(let app) = row.color {
+                ServiceTile(app: app, size: 18)
+            } else {
+                CompositionSwatch(role: row.color, size: 8)
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(title(for: row))
                     .font(.system(size: 12.5, weight: isSecondary ? .regular : .semibold))
@@ -3382,7 +3386,7 @@ private struct QuotaTimelineSection: Identifiable {
     let accountKey: String
     let title: String
     let app: UsageApp
-    var tint: Color { app.tintColor }
+    @MainActor var tint: Color { app.tintColor }
     let windows: [QuotaTimelineWindow]
     var isLoading: Bool = false
 }

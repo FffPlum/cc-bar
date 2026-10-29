@@ -23,6 +23,10 @@
 		49C1B107000000000001AABB /* ScanCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B107000000000001AAAA /* ScanCache.swift */; };
 		49C1B108000000000001AABB /* QuotaHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B108000000000001AAAA /* QuotaHistoryStore.swift */; };
 		49C1B120000000000001AABB /* QuotaModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B120000000000001AAAA /* QuotaModels.swift */; };
+		B12AAD000000000000000101 /* BrandCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B12AAD000000000000000001 /* BrandCatalog.swift */; };
+		B12AAD000000000000000102 /* InstalledAppIconLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B12AAD000000000000000002 /* InstalledAppIconLocator.swift */; };
+		B12AAD000000000000000103 /* BrandAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B12AAD000000000000000003 /* BrandAppearanceTests.swift */; };
+		B12AAD000000000000000104 /* BrandColorResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B12AAD000000000000000004 /* BrandColorResolver.swift */; };
 		49C1B121000000000001AABB /* CodexTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B121000000000001AAAA /* CodexTokenRefresher.swift */; };
 		49C1B122000000000001AABB /* CodexQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B122000000000001AAAA /* CodexQuotaClient.swift */; };
 		49C1B123000000000001AABB /* ClaudeQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B123000000000001AAAA /* ClaudeQuotaClient.swift */; };
@@ -33,6 +37,15 @@
 		49C1B131000000000001AABB /* Scheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B131000000000001AAAA /* Scheduler.swift */; };
 		49C1B132000000000001AABB /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B132000000000001AAAA /* L10n.swift */; };
 		49C1B140000000000001AABB /* codex.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1B140000000000001AAAA /* codex.svg */; };
+		FA11C0DE0000000000000101 /* favicon-codex.svg in Resources */ = {isa = PBXBuildFile; fileRef = FA11C0DE0000000000000001 /* favicon-codex.svg */; };
+		FA11C0DE0000000000000102 /* favicon-claude.png in Resources */ = {isa = PBXBuildFile; fileRef = FA11C0DE0000000000000002 /* favicon-claude.png */; };
+		FA11C0DE0000000000000103 /* favicon-antigravity.png in Resources */ = {isa = PBXBuildFile; fileRef = FA11C0DE0000000000000003 /* favicon-antigravity.png */; };
+		FA11C0DE0000000000000104 /* favicon-cursor.svg in Resources */ = {isa = PBXBuildFile; fileRef = FA11C0DE0000000000000004 /* favicon-cursor.svg */; };
+		FA11C0DE0000000000000105 /* favicon-commandcode.png in Resources */ = {isa = PBXBuildFile; fileRef = FA11C0DE0000000000000005 /* favicon-commandcode.png */; };
+		FA11C0DE0000000000000106 /* favicon-opencode.png in Resources */ = {isa = PBXBuildFile; fileRef = FA11C0DE0000000000000006 /* favicon-opencode.png */; };
+		FA11C0DE0000000000000107 /* favicon-kimi.png in Resources */ = {isa = PBXBuildFile; fileRef = FA11C0DE0000000000000007 /* favicon-kimi.png */; };
+		FA11C0DE0000000000000108 /* favicon-pi.svg in Resources */ = {isa = PBXBuildFile; fileRef = FA11C0DE0000000000000008 /* favicon-pi.svg */; };
+		FA11C0DE0000000000000109 /* favicon-dsh.ico in Resources */ = {isa = PBXBuildFile; fileRef = FA11C0DE0000000000000009 /* favicon-dsh.ico */; };
 		49C1B141000000000001AABB /* claude.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1B141000000000001AAAA /* claude.svg */; };
 		49C1B143000000000001AABB /* antigravity.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1B143000000000001AAAA /* antigravity.svg */; };
 		49C1B150000000000001AABB /* UsageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B150000000000001AAAA /* UsageModels.swift */; };
@@ -163,6 +176,7 @@
 		B71D3000000000000000AABB /* KimiTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D3000000000000000AAAA /* KimiTokenRefresher.swift */; };
 		B71D4000000000000000AABB /* KimiQuotaClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D4000000000000000AAAA /* KimiQuotaClientTests.swift */; };
 		B71D5000000000000000AABB /* KimiQuotaIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D5000000000000000AAAA /* KimiQuotaIntegrationTests.swift */; };
+		FA11C0DE0000000000000110 /* ServiceIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11C0DE0000000000000010 /* ServiceIconTests.swift */; };
 		B71D6000000000000000AABB /* kimi.ico in Resources */ = {isa = PBXBuildFile; fileRef = B71D6000000000000000AAAA /* kimi.ico */; };
 		B71E0100000000000000AABB /* KimiManagedAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0100000000000000AAAA /* KimiManagedAccountStore.swift */; };
 		B71E0200000000000000AABB /* KimiDeviceAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0200000000000000AAAA /* KimiDeviceAuthorization.swift */; };
@@ -214,6 +228,10 @@
 		49C1B107000000000001AAAA /* ScanCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanCache.swift; sourceTree = "<group>"; };
 		49C1B108000000000001AAAA /* QuotaHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaHistoryStore.swift; sourceTree = "<group>"; };
 		49C1B120000000000001AAAA /* QuotaModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaModels.swift; sourceTree = "<group>"; };
+		B12AAD000000000000000001 /* BrandCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandCatalog.swift; sourceTree = "<group>"; };
+		B12AAD000000000000000002 /* InstalledAppIconLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledAppIconLocator.swift; sourceTree = "<group>"; };
+		B12AAD000000000000000003 /* BrandAppearanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandAppearanceTests.swift; sourceTree = "<group>"; };
+		B12AAD000000000000000004 /* BrandColorResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandColorResolver.swift; sourceTree = "<group>"; };
 		49C1B121000000000001AAAA /* CodexTokenRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexTokenRefresher.swift; sourceTree = "<group>"; };
 		49C1B122000000000001AAAA /* CodexQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexQuotaClient.swift; sourceTree = "<group>"; };
 		49C1B123000000000001AAAA /* ClaudeQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeQuotaClient.swift; sourceTree = "<group>"; };
@@ -224,6 +242,15 @@
 		49C1B131000000000001AAAA /* Scheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scheduler.swift; sourceTree = "<group>"; };
 		49C1B132000000000001AAAA /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		49C1B140000000000001AAAA /* codex.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = codex.svg; sourceTree = "<group>"; };
+		FA11C0DE0000000000000001 /* favicon-codex.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = "favicon-codex.svg"; sourceTree = "<group>"; };
+		FA11C0DE0000000000000002 /* favicon-claude.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-claude.png"; sourceTree = "<group>"; };
+		FA11C0DE0000000000000003 /* favicon-antigravity.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-antigravity.png"; sourceTree = "<group>"; };
+		FA11C0DE0000000000000004 /* favicon-cursor.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = "favicon-cursor.svg"; sourceTree = "<group>"; };
+		FA11C0DE0000000000000005 /* favicon-commandcode.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-commandcode.png"; sourceTree = "<group>"; };
+		FA11C0DE0000000000000006 /* favicon-opencode.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-opencode.png"; sourceTree = "<group>"; };
+		FA11C0DE0000000000000007 /* favicon-kimi.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-kimi.png"; sourceTree = "<group>"; };
+		FA11C0DE0000000000000008 /* favicon-pi.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = "favicon-pi.svg"; sourceTree = "<group>"; };
+		FA11C0DE0000000000000009 /* favicon-dsh.ico */ = {isa = PBXFileReference; lastKnownFileType = image.ico; path = "favicon-dsh.ico"; sourceTree = "<group>"; };
 		49C1B141000000000001AAAA /* claude.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = claude.svg; sourceTree = "<group>"; };
 		49C1B143000000000001AAAA /* antigravity.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = antigravity.svg; sourceTree = "<group>"; };
 		49C1B150000000000001AAAA /* UsageModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageModels.swift; sourceTree = "<group>"; };
@@ -340,6 +367,7 @@
 		49C2AD04000000000001AAAA /* SystemNotificationClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemNotificationClient.swift; sourceTree = "<group>"; };
 		49C2AD05000000000001AAAA /* QuotaAlertStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaAlertStore.swift; sourceTree = "<group>"; };
 		49C2AD06000000000001AAAA /* QuotaAlertTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaAlertTests.swift; sourceTree = "<group>"; };
+		FA11C0DE0000000000000010 /* ServiceIconTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceIconTests.swift; sourceTree = "<group>"; };
 		49C2AF01000000000001AAAA /* NetworkProxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProxy.swift; sourceTree = "<group>"; };
 		A6A1B90000000000000FAAAA /* AntigravityScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityScanner.swift; sourceTree = "<group>"; };
 		A6A1B90000000000000FBAAA /* AntigravityScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityScannerTests.swift; sourceTree = "<group>"; };
@@ -438,6 +466,7 @@
 				49C1B112000000000001AAAA /* Quota */,
 				49C1B15F000000000001AAAA /* Usage */,
 				49C1B15B000000000001AAAA /* Pricing */,
+				B12AAD000000000000000010 /* Branding */,
 				49C1B111000000000001AAAA /* Storage */,
 				49C1BD00000000000001AAAA /* Diagnostics */,
 			);
@@ -506,6 +535,16 @@
 			path = Credentials;
 			sourceTree = "<group>";
 		};
+		B12AAD000000000000000010 /* Branding */ = {
+			isa = PBXGroup;
+			children = (
+				B12AAD000000000000000001 /* BrandCatalog.swift */,
+				B12AAD000000000000000002 /* InstalledAppIconLocator.swift */,
+				B12AAD000000000000000004 /* BrandColorResolver.swift */,
+			);
+			path = Branding;
+			sourceTree = "<group>";
+		};
 		49C1B111000000000001AAAA /* Storage */ = {
 			isa = PBXGroup;
 			children = (
@@ -564,6 +603,15 @@
 				49C1EE02000000000001AAAA /* opencode.svg */,
 				B71D6000000000000000AAAA /* kimi.ico */,
 				49C1EE03000000000001AAAA /* dsh.svg */,
+				FA11C0DE0000000000000001 /* favicon-codex.svg */,
+				FA11C0DE0000000000000002 /* favicon-claude.png */,
+				FA11C0DE0000000000000003 /* favicon-antigravity.png */,
+				FA11C0DE0000000000000004 /* favicon-cursor.svg */,
+				FA11C0DE0000000000000005 /* favicon-commandcode.png */,
+				FA11C0DE0000000000000006 /* favicon-opencode.png */,
+				FA11C0DE0000000000000007 /* favicon-kimi.png */,
+				FA11C0DE0000000000000008 /* favicon-pi.svg */,
+				FA11C0DE0000000000000009 /* favicon-dsh.ico */,
 			);
 			path = Logos;
 			sourceTree = "<group>";
@@ -650,6 +698,8 @@
 			isa = PBXGroup;
 			children = (
 				49C2AD06000000000001AAAA /* QuotaAlertTests.swift */,
+				FA11C0DE0000000000000010 /* ServiceIconTests.swift */,
+				B12AAD000000000000000003 /* BrandAppearanceTests.swift */,
 				49C1B300000000000001AAAA /* QuotaParsingTests.swift */,
 				49C1BC12000000000001AAAA /* CursorAuthTests.swift */,
 				49C1BC15000000000001AAAA /* CursorUsageFetcherTests.swift */,
@@ -833,6 +883,15 @@
 				49C1EE02000000000001AABB /* opencode.svg in Resources */,
 				B71D6000000000000000AABB /* kimi.ico in Resources */,
 				49C1EE03000000000001AABB /* dsh.svg in Resources */,
+				FA11C0DE0000000000000101 /* favicon-codex.svg in Resources */,
+				FA11C0DE0000000000000102 /* favicon-claude.png in Resources */,
+				FA11C0DE0000000000000103 /* favicon-antigravity.png in Resources */,
+				FA11C0DE0000000000000104 /* favicon-cursor.svg in Resources */,
+				FA11C0DE0000000000000105 /* favicon-commandcode.png in Resources */,
+				FA11C0DE0000000000000106 /* favicon-opencode.png in Resources */,
+				FA11C0DE0000000000000107 /* favicon-kimi.png in Resources */,
+				FA11C0DE0000000000000108 /* favicon-pi.svg in Resources */,
+				FA11C0DE0000000000000109 /* favicon-dsh.ico in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -879,6 +938,9 @@
 				49C1B105000000000001AABB /* Settings.swift in Sources */,
 				49C1B106000000000001AABB /* QuotaCache.swift in Sources */,
 				49C1B120000000000001AABB /* QuotaModels.swift in Sources */,
+				B12AAD000000000000000101 /* BrandCatalog.swift in Sources */,
+				B12AAD000000000000000102 /* InstalledAppIconLocator.swift in Sources */,
+				B12AAD000000000000000104 /* BrandColorResolver.swift in Sources */,
 				49C1B121000000000001AABB /* CodexTokenRefresher.swift in Sources */,
 				49C1B122000000000001AABB /* CodexQuotaClient.swift in Sources */,
 				49C1D101000000000001AABB /* AntigravityQuotaClient.swift in Sources */,
@@ -979,6 +1041,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				49C2AD06000000000001AABB /* QuotaAlertTests.swift in Sources */,
+				FA11C0DE0000000000000110 /* ServiceIconTests.swift in Sources */,
+				B12AAD000000000000000103 /* BrandAppearanceTests.swift in Sources */,
 				49C1B300000000000001AABB /* QuotaParsingTests.swift in Sources */,
 				49C1BC12000000000001AABB /* CursorAuthTests.swift in Sources */,
 				49C1BC15000000000001AABB /* CursorUsageFetcherTests.swift in Sources */,
