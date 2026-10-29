@@ -31,7 +31,7 @@ struct FloatingContentView: View {
                 )
             }
             ForEach(managed) { account in
-                FloatingRow(logoName: "kimi", fallback: "K", tint: .purple,
+                FloatingRow(logoName: "kimi", fallback: "K", tint: QuotaApp.kimi.tintColor,
                             snapshot: appState.kimiManagedQuotas[account.id])
                     .help("\(account.region.displayName) · \(appState.kimiManagedSubtitle(account))")
             }

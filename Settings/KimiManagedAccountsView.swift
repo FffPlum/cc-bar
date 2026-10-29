@@ -15,7 +15,7 @@ struct KimiManagedAccountsSettingsView: View {
                 divider
                 HStack(spacing: 0) {
                     Color.clear.frame(width: ServiceRowMetrics.handleWidth + ServiceRowMetrics.handleGap)
-                    ServiceTile(logoName: "kimi", fallback: "K", tint: .purple,
+                    ServiceTile(logoName: "kimi", fallback: "K", tint: QuotaApp.kimi.tintColor,
                                 size: ServiceRowMetrics.tileSize, logoSize: 18, cornerRadius: 7.5)
                         .padding(.trailing, ServiceRowMetrics.tileGap)
                     VStack(alignment: .leading, spacing: 1) {
