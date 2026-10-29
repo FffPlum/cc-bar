@@ -14,6 +14,8 @@ struct PopoverRootView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.openWindow) private var openWindow
     @State private var refreshRotation: Double = 0
+    @State private var hoveredHeaderTooltip: HeaderTooltip?
+    @State private var visibleHeaderTooltip: HeaderTooltip?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,6 +44,34 @@ struct PopoverRootView: View {
             }
         }
         .frame(width: 340)
+        .overlayPreferenceValue(HeaderTooltipAnchorKey.self) { anchors in
+            GeometryReader { geometry in
+                if let item = visibleHeaderTooltip, let anchor = anchors[item] {
+                    HeaderTooltipLayout(anchor: geometry[anchor]) {
+                        Text(headerTooltipText(item))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Color.black.opacity(0.85))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                    }
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                }
+            }
+            // 说明只负责绘制，不建立额外 popover、不抢焦点或吞掉点击。
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .task(id: hoveredHeaderTooltip) {
+            guard let item = hoveredHeaderTooltip else { return }
+            do { try await Task.sleep(nanoseconds: 100_000_000) }
+            catch { return }
+            guard !Task.isCancelled, hoveredHeaderTooltip == item else { return }
+            visibleHeaderTooltip = item
+        }
+        .onDisappear { clearHeaderTooltip() }
         // 转圈由 appState.isRefreshing 统一驱动:无论刷新从哪个入口发起
         // (点击刷新按钮、⌘R 全局快捷键),只要整体刷新真正开始,按钮就转一圈。
         .onChange(of: appState.isRefreshing) { _, refreshing in
@@ -75,53 +105,72 @@ struct PopoverRootView: View {
                     .fill(state.color)
                     .frame(width: 7, height: 7)
                     .accessibilityLabel(headerStateTooltip(state))
-                    .nativeHover(headerStateTooltip(state), delayNanoseconds: 100_000_000)
+                    .anchorPreference(key: HeaderTooltipAnchorKey.self, value: .bounds) { [.status: $0] }
+                    .onHover { hoverHeaderTooltip(.status, inside: $0) }
                     .padding(.trailing, 4)
             }
 
-            Button(action: refresh) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(refreshRotation))
-                    .animation(.easeInOut(duration: 0.7), value: refreshRotation)
-            }
-            .buttonStyle(PopoverIconButtonStyle())
             // 不加 disabled:按钮永远可点;AppState.refreshNow() 内部已经做了
             // in-flight 去重,不会重复发请求。刷新真正开始时由 isRefreshing 驱动转圈。
-            .accessibilityLabel(tr("Refresh now", "立即刷新"))
-            .nativeHover(tr("Refresh now", "立即刷新"), delayNanoseconds: 100_000_000)
+            headerButton(.refresh, symbol: "arrow.clockwise", action: refresh)
 
-            Button { activateAndOpenMain(tab: .stats) } label: {
-                Image(systemName: "chart.bar.xaxis")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
+            headerButton(.statistics, symbol: "chart.bar.xaxis") {
+                activateAndOpenMain(tab: .stats)
             }
-            .buttonStyle(PopoverIconButtonStyle())
-            .accessibilityLabel(tr("Open Statistics", "查看统计"))
-            .nativeHover(tr("Open Statistics", "查看统计"), delayNanoseconds: 100_000_000)
 
-            Button { activateAndOpenMain(tab: .settings) } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
+            headerButton(.settings, symbol: "gearshape") {
+                activateAndOpenMain(tab: .settings)
             }
-            .buttonStyle(PopoverIconButtonStyle())
-            .accessibilityLabel(tr("Settings", "设置"))
-            .nativeHover(tr("Settings", "设置"), delayNanoseconds: 100_000_000)
 
-            Button { NSApp.terminate(nil) } label: {
-                Image(systemName: "power")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
+            headerButton(.quit, symbol: "power") {
+                NSApp.terminate(nil)
             }
-            .buttonStyle(PopoverIconButtonStyle())
-            .accessibilityLabel(tr("Quit", "退出"))
-            .nativeHover(tr("Quit", "退出"), delayNanoseconds: 100_000_000)
         }
         .padding(.top, 14)
         .padding(.horizontal, 12)
         .padding(.bottom, 12)
+    }
+
+    private func headerButton(_ item: HeaderTooltip, symbol: String, action: @escaping () -> Void) -> some View {
+        Button {
+            clearHeaderTooltip()
+            action()
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(item == .refresh ? refreshRotation : 0))
+                .animation(.easeInOut(duration: 0.7), value: refreshRotation)
+        }
+        .buttonStyle(PopoverIconButtonStyle())
+        .accessibilityLabel(headerTooltipText(item))
+        .anchorPreference(key: HeaderTooltipAnchorKey.self, value: .bounds) { [item: $0] }
+        .onHover { hoverHeaderTooltip(item, inside: $0) }
+    }
+
+    private func headerTooltipText(_ item: HeaderTooltip) -> String {
+        switch item {
+        case .status: headerState.map { headerStateTooltip($0) } ?? ""
+        case .refresh: tr("Refresh now", "立即刷新")
+        case .statistics: tr("Open Statistics", "查看统计")
+        case .settings: tr("Settings", "设置")
+        case .quit: tr("Quit", "退出")
+        }
+    }
+
+    private func hoverHeaderTooltip(_ item: HeaderTooltip, inside: Bool) {
+        if inside {
+            guard hoveredHeaderTooltip != item else { return }
+            visibleHeaderTooltip = nil
+            hoveredHeaderTooltip = item
+        } else if hoveredHeaderTooltip == item {
+            clearHeaderTooltip()
+        }
+    }
+
+    private func clearHeaderTooltip() {
+        hoveredHeaderTooltip = nil
+        visibleHeaderTooltip = nil
     }
 
     /// `now` 由 header 的 TimelineView 提供,让"Xs 前已刷新"实时滚动。
@@ -862,6 +911,39 @@ struct ServiceBlockView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if oneLine.count <= 110 { return oneLine }
         return String(oneLine.prefix(107)) + "..."
+    }
+}
+
+private enum HeaderTooltip: Hashable {
+    case status, refresh, statistics, settings, quit
+}
+
+private struct HeaderTooltipAnchorKey: PreferenceKey {
+    static var defaultValue: [HeaderTooltip: Anchor<CGRect>] = [:]
+
+    static func reduce(value: inout [HeaderTooltip: Anchor<CGRect>], nextValue: () -> [HeaderTooltip: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+/// 在根视图内按实际文字尺寸放置说明，避开按钮并收进左右边缘。
+private struct HeaderTooltipLayout: Layout {
+    let anchor: CGRect
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let tooltip = subviews.first else { return }
+        let margin: CGFloat = 12
+        let size = tooltip.sizeThatFits(ProposedViewSize(width: min(220, max(0, bounds.width - margin * 2)), height: nil))
+        let x = min(max(margin, anchor.midX - size.width / 2), bounds.width - margin - size.width)
+        tooltip.place(
+            at: CGPoint(x: bounds.minX + x, y: bounds.minY + anchor.maxY + 6),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: size.width, height: size.height)
+        )
     }
 }
 
