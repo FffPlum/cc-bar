@@ -3888,6 +3888,44 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertTrue(decoded.claudeFast.isEmpty)
     }
 
+    func testPriceAndRecalculationSuccessRequiresBothActualResults() {
+        let outcomes: [UsageRebuildOutcome?] = [
+            nil, .rejectedUsageChanged, .rejectedIncompleteSources("incomplete"),
+            .commitFailed("write failed"), .partiallyCommitted("partial"),
+            .restrictedRecoveryRejected, .recoveredFromRestrictedHistory
+        ]
+        for outcome in outcomes {
+            XCTAssertTrue(PricingRecalculationResult(modelsDevUpdated: true, rebuildOutcome: outcome).isError)
+            XCTAssertTrue(PricingRecalculationResult(modelsDevUpdated: false, rebuildOutcome: outcome).isError)
+        }
+        for cycleVerified in [true, false] {
+            let replaced = UsageRebuildOutcome.replaced(cycleVerified: cycleVerified)
+            XCTAssertFalse(PricingRecalculationResult(modelsDevUpdated: true, rebuildOutcome: replaced).isError)
+            XCTAssertTrue(PricingRecalculationResult(modelsDevUpdated: false, rebuildOutcome: replaced).isError)
+        }
+    }
+
+    func testDisabledPriceRefreshReportsBothSourcesFailed() async {
+        let result = await PricingCatalogStore.shared.forceRefreshWithResults()
+        XCTAssertFalse(result.liteLLM)
+        XCTAssertFalse(result.modelsDev)
+        XCTAssertFalse(result.anySucceeded)
+    }
+
+    func testPriceRefreshKeepsSourcesIndependent() {
+        let fallbackOnly = PricingCatalogRefreshResult(liteLLM: true, modelsDev: false)
+        XCTAssertTrue(fallbackOnly.anySucceeded)
+        XCTAssertTrue(PricingRecalculationResult(
+            modelsDevUpdated: fallbackOnly.modelsDev, rebuildOutcome: .replaced(cycleVerified: true)
+        ).isError)
+
+        let modelsDevOnly = PricingCatalogRefreshResult(liteLLM: false, modelsDev: true)
+        XCTAssertTrue(modelsDevOnly.anySucceeded)
+        XCTAssertFalse(PricingRecalculationResult(
+            modelsDevUpdated: modelsDevOnly.modelsDev, rebuildOutcome: .replaced(cycleVerified: true)
+        ).isError)
+    }
+
     func testLegacyV2CatalogFetchesProviderGroupsWithoutDiscardingPrices() throws {
         let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
         let price = ModelPrice(input: 1, output: 2, cacheRead: 0.1, cacheCreation: 1)

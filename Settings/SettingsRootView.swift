@@ -720,11 +720,10 @@ struct SettingsRootView: View {
                         pricingCatalogMessage = nil
                         isRecalculatingUsage = true
                         Task {
-                            let succeeded = await appState.usageService.refreshPricingCatalogAndRecalculateUsage()
-                            pricingCatalogMessageIsError = !succeeded
-                            pricingCatalogMessage = succeeded
-                                ? tr("Updated and recalculated", "价格已更新，用量已重算")
-                                : tr("Price update failed; recalculated with cached prices", "价格更新失败，已用缓存价格重算")
+                            let result = await appState.usageService.refreshPricingCatalogAndRecalculateUsage()
+                            pricingCatalogMessageIsError = result?.isError ?? true
+                            pricingCatalogMessage = result?.message
+                                ?? tr("Update and recalculation did not start", "更新和重算未执行")
                             isRecalculatingUsage = false
                         }
                     } label: {

@@ -1,6 +1,12 @@
 import Foundation
 import os
 
+nonisolated struct PricingCatalogRefreshResult: Sendable, Equatable {
+    let liteLLM: Bool
+    let modelsDev: Bool
+    var anySucceeded: Bool { liteLLM || modelsDev }
+}
+
 /// LiteLLM / models.dev 远端价格目录：内存快照 + 磁盘缓存 + 后台刷新（stale-while-revalidate）。
 ///
 /// 用锁保护的普通 class（不用 `actor`）：`rate(for:app:speed:)` 必须保持同步调用，因为它被 `Pricing.cost()`
@@ -186,8 +192,14 @@ nonisolated final class PricingCatalogStore: @unchecked Sendable {
     /// 用户手动更新：绕过 24 小时与失败退避。若常规刷新正在进行，等它完成后再强制刷新，
     /// 避免只复用「其中一个源到期」的常规结果而漏掉另一个源。
     func forceRefresh() async -> Bool {
+        await forceRefreshWithResults().anySucceeded
+    }
+
+    func forceRefreshWithResults() async -> PricingCatalogRefreshResult {
         #if DEBUG
-        if testOverridesStorage.withLock({ $0.networkDisabled }) { return false }
+        if testOverridesStorage.withLock({ $0.networkDisabled }) {
+            return PricingCatalogRefreshResult(liteLLM: false, modelsDev: false)
+        }
         #endif
         while !beginRefresh() {
             await waitForRefreshCompletion()
@@ -251,7 +263,7 @@ nonisolated final class PricingCatalogStore: @unchecked Sendable {
         return now.timeIntervalSince(fetchedAt) >= refreshInterval
     }
 
-    private func performRefresh(force: Bool) async -> Bool {
+    private func performRefresh(force: Bool) async -> PricingCatalogRefreshResult {
         let liteLLM = await refreshSource(
             url: Self.liteLLMURL,
             source: .liteLLM,
@@ -264,7 +276,7 @@ nonisolated final class PricingCatalogStore: @unchecked Sendable {
             force: force,
             decode: ModelsDevPricingDecoder.decode
         )
-        return liteLLM || modelsDev
+        return PricingCatalogRefreshResult(liteLLM: liteLLM, modelsDev: modelsDev)
     }
 
     private func refreshSource(
