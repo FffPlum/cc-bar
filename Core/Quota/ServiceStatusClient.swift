@@ -81,6 +81,16 @@ enum ServiceStatusClient {
     static let kimiComponentsURL = URL(string: "https://status.moonshot.cn/api/v2/components.json")!
     private static let kimiCodeGroupID = "cyrtlddz0q8c"
 
+    static func pageURL(for app: QuotaApp) -> URL? {
+        switch app {
+        case .codex: URL(string: "https://status.openai.com")!
+        case .claude: URL(string: "https://status.claude.com")!
+        case .cursor: URL(string: "https://status.cursor.com")!
+        case .kimi: URL(string: "https://status.moonshot.cn")!
+        case .antigravity, .commandCode, .opencodeGo: nil
+        }
+    }
+
     /// 拉取 Statuspage.io status.json 并解析为 ServiceStatus;
     /// 任何网络 / 解码错误都抛出,调用方负责保留旧快照。
     static func fetch(from url: URL) async throws -> ServiceStatus {
