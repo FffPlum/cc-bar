@@ -324,6 +324,7 @@ final class SettingsStore {
     var quotaInterval: QuotaIntervalChoice { didSet { defaults.set(quotaInterval.rawValue, forKey: Keys.quotaInterval) } }
     var usageInterval: UsageIntervalChoice { didSet { defaults.set(usageInterval.rawValue, forKey: Keys.usageInterval) } }
     var resetTimeDisplay: ResetTimeDisplay { didSet { defaults.set(resetTimeDisplay.rawValue, forKey: Keys.resetTimeDisplay) } }
+    var displayCurrency: DisplayCurrency { didSet { defaults.set(displayCurrency.rawValue, forKey: Keys.displayCurrency) } }
 
     /// 统计页排行口径（默认 Tokens），见 `StatsRankMetric`。
     var statsRankMetric: StatsRankMetric { didSet { defaults.set(statsRankMetric.rawValue, forKey: Keys.statsRankMetric) } }
@@ -456,6 +457,7 @@ final class SettingsStore {
         usageInterval = UsageIntervalChoice(rawValue: uiRaw) ?? .m5
         let rtdRaw = defaults.string(forKey: Keys.resetTimeDisplay) ?? ResetTimeDisplay.relative.rawValue
         resetTimeDisplay = ResetTimeDisplay(rawValue: rtdRaw) ?? .relative
+        displayCurrency = defaults.string(forKey: Keys.displayCurrency).flatMap(DisplayCurrency.init(rawValue:)) ?? .usd
         let srmRaw = defaults.string(forKey: Keys.statsRankMetric) ?? StatsRankMetric.tokens.rawValue
         statsRankMetric = StatsRankMetric(rawValue: srmRaw) ?? .tokens
         cycleIncludesOtherAgents = defaults.object(forKey: Keys.cycleIncludesOtherAgents) as? Bool ?? false
@@ -870,6 +872,7 @@ final class SettingsStore {
         static let quotaInterval = "ccbar.settings.quotaInterval"
         static let usageInterval = "ccbar.settings.usageInterval"
         static let resetTimeDisplay = "ccbar.settings.resetTimeDisplay"
+        static let displayCurrency = "ccbar.settings.displayCurrency"
         static let statsRankMetric = "ccbar.settings.statsRankMetric"
         static let cycleIncludesOtherAgents = "ccbar.settings.cycleIncludesOtherAgents"
         static let piEstimatedOutputSpeed = "ccbar.settings.piEstimatedOutputSpeed"

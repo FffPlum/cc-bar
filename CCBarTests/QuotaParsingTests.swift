@@ -3888,12 +3888,56 @@ final class QuotaParsingTests: XCTestCase {
         XCTAssertTrue(decoded.claudeFast.isEmpty)
     }
 
+    func testLegacyV2CatalogFetchesProviderGroupsWithoutDiscardingPrices() throws {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let price = ModelPrice(input: 1, output: 2, cacheRead: 0.1, cacheCreation: 1)
+        for providers: [ModelsDevProviderPricing]? in [nil, []] {
+            let source = PricingSourceState(
+                etag: "old-etag", fetchedAt: timestamp, failedAt: timestamp,
+                standardRates: ["model": price], codexFastRates: ["model": price],
+                claudeFastRates: ["model": price], providers: providers
+            )
+            let original = PricingCatalogCachePayload(liteLLM: source, modelsDev: source)
+            let migrated = PricingCatalogCache.decode(try JSONEncoder().encode(original))
+
+            XCTAssertNil(migrated.modelsDev.etag, "旧 ETag 会导致 304，无法补齐分组")
+            XCTAssertNil(migrated.modelsDev.fetchedAt, "缺少分组时不能等待 24 小时")
+            XCTAssertEqual(migrated.modelsDev.failedAt, timestamp, "保留失败退避")
+            XCTAssertEqual(migrated.modelsDev.standardRates, source.standardRates)
+            XCTAssertEqual(migrated.modelsDev.codexFastRates, source.codexFastRates)
+            XCTAssertEqual(migrated.modelsDev.claudeFastRates, source.claudeFastRates)
+            XCTAssertEqual(migrated.liteLLM.etag, source.etag)
+            XCTAssertEqual(migrated.liteLLM.fetchedAt, timestamp)
+        }
+    }
+
+    func testCatalogWithProviderGroupsKeepsConditionalRefreshMetadata() throws {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let price = ModelPrice(input: 1, output: 2, cacheRead: 0.1, cacheCreation: 1)
+        let providers = [ModelsDevProviderPricing(
+            id: "openai", name: "OpenAI",
+            models: [ModelsDevModelPricing(id: "model", name: "Model", price: price)]
+        )]
+        let source = PricingSourceState(
+            etag: "current-etag", fetchedAt: timestamp,
+            standardRates: ["model": price], providers: providers
+        )
+        let restored = PricingCatalogCache.decode(try JSONEncoder().encode(
+            PricingCatalogCachePayload(modelsDev: source)
+        ))
+        XCTAssertEqual(restored.modelsDev.providers, providers)
+        XCTAssertEqual(restored.modelsDev.etag, source.etag)
+        XCTAssertEqual(restored.modelsDev.fetchedAt, timestamp)
+    }
+
     func testModelsDevDecoderReadsOfficialFastModeAndIgnoresReseller() throws {
         let data = Data(#"""
         {
           "anthropic": {
+            "name": "Anthropic",
             "models": {
               "claude-opus-5": {
+                "name": "Claude Opus 5",
                 "cost": {
                   "input": 5,
                   "output": 25,
@@ -3912,6 +3956,15 @@ final class QuotaParsingTests: XCTestCase {
                     }
                   }
                 }
+              }
+            }
+          },
+          "google": {
+            "name": "Google",
+            "models": {
+              "gemini-3.8-flash": {
+                "name": "Gemini 3.8 Flash",
+                "cost": {"input": 0.75, "output": 3.75}
               }
             }
           },
@@ -3944,6 +3997,11 @@ final class QuotaParsingTests: XCTestCase {
             cacheCreation: 12.5
         ))
         XCTAssertNil(decoded.codexFast["claude-opus-5"])
+        XCTAssertEqual(decoded.providers.map(\.id), ["anthropic", "google"])
+        XCTAssertEqual(decoded.providers[0].name, "Anthropic")
+        XCTAssertEqual(decoded.providers[0].models[0].name, "Claude Opus 5")
+        XCTAssertEqual(decoded.providers[1].models[0].price.input, Decimal(string: "0.75"))
+        XCTAssertFalse(decoded.providers.contains { $0.id == "reseller" })
     }
 
     func testMissingPriceRefreshSkipsUnknownTierAndIntentionalInternalModel() {

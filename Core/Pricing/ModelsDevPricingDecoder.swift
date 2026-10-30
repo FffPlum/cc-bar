@@ -8,8 +8,10 @@ import Foundation
 /// 单条脏数据跳过即可，不拖垮整个 feed。
 nonisolated enum ModelsDevPricingDecoder {
     /// 同名模型跨官方 provider 出现时，保持这个显式优先级；不要使用 Set 遍历顺序。
-    // Moonshot 只收全球 API 的 USD 价格；订阅计划的零价格及人民币换算价不纳入。
-    nonisolated private static let allowedProviders = ["anthropic", "openai", "deepseek", "moonshotai"]
+    /// 只收当前服务涉及的官方渠道；转售渠道与 Moonshot 中国区 / 订阅零价均不纳入。
+    nonisolated private static let allowedProviders = [
+        "anthropic", "openai", "google", "deepseek", "moonshotai", "xai", "zai", "minimax"
+    ]
 
     nonisolated private struct Candidate {
         let key: String
@@ -17,7 +19,7 @@ nonisolated enum ModelsDevPricingDecoder {
         let price: ModelPrice
     }
 
-    /// - Returns: Standard / Fast 两套归一化价格（models.dev 原生单位为 USD / 百万 token）。
+    /// - Returns: Standard / Fast 两套归一化价格及官方 Provider 展示目录（USD / 百万 token）。
     /// - Throws: `PricingCatalogError.notAnObject` 顶层不是 JSON 对象；
     ///           `PricingCatalogError.emptyFeed` 解析后一条可用条目都没有。
     nonisolated static func decode(_ data: Data) throws -> DecodedPricingRates {
@@ -28,10 +30,12 @@ nonisolated enum ModelsDevPricingDecoder {
         var standardCandidates: [Candidate] = []
         var codexFastCandidates: [Candidate] = []
         var claudeFastCandidates: [Candidate] = []
+        var providers: [ModelsDevProviderPricing] = []
         for (providerPriority, providerId) in allowedProviders.enumerated() {
             guard let providerEntry = root[providerId] as? [String: Any],
                   let models = providerEntry["models"] as? [String: Any]
             else { continue }
+            var displayModels: [ModelsDevModelPricing] = []
             for (modelId, value) in models {
                 guard let entry = value as? [String: Any] else { continue }
                 if let cost = entry["cost"] as? [String: Any],
@@ -39,6 +43,11 @@ nonisolated enum ModelsDevPricingDecoder {
                     standardCandidates.append(.init(
                         key: modelId,
                         providerPriority: providerPriority,
+                        price: price
+                    ))
+                    displayModels.append(ModelsDevModelPricing(
+                        id: modelId,
+                        name: entry["name"] as? String ?? modelId,
                         price: price
                     ))
                 }
@@ -59,6 +68,13 @@ nonisolated enum ModelsDevPricingDecoder {
                     }
                 }
             }
+            if !displayModels.isEmpty {
+                providers.append(ModelsDevProviderPricing(
+                    id: providerId,
+                    name: providerEntry["name"] as? String ?? providerId,
+                    models: displayModels.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                ))
+            }
         }
 
         let standard = resolve(standardCandidates)
@@ -68,7 +84,8 @@ nonisolated enum ModelsDevPricingDecoder {
         return DecodedPricingRates(
             standard: standard,
             codexFast: codexFast,
-            claudeFast: claudeFast
+            claudeFast: claudeFast,
+            providers: providers
         )
     }
 

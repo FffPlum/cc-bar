@@ -3466,47 +3466,24 @@ enum StatsFormatter {
         return f
     }
 
-    private static let costFormatter = decimalFormatter(minimumFractionDigits: 2, maximumFractionDigits: 2)
-    private static let costWholeFormatter = decimalFormatter(minimumFractionDigits: 0, maximumFractionDigits: 0)
-    private static let costPreciseFormatter = decimalFormatter(minimumFractionDigits: 4, maximumFractionDigits: 6)
     private static let tokenFormatter = decimalFormatter(minimumFractionDigits: nil, maximumFractionDigits: nil)
 
     static func cost(_ value: Decimal) -> String {
-        let ns = NSDecimalNumber(decimal: value)
-        return "$\(costFormatter.string(from: ns) ?? "0.00")"
+        CurrencyFormatter.amount(value)
     }
 
-    /// 美元显示取整（四舍五入到整数），仅周期页面使用，存储仍用原始 Decimal。
+    /// 当前币种显示取整，仅周期页面使用，存储仍用原始美元 Decimal。
     static func costWhole(_ value: Decimal) -> String {
-        let ns = NSDecimalNumber(decimal: value)
-            .rounding(accordingToBehavior: nil)
-        return "$\(costWholeFormatter.string(from: ns) ?? "0")"
+        CurrencyFormatter.whole(value)
     }
 
     static func costPrecise(_ value: Decimal) -> String {
-        let ns = NSDecimalNumber(decimal: value)
-        return "$\(costPreciseFormatter.string(from: ns) ?? "0.0000")"
+        CurrencyFormatter.precise(value)
     }
 
-    /// 图表 Y 轴专用：正常金额保持紧凑，小额刻度保留足够小数避免全部显示为 $0。
+    /// 图表 Y 轴专用：正常金额保持紧凑，小额刻度保留足够小数避免全部显示为零。
     static func axisCost(_ value: Decimal) -> String {
-        let ns = NSDecimalNumber(decimal: value)
-        let magnitude = abs(ns.doubleValue)
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.groupingSeparator = ","
-        if magnitude >= 10 {
-            f.minimumFractionDigits = 0
-            f.maximumFractionDigits = 0
-        } else if magnitude >= 1 {
-            f.minimumFractionDigits = 2
-            f.maximumFractionDigits = 2
-        } else {
-            f.minimumFractionDigits = 2
-            f.maximumFractionDigits = 3
-        }
-        return "$\(f.string(from: ns) ?? "0.00")"
+        CurrencyFormatter.axis(value)
     }
 
     @MainActor

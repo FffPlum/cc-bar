@@ -2221,6 +2221,17 @@ final class UsageService {
         return succeeded
     }
 
+    /// 设置页的合并操作：先强制更新价格，再按同一目录完整重算一次；目录更新失败也仍允许重算。
+    @discardableResult
+    func refreshPricingCatalogAndRecalculateUsage() async -> Bool {
+        guard !suspendedForTermination, !isPersistingForTermination, !isRefreshingPricingCatalog else { return false }
+        isRefreshingPricingCatalog = true
+        defer { isRefreshingPricingCatalog = false }
+        let succeeded = await PricingCatalogStore.shared.forceRefresh()
+        await forceRescan()
+        return succeeded
+    }
+
     // MARK: - 常规扫描实现
 
     /// - Parameter allowDeferredWrite: 允许把本轮聚合结果留在内存里、等到节流窗口到期

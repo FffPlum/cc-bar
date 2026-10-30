@@ -84,6 +84,7 @@ private struct MenuBarLabelRoot: View {
                 // 单元测试宿主也会启动 App；此时绝不能触发真实 bootstrap，
                 // 它会读真实日志、写真实 rollup / 缓存。测试自己注入临时目录驱动 UsageService。
                 guard !AppRuntime.isRunningUnitTests else { return }
+                CurrencyStore.shared.refreshIfNeeded()
                 appState.quotaNotifications.settingsChanged(
                     clearNotifications: SettingsStore.shared.privacyMode || !SettingsStore.shared.quotaAlertsEnabled
                 )
