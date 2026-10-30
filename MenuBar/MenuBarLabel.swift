@@ -45,7 +45,7 @@ struct MenuBarLabel: View {
     private var moonshotBalanceTexts: [String] {
         appState.moonshotAccounts.filter(\.showInMenuBar).compactMap { account in
             appState.moonshotBalances[account.id].map {
-                MoonshotBalanceFormatter.amount($0.available, currencyCode: $0.currencyCode)
+                CurrencyFormatter.balance($0.available, from: $0.currencyCode)
             }
         }
     }

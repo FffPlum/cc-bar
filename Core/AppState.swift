@@ -642,6 +642,7 @@ final class AppState {
     func refreshQuotas(reason: QuotaRefreshReason = .periodic) async {
         guard beginStateOperation() else { return }
         defer { activeStateOperations -= 1 }
+        CurrencyStore.shared.refreshIfNeeded()
         quotaRefreshBatchDepth += 1
         defer { endQuotaRefreshBatch() }
         let plan = QuotaRefreshPlan.make(

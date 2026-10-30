@@ -745,13 +745,33 @@ extension View {
 // Popover 顶部 26×22 圆角 5pt borderless 图标按钮。
 // hover 浅灰背景 + 手型光标,匹配 docs/界面布局.md §1.3。
 
+/// 图标统一按可见轮廓缩放，固定容器保证不同 SF Symbols 垂直居中。
+struct PopoverButtonIcon: View {
+    let systemName: String
+
+    var body: some View {
+        Image(systemName: systemName)
+            .resizable()
+            .scaledToFit()
+            .fontWeight(.medium)
+            .frame(width: 14, height: 14)
+            .foregroundStyle(.secondary)
+            .frame(width: 16, height: 16, alignment: .center)
+    }
+}
+
 struct PopoverIconButtonStyle: ButtonStyle {
+    var width: CGFloat? = 26
     @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
 
+    init(width: CGFloat? = 26) {
+        self.width = width
+    }
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .frame(width: 26, height: 22)
+            .frame(width: width, height: 22)
             .background(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(hovering && isEnabled ? Color.primary.opacity(0.08) : .clear)

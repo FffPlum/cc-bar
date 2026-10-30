@@ -25,7 +25,7 @@ struct MoonshotBalancesSection: View {
             }
             HStack(alignment: .firstTextBaseline) {
                 if let balance = appState.moonshotBalances[account.id] {
-                    Text(MoonshotBalanceFormatter.amount(balance.available, currencyCode: balance.currencyCode))
+                    Text(CurrencyFormatter.balance(balance.available, from: balance.currencyCode))
                         .font(.system(size: 18, weight: .semibold)).monospacedDigit()
                 } else if appState.moonshotRefreshStates[account.id]?.inFlight == true {
                     ProgressView().controlSize(.small)
@@ -38,10 +38,10 @@ struct MoonshotBalancesSection: View {
                 HStack {
                     Text(tr("Cash", "现金"))
                     Spacer()
-                    Text(MoonshotBalanceFormatter.amount(balance.cash, currencyCode: balance.currencyCode))
+                    Text(CurrencyFormatter.balance(balance.cash, from: balance.currencyCode))
                     Text(tr("Voucher", "代金券"))
                     Spacer()
-                    Text(MoonshotBalanceFormatter.amount(balance.voucher, currencyCode: balance.currencyCode))
+                    Text(CurrencyFormatter.balance(balance.voucher, from: balance.currencyCode))
                 }
                 .font(.system(size: 10.5)).foregroundStyle(.secondary).monospacedDigit()
                 Text(tr("Fetched \(PopoverRootView.relativeAge(from: balance.fetchedAt)) ago · \(balance.currencyCode)",

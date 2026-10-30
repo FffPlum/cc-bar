@@ -5,17 +5,16 @@ import AppKit
 // MARK: - PopoverRootView
 //
 // 见 docs/界面布局.md §1。
-// 结构:Header(标题 + 副标题 + 状态点 + 刷新 / 统计 / 设置 / 退出 四个一级图标) /
+// 结构:Header(标题 + 副标题 + 状态点 + 刷新 / 统计 / 退出) /
 //      每个已启用 Provider 一个 ServiceBlockView(tile + 服务名/plan + 主额度大字 +
 //      进度条 + reset + today/week cost + 次要额度行),block 间 0.5pt Divider。
-// 退出是 header 上的一级图标；发现新版本后仅显示版本号与打开更新窗口的下载按钮。
+// Footer 左侧为当前版本与发布页入口，右侧为设置。
 
 struct PopoverRootView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.openWindow) private var openWindow
     @State private var refreshRotation: Double = 0
-    @State private var hoveredHeaderTooltip: HeaderTooltip?
-    @State private var visibleHeaderTooltip: HeaderTooltip?
+    @State private var hoveredPopoverTooltip: PopoverTooltip?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,53 +24,38 @@ struct PopoverRootView: View {
 
             content
 
-            if let version = AppUpdater.shared.availableVersion {
-                HStack(spacing: 8) {
-                    Spacer()
-                    Text(version)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                    Button(tr("Download", "下载")) {
-                        AppUpdater.shared.showUpdateWindow()
+            Divider()
+
+            HStack(alignment: .center, spacing: 8) {
+                Button {
+                    clearPopoverTooltip()
+                    AppUpdater.shared.openReleasePage()
+                } label: {
+                    HStack(alignment: .center, spacing: 6) {
+                        Text("v\(AppUpdater.shared.currentVersion)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                        PopoverButtonIcon(systemName: "arrow.up.forward.square")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .padding(.horizontal, 6)
                 }
-                .font(.system(size: 11.5))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                .buttonStyle(PopoverIconButtonStyle(width: nil))
+                .accessibilityLabel("v\(AppUpdater.shared.currentVersion) · \(popoverTooltipText(.releasePage))")
+                .anchorPreference(key: PopoverTooltipAnchorKey.self, value: .bounds) { [.releasePage: $0] }
+                .onHover { hoverPopoverTooltip(.releasePage, inside: $0) }
+
+                Spacer()
+
+                popoverButton(.settings, symbol: "gearshape") {
+                    activateAndOpenMain(tab: .settings)
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
         .frame(width: 340)
-        .overlayPreferenceValue(HeaderTooltipAnchorKey.self) { anchors in
-            GeometryReader { geometry in
-                if let item = visibleHeaderTooltip, let anchor = anchors[item] {
-                    HeaderTooltipLayout(anchor: geometry[anchor]) {
-                        Text(headerTooltipText(item))
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Color.black.opacity(0.85))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(.white, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
-                    }
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                }
-            }
-            // 说明只负责绘制，不建立额外 popover、不抢焦点或吞掉点击。
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        }
-        .task(id: hoveredHeaderTooltip) {
-            guard let item = hoveredHeaderTooltip else { return }
-            do { try await Task.sleep(nanoseconds: 100_000_000) }
-            catch { return }
-            guard !Task.isCancelled, hoveredHeaderTooltip == item else { return }
-            visibleHeaderTooltip = item
-        }
-        .onDisappear { clearHeaderTooltip() }
+        .modifier(PopoverTooltipOverlay(hovered: $hoveredPopoverTooltip, text: popoverTooltipText))
         // 转圈由 appState.isRefreshing 统一驱动:无论刷新从哪个入口发起
         // (点击刷新按钮、⌘R 全局快捷键),只要整体刷新真正开始,按钮就转一圈。
         .onChange(of: appState.isRefreshing) { _, refreshing in
@@ -105,24 +89,20 @@ struct PopoverRootView: View {
                     .fill(state.color)
                     .frame(width: 7, height: 7)
                     .accessibilityLabel(headerStateTooltip(state))
-                    .anchorPreference(key: HeaderTooltipAnchorKey.self, value: .bounds) { [.status: $0] }
-                    .onHover { hoverHeaderTooltip(.status, inside: $0) }
+                    .anchorPreference(key: PopoverTooltipAnchorKey.self, value: .bounds) { [.status: $0] }
+                    .onHover { hoverPopoverTooltip(.status, inside: $0) }
                     .padding(.trailing, 4)
             }
 
             // 不加 disabled:按钮永远可点;AppState.refreshNow() 内部已经做了
             // in-flight 去重,不会重复发请求。刷新真正开始时由 isRefreshing 驱动转圈。
-            headerButton(.refresh, symbol: "arrow.clockwise", action: refresh)
+            popoverButton(.refresh, symbol: "arrow.clockwise", action: refresh)
 
-            headerButton(.statistics, symbol: "chart.bar.xaxis") {
+            popoverButton(.statistics, symbol: "chart.bar.xaxis") {
                 activateAndOpenMain(tab: .stats)
             }
 
-            headerButton(.settings, symbol: "gearshape") {
-                activateAndOpenMain(tab: .settings)
-            }
-
-            headerButton(.quit, symbol: "power") {
+            popoverButton(.quit, symbol: "power") {
                 NSApp.terminate(nil)
             }
         }
@@ -131,46 +111,46 @@ struct PopoverRootView: View {
         .padding(.bottom, 12)
     }
 
-    private func headerButton(_ item: HeaderTooltip, symbol: String, action: @escaping () -> Void) -> some View {
+    private func popoverButton(_ item: PopoverTooltip, symbol: String, action: @escaping () -> Void) -> some View {
         Button {
-            clearHeaderTooltip()
+            clearPopoverTooltip()
             action()
         } label: {
-            Image(systemName: symbol)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
+            PopoverButtonIcon(systemName: symbol)
                 .rotationEffect(.degrees(item == .refresh ? refreshRotation : 0))
                 .animation(.easeInOut(duration: 0.7), value: refreshRotation)
         }
         .buttonStyle(PopoverIconButtonStyle())
-        .accessibilityLabel(headerTooltipText(item))
-        .anchorPreference(key: HeaderTooltipAnchorKey.self, value: .bounds) { [item: $0] }
-        .onHover { hoverHeaderTooltip(item, inside: $0) }
+        .accessibilityLabel(popoverTooltipText(item))
+        .anchorPreference(key: PopoverTooltipAnchorKey.self, value: .bounds) { [item: $0] }
+        .onHover { hoverPopoverTooltip(item, inside: $0) }
     }
 
-    private func headerTooltipText(_ item: HeaderTooltip) -> String {
+    private func popoverTooltipText(_ item: PopoverTooltip) -> String {
         switch item {
         case .status: headerState.map { headerStateTooltip($0) } ?? ""
         case .refresh: tr("Refresh now", "立即刷新")
         case .statistics: tr("Open Statistics", "查看统计")
         case .settings: tr("Settings", "设置")
         case .quit: tr("Quit", "退出")
+        case .releasePage: tr("Open release page", "打开发布页")
+        case .statusRefresh: tr("Refresh official status", "刷新官方状态")
+        case .statusPage: tr("Open status page", "打开状态页")
+        case .currencyRefresh: tr("Refresh exchange rates", "刷新汇率")
         }
     }
 
-    private func hoverHeaderTooltip(_ item: HeaderTooltip, inside: Bool) {
+    private func hoverPopoverTooltip(_ item: PopoverTooltip, inside: Bool) {
         if inside {
-            guard hoveredHeaderTooltip != item else { return }
-            visibleHeaderTooltip = nil
-            hoveredHeaderTooltip = item
-        } else if hoveredHeaderTooltip == item {
-            clearHeaderTooltip()
+            guard hoveredPopoverTooltip != item else { return }
+            hoveredPopoverTooltip = item
+        } else if hoveredPopoverTooltip == item {
+            clearPopoverTooltip()
         }
     }
 
-    private func clearHeaderTooltip() {
-        hoveredHeaderTooltip = nil
-        visibleHeaderTooltip = nil
+    private func clearPopoverTooltip() {
+        hoveredPopoverTooltip = nil
     }
 
     /// `now` 由 header 的 TimelineView 提供,让"Xs 前已刷新"实时滚动。
@@ -253,7 +233,8 @@ struct PopoverRootView: View {
                         || appState.kimiManagedAccounts.contains(where: \.visibleInPopover) {
                         AccountVendorHeader(title: provider.title, logoName: provider.logoName,
                                             fallback: provider.fallback, tint: provider.app.tintColor,
-                                            status: provider.app == .kimi ? appState.displayedKimiServiceStatus : serviceStatus(for: provider.app))
+                                            status: provider.app == .kimi ? appState.displayedKimiServiceStatus : serviceStatus(for: provider.app),
+                                            statusPageURL: ServiceStatusClient.pageURL(for: provider.app))
                     }
                     if provider.app != .kimi || appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty {
                         primaryServiceBlock(provider)
@@ -561,6 +542,7 @@ struct AccountVendorHeader: View {
     var fallback = "K"
     var tint: Color = .purple
     var status: ServiceStatus? = nil
+    var statusPageURL: URL? = nil
 
     var body: some View {
         HStack(spacing: 9) {
@@ -574,7 +556,9 @@ struct AccountVendorHeader: View {
             }
             Text(title).font(.system(size: 13, weight: .semibold))
             Spacer(minLength: 0)
-            if let status { ServiceStatusDot(status: status, title: title) }
+            if let status {
+                ServiceStatusDot(status: status, title: title, statusPageURL: statusPageURL)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 14)
@@ -891,18 +875,8 @@ struct ServiceBlockView: View {
         }
     }
 
-    /// 取整美元金额:`<$1` 用于 0 ~ 0.99,`$0` 仅在 nil/0 时显示。
     private func formatCostInt(_ value: Decimal?) -> String {
-        guard let value else { return "—" }
-        let d = NSDecimalNumber(decimal: value).doubleValue
-        if d <= 0 { return "$0" }
-        if d < 1 { return "<$1" }
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.maximumFractionDigits = 0
-        formatter.minimumFractionDigits = 0
-        return "$\(formatter.string(from: NSDecimalNumber(decimal: value)) ?? "0")"
+        CurrencyFormatter.compactWhole(value)
     }
 
     private func shortError(_ error: String?) -> String? {
@@ -914,21 +888,68 @@ struct ServiceBlockView: View {
     }
 }
 
-private enum HeaderTooltip: Hashable {
-    case status, refresh, statistics, settings, quit
+enum PopoverTooltip: Hashable {
+    case status, refresh, statistics, settings, quit, releasePage, statusRefresh, statusPage, currencyRefresh
+
+    var appearsAbove: Bool {
+        switch self {
+        case .settings, .releasePage, .statusRefresh, .statusPage: true
+        default: false
+        }
+    }
 }
 
-private struct HeaderTooltipAnchorKey: PreferenceKey {
-    static var defaultValue: [HeaderTooltip: Anchor<CGRect>] = [:]
+struct PopoverTooltipOverlay: ViewModifier {
+    @Binding var hovered: PopoverTooltip?
+    let text: (PopoverTooltip) -> String
+    @State private var visible: PopoverTooltip?
 
-    static func reduce(value: inout [HeaderTooltip: Anchor<CGRect>], nextValue: () -> [HeaderTooltip: Anchor<CGRect>]) {
+    func body(content: Content) -> some View {
+        content
+            .overlayPreferenceValue(PopoverTooltipAnchorKey.self) { anchors in
+                GeometryReader { geometry in
+                    if let item = visible, item == hovered, let anchor = anchors[item] {
+                        PopoverTooltipLayout(anchor: geometry[anchor], appearsAbove: item.appearsAbove) {
+                            Text(text(item))
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Color.black.opacity(0.85))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(.white, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                        }
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                    }
+                }
+                // 说明只负责绘制，不建立额外 popover、不抢焦点或吞掉点击。
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            .task(id: hovered) {
+                visible = nil
+                guard let item = hovered else { return }
+                do { try await Task.sleep(nanoseconds: 100_000_000) }
+                catch { return }
+                guard !Task.isCancelled, hovered == item else { return }
+                visible = item
+            }
+            .onDisappear { hovered = nil; visible = nil }
+    }
+}
+
+struct PopoverTooltipAnchorKey: PreferenceKey {
+    static var defaultValue: [PopoverTooltip: Anchor<CGRect>] = [:]
+
+    static func reduce(value: inout [PopoverTooltip: Anchor<CGRect>], nextValue: () -> [PopoverTooltip: Anchor<CGRect>]) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
 
 /// 在根视图内按实际文字尺寸放置说明，避开按钮并收进左右边缘。
-private struct HeaderTooltipLayout: Layout {
+private struct PopoverTooltipLayout: Layout {
     let anchor: CGRect
+    let appearsAbove: Bool
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         proposal.replacingUnspecifiedDimensions()
@@ -939,8 +960,9 @@ private struct HeaderTooltipLayout: Layout {
         let margin: CGFloat = 12
         let size = tooltip.sizeThatFits(ProposedViewSize(width: min(220, max(0, bounds.width - margin * 2)), height: nil))
         let x = min(max(margin, anchor.midX - size.width / 2), bounds.width - margin - size.width)
+        let y = appearsAbove ? anchor.minY - size.height - 6 : anchor.maxY + 6
         tooltip.place(
-            at: CGPoint(x: bounds.minX + x, y: bounds.minY + anchor.maxY + 6),
+            at: CGPoint(x: bounds.minX + x, y: bounds.minY + max(0, min(y, bounds.height - size.height))),
             anchor: .topLeading,
             proposal: ProposedViewSize(width: size.width, height: size.height)
         )
@@ -994,19 +1016,26 @@ private final class QuickHoverPresentation: ObservableObject {
 struct ServiceStatusDot: View {
     let status: ServiceStatus
     let title: String
+    let statusPageURL: URL?
     @StateObject private var presentation = QuickHoverPresentation()
 
     var body: some View {
         Button { presentation.toggle() } label: {
-            Circle().fill(status.indicator.dotColor).frame(width: 6, height: 6)
-                .padding(5).contentShape(Rectangle())
+            HStack(spacing: 5) {
+                Circle().fill(status.indicator.dotColor).frame(width: 6, height: 6)
+                Text(tr("Official status", "官方状态"))
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(5)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Text("\(title): \(status.isStale ? tr("Status unknown", "状态未知") : status.indicator.componentLabel)"))
+        .accessibilityLabel(Text("\(title): \(tr("Official status", "官方状态")) · \(status.isStale ? tr("Status unknown", "状态未知") : status.indicator.componentLabel)"))
         .onHover { presentation.hover($0, delayNanoseconds: 100_000_000) }
         .onDisappear { presentation.reset() }
         .popover(isPresented: $presentation.isPresented, arrowEdge: .bottom) {
-            ServiceStatusDetailView(status: status, title: title)
+            ServiceStatusDetailView(status: status, title: title, statusPageURL: statusPageURL)
                 .onHover { presentation.hover($0, content: true) }
                 .onDisappear { presentation.reset() }
         }
@@ -1014,8 +1043,13 @@ struct ServiceStatusDot: View {
 }
 
 private struct ServiceStatusDetailView: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.openURL) private var openURL
     let status: ServiceStatus
     let title: String
+    let statusPageURL: URL?
+    @State private var isRefreshing = false
+    @State private var hoveredTooltip: PopoverTooltip?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1042,9 +1076,57 @@ private struct ServiceStatusDetailView: View {
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Divider()
+            HStack(alignment: .center) {
+                Button {
+                    hoveredTooltip = nil
+                    isRefreshing = true
+                    Task {
+                        await appState.refreshServiceStatus()
+                        isRefreshing = false
+                    }
+                } label: {
+                    if isRefreshing {
+                        ProgressView().controlSize(.small).frame(width: 16, height: 16)
+                    } else {
+                        PopoverButtonIcon(systemName: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(PopoverIconButtonStyle())
+                .foregroundStyle(.secondary)
+                .disabled(isRefreshing)
+                .accessibilityLabel(tr("Refresh official status", "刷新官方状态"))
+                .anchorPreference(key: PopoverTooltipAnchorKey.self, value: .bounds) { [.statusRefresh: $0] }
+                .onHover { hoverTooltip(.statusRefresh, inside: $0 && !isRefreshing) }
+
+                Spacer()
+
+                if let statusPageURL {
+                    Button {
+                        hoveredTooltip = nil
+                        openURL(statusPageURL)
+                    } label: {
+                        PopoverButtonIcon(systemName: "arrow.up.forward.square")
+                    }
+                    .buttonStyle(PopoverIconButtonStyle())
+                    .accessibilityLabel(tr("Open status page", "打开状态页"))
+                    .anchorPreference(key: PopoverTooltipAnchorKey.self, value: .bounds) { [.statusPage: $0] }
+                    .onHover { hoverTooltip(.statusPage, inside: $0) }
+                }
+            }
         }
         .padding(14)
         .frame(width: 300, alignment: .leading)
+        .modifier(PopoverTooltipOverlay(hovered: $hoveredTooltip) { item in
+            item == .statusRefresh
+                ? tr("Refresh official status", "刷新官方状态")
+                : tr("Open status page", "打开状态页")
+        })
+    }
+
+    private func hoverTooltip(_ item: PopoverTooltip, inside: Bool) {
+        if inside { hoveredTooltip = item }
+        else if hoveredTooltip == item { hoveredTooltip = nil }
     }
 
     private func statusRow(name: String, indicator: ServiceStatusIndicator) -> some View {

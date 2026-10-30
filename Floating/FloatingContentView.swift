@@ -41,7 +41,7 @@ struct FloatingContentView: View {
                         .frame(width: 18, height: 18)
                     Spacer(minLength: 56)
                     if let balance = appState.moonshotBalances[account.id] {
-                        Text(MoonshotBalanceFormatter.amount(balance.available, currencyCode: balance.currencyCode))
+                        Text(CurrencyFormatter.balance(balance.available, from: balance.currencyCode))
                             .font(.system(size: 13, weight: .semibold)).monospacedDigit()
                     } else {
                         Text("—").foregroundStyle(.secondary)

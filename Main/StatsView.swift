@@ -1729,12 +1729,11 @@ private struct OverviewCompositionPanel: View {
     let onSelectService: (UsageApp) -> Void
     let navigate: (StatsNavigationRequest.Target) -> Void
 
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dimension: CompositionDimension = .service
     @State private var expandedProvider: ModelProvider?
     @State private var expandedModel: String?
-    @State private var hoveredServiceID: String?
+    @State private var hoveredRowID: String?
 
     var body: some View {
         let rows = model.composition[dimension] ?? []
@@ -1756,7 +1755,7 @@ private struct OverviewCompositionPanel: View {
                 VStack(alignment: .leading, spacing: 10) {
                     CompositionShareBar(segments: rows.map {
                         CompositionShareBar.Segment(id: $0.id, role: $0.color, share: model.share(of: $0.totals))
-                    }, height: 8, highlightedID: dimension == .service ? hoveredServiceID : nil)
+                    }, height: 8, highlightedID: hoveredRowID)
 
                     VStack(spacing: 0) {
                         columnHeader
@@ -1794,12 +1793,12 @@ private struct OverviewCompositionPanel: View {
         .onChange(of: scope) { _, _ in
             expandedProvider = nil
             expandedModel = nil
-            hoveredServiceID = nil
+            hoveredRowID = nil
         }
         .onChange(of: dimension) { _, _ in
             expandedProvider = nil
             expandedModel = nil
-            hoveredServiceID = nil
+            hoveredRowID = nil
         }
     }
 
@@ -1816,8 +1815,8 @@ private struct OverviewCompositionPanel: View {
                 rowView(row)
             }
         }
-        // 给首尾行和左右边缘的柔光留出空间，避免被滚动区域裁成硬边。
-        .padding(dimension == .service ? CCSpacing.xs : 0)
+        // 保留各维度行四周的间距，避免悬停背景紧贴滚动区域边缘。
+        .padding(CCSpacing.xs)
     }
 
     /// 列名行，列宽与 `rowContent` 一致。
@@ -1835,7 +1834,7 @@ private struct OverviewCompositionPanel: View {
         }
         .font(.system(size: 10.5))
         .foregroundStyle(.tertiary)
-        .padding(.horizontal, dimension == .service ? CCSpacing.m2 + CCSpacing.xs : 0)
+        .padding(.horizontal, CCSpacing.m2 + CCSpacing.xs)
         .padding(.bottom, 4)
     }
 
@@ -1876,23 +1875,25 @@ private struct OverviewCompositionPanel: View {
                     }
                 }
                 .padding(.leading, 16)
+                .padding(.trailing, CCSpacing.m2)
                 .padding(.bottom, 8)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .zIndex(hoveredServiceID == row.id ? 1 : 0)
+        .zIndex(hoveredRowID == row.id ? 1 : 0)
     }
 
     private func rowContent(_ row: CompositionRow, isExpanded: Bool) -> some View {
         // 未归属与不参与排名的灰色行（「其他」提供商、特殊项目）用次级样式。
         let isSecondary = row.kind != .item || row.color == .rest
-        let isHovered = dimension == .service && hoveredServiceID == row.id
+        let isHovered = hoveredRowID == row.id
         return HStack(spacing: 8) {
             if case .service(let app) = row.color {
                 ServiceTile(app: app, size: 18)
                     .scaleEffect(isHovered && !reduceMotion ? 1.08 : 1)
             } else {
                 CompositionSwatch(role: row.color, size: 8)
+                    .scaleEffect(isHovered && !reduceMotion ? 1.08 : 1)
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(title(for: row))
@@ -1954,36 +1955,28 @@ private struct OverviewCompositionPanel: View {
             .foregroundStyle(.tertiary)
             .frame(width: 10, height: 10)
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, dimension == .service ? CCSpacing.m2 : 0)
+        .padding(.vertical, dimension == .provider ? 8 : 6)
+        .padding(.horizontal, CCSpacing.m2)
         .background {
-            if dimension == .service {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(LinearGradient(
-                        colors: [.white.opacity(colorScheme == .dark ? 0.07 : 0.6),
-                                 .white.opacity(colorScheme == .dark ? 0.025 : 0.15)],
-                        startPoint: .top, endPoint: .bottom
-                    ))
-                    .shadow(color: .white.opacity(colorScheme == .dark ? 0.1 : 0.45), radius: 4)
-                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.08 : 0.035), radius: 3, y: 1)
-                    .opacity(isHovered ? 1 : 0)
-                    .allowsHitTesting(false)
-            }
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                // 与对话列表 StatsSelectableRow 的悬停底色保持一致。
+                .fill(Color.primary.opacity(dimension == .provider && isExpanded ? 0.08 : (isHovered ? 0.04 : 0)))
+                .padding(.vertical, 3)
+                .allowsHitTesting(false)
         }
         .contentShape(Rectangle())
         .onHover { hovering in
-            guard dimension == .service, case .service = row.color else { return }
             // 只给指针反馈加动画；切换维度/范围等操作仍即时重置。
             withAnimation(.timingCurve(0.23, 1, 0.32, 1, duration: 0.16)) {
                 if hovering {
-                    hoveredServiceID = row.id
-                } else if hoveredServiceID == row.id {
-                    hoveredServiceID = nil
+                    hoveredRowID = row.id
+                } else if hoveredRowID == row.id {
+                    hoveredRowID = nil
                 }
             }
         }
         .onDisappear {
-            if hoveredServiceID == row.id { hoveredServiceID = nil }
+            if hoveredRowID == row.id { hoveredRowID = nil }
         }
     }
 
@@ -2320,13 +2313,21 @@ struct CompositionShareBar: View {
                         .opacity(hasHighlight && segment.id != highlightedID ? 0.45 : 1)
                         .scaleEffect(x: hasHighlight && segment.id == highlightedID && !reduceMotion ? 1.015 : 1,
                                      y: hasHighlight && segment.id == highlightedID && !reduceMotion ? 1.3 : 1)
-                        .shadow(color: .white.opacity(hasHighlight && segment.id == highlightedID ? 0.35 : 0), radius: 3)
-                        .shadow(color: .black.opacity(hasHighlight && segment.id == highlightedID ? 0.06 : 0), radius: 2, y: 1)
+                        .shadow(color: glowColor(for: segment.role).opacity(hasHighlight && segment.id == highlightedID ? 0.2 : 0), radius: 3)
                         .zIndex(hasHighlight && segment.id == highlightedID ? 1 : 0)
                 }
             }
         }
         .frame(height: height)
+    }
+
+    private func glowColor(for role: CompositionColorRole) -> Color {
+        switch role {
+        case .service(let app): app.tintColor
+        case .rank(let index): CompositionPalette.rank(index)
+        case .rest: CompositionPalette.rest
+        case .unattributed: CompositionPalette.unattributedStripe
+        }
     }
 }
 
@@ -3466,47 +3467,24 @@ enum StatsFormatter {
         return f
     }
 
-    private static let costFormatter = decimalFormatter(minimumFractionDigits: 2, maximumFractionDigits: 2)
-    private static let costWholeFormatter = decimalFormatter(minimumFractionDigits: 0, maximumFractionDigits: 0)
-    private static let costPreciseFormatter = decimalFormatter(minimumFractionDigits: 4, maximumFractionDigits: 6)
     private static let tokenFormatter = decimalFormatter(minimumFractionDigits: nil, maximumFractionDigits: nil)
 
     static func cost(_ value: Decimal) -> String {
-        let ns = NSDecimalNumber(decimal: value)
-        return "$\(costFormatter.string(from: ns) ?? "0.00")"
+        CurrencyFormatter.amount(value)
     }
 
-    /// 美元显示取整（四舍五入到整数），仅周期页面使用，存储仍用原始 Decimal。
+    /// 当前币种显示取整，仅周期页面使用，存储仍用原始美元 Decimal。
     static func costWhole(_ value: Decimal) -> String {
-        let ns = NSDecimalNumber(decimal: value)
-            .rounding(accordingToBehavior: nil)
-        return "$\(costWholeFormatter.string(from: ns) ?? "0")"
+        CurrencyFormatter.whole(value)
     }
 
     static func costPrecise(_ value: Decimal) -> String {
-        let ns = NSDecimalNumber(decimal: value)
-        return "$\(costPreciseFormatter.string(from: ns) ?? "0.0000")"
+        CurrencyFormatter.precise(value)
     }
 
-    /// 图表 Y 轴专用：正常金额保持紧凑，小额刻度保留足够小数避免全部显示为 $0。
+    /// 图表 Y 轴专用：正常金额保持紧凑，小额刻度保留足够小数避免全部显示为零。
     static func axisCost(_ value: Decimal) -> String {
-        let ns = NSDecimalNumber(decimal: value)
-        let magnitude = abs(ns.doubleValue)
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.groupingSeparator = ","
-        if magnitude >= 10 {
-            f.minimumFractionDigits = 0
-            f.maximumFractionDigits = 0
-        } else if magnitude >= 1 {
-            f.minimumFractionDigits = 2
-            f.maximumFractionDigits = 2
-        } else {
-            f.minimumFractionDigits = 2
-            f.maximumFractionDigits = 3
-        }
-        return "$\(f.string(from: ns) ?? "0.00")"
+        CurrencyFormatter.axis(value)
     }
 
     @MainActor

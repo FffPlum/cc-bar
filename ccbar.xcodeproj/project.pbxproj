@@ -195,6 +195,9 @@
 		B71E3100000000000000AABB /* CachedManagedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E3100000000000000AAAA /* CachedManagedKeychain.swift */; };
 		B71E3200000000000000AABB /* CachedManagedKeychainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E3200000000000000AAAA /* CachedManagedKeychainTests.swift */; };
 		B71F0100000000000000AABB /* KimiTimingAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71F0100000000000000AAAA /* KimiTimingAuditTests.swift */; };
+		C0B10001000000000000AABB /* Currency.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B10001000000000000AAAA /* Currency.swift */; };
+		C0B10002000000000000AABB /* PricingCatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B10002000000000000AAAA /* PricingCatalogView.swift */; };
+		C0B10003000000000000AABB /* CurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B10003000000000000AAAA /* CurrencyTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -397,6 +400,9 @@
 		B71E3100000000000000AAAA /* CachedManagedKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedManagedKeychain.swift; sourceTree = "<group>"; };
 		B71E3200000000000000AAAA /* CachedManagedKeychainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedManagedKeychainTests.swift; sourceTree = "<group>"; };
 		B71F0100000000000000AAAA /* KimiTimingAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiTimingAuditTests.swift; sourceTree = "<group>"; };
+		C0B10001000000000000AAAA /* Currency.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Currency.swift; sourceTree = "<group>"; };
+		C0B10002000000000000AAAA /* PricingCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PricingCatalogView.swift; sourceTree = "<group>"; };
+		C0B10003000000000000AAAA /* CurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrencyTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -498,6 +504,7 @@
 			isa = PBXGroup;
 			children = (
 				4931AC542FC02A4200EE598C /* SettingsRootView.swift */,
+				C0B10002000000000000AAAA /* PricingCatalogView.swift */,
 				49C1CC04000000000001AAAA /* CommandCodeCredentialSheet.swift */,
 				49C1CC08000000000001AAAA /* OpenCodeGoCredentialSheet.swift */,
 				49C1B194000000000001AAAA /* ImportedCodexAccountsView.swift */,
@@ -623,6 +630,7 @@
 				49C1B158000000000001AAAA /* LiteLLMPricingDecoder.swift */,
 				49C1B159000000000001AAAA /* ModelsDevPricingDecoder.swift */,
 				49C1B15A000000000001AAAA /* PricingCatalogStore.swift */,
+				C0B10001000000000000AAAA /* Currency.swift */,
 			);
 			path = Pricing;
 			sourceTree = "<group>";
@@ -701,6 +709,7 @@
 				FA11C0DE0000000000000010 /* ServiceIconTests.swift */,
 				B12AAD000000000000000003 /* BrandAppearanceTests.swift */,
 				49C1B300000000000001AAAA /* QuotaParsingTests.swift */,
+				C0B10003000000000000AAAA /* CurrencyTests.swift */,
 				49C1BC12000000000001AAAA /* CursorAuthTests.swift */,
 				49C1BC15000000000001AAAA /* CursorUsageFetcherTests.swift */,
 				49C1BF02000000000001AAAA /* QuotaRefreshPlanTests.swift */,
@@ -999,6 +1008,8 @@
 				49C1B158000000000001AABB /* LiteLLMPricingDecoder.swift in Sources */,
 				49C1B159000000000001AABB /* ModelsDevPricingDecoder.swift in Sources */,
 				49C1B15A000000000001AABB /* PricingCatalogStore.swift in Sources */,
+				C0B10001000000000000AABB /* Currency.swift in Sources */,
+				C0B10002000000000000AABB /* PricingCatalogView.swift in Sources */,
 				49C1B161000000000001AABB /* MainWindowRootView.swift in Sources */,
 				49C1B162000000000001AABB /* StatsView.swift in Sources */,
 				49C1B1F0000000000001AABB /* StatsOverviewModel.swift in Sources */,
@@ -1044,6 +1055,7 @@
 				FA11C0DE0000000000000110 /* ServiceIconTests.swift in Sources */,
 				B12AAD000000000000000103 /* BrandAppearanceTests.swift in Sources */,
 				49C1B300000000000001AABB /* QuotaParsingTests.swift in Sources */,
+				C0B10003000000000000AABB /* CurrencyTests.swift in Sources */,
 				49C1BC12000000000001AABB /* CursorAuthTests.swift in Sources */,
 				49C1BC15000000000001AABB /* CursorUsageFetcherTests.swift in Sources */,
 				49C1BF02000000000001AABB /* QuotaRefreshPlanTests.swift in Sources */,
@@ -1240,7 +1252,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.36;
+				MARKETING_VERSION = 1.1.37;
 				PRODUCT_BUNDLE_IDENTIFIER = com.fffplum.ccbar;
 				PRODUCT_NAME = CCBar;
 				REGISTER_APP_GROUPS = YES;
@@ -1275,7 +1287,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.36;
+				MARKETING_VERSION = 1.1.37;
 				PRODUCT_BUNDLE_IDENTIFIER = com.fffplum.ccbar;
 				PRODUCT_NAME = CCBar;
 				REGISTER_APP_GROUPS = YES;

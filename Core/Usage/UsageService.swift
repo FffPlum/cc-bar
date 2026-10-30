@@ -135,6 +135,40 @@ extension UsageLogReadIssue {
     }
 }
 
+/// 本次手动操作的两个独立结果；受限恢复只核对历史，不视为完整重算。
+struct PricingRecalculationResult {
+    let modelsDevUpdated: Bool
+    let rebuildOutcome: UsageRebuildOutcome?
+
+    var isError: Bool {
+        guard modelsDevUpdated, case .replaced = rebuildOutcome else { return true }
+        return false
+    }
+
+    @MainActor
+    var message: String {
+        let pricing = modelsDevUpdated
+            ? tr("models.dev prices updated", "models.dev 价格已更新")
+            : tr("models.dev price update failed", "models.dev 价格更新失败")
+        let rebuild: String
+        switch rebuildOutcome {
+        case .replaced:
+            rebuild = modelsDevUpdated
+                ? tr("usage recalculated", "用量已重算")
+                : tr("usage recalculated with available prices", "已用现有价格重算用量")
+        case .partiallyCommitted:
+            rebuild = tr("usage partly recalculated", "用量仅部分重算")
+        case .recoveredFromRestrictedHistory:
+            rebuild = tr("history verified; recalculate again", "历史已校验恢复，请再次重算用量")
+        case .rejectedUsageChanged, .rejectedIncompleteSources, .commitFailed, .restrictedRecoveryRejected:
+            rebuild = tr("usage recalculation not applied", "用量重算未生效")
+        case nil:
+            rebuild = tr("usage recalculation did not start", "用量重算未执行")
+        }
+        return "\(pricing) · \(rebuild)"
+    }
+}
+
 /// 一次候选重算的完整结果。
 private struct RebuildCandidate {
     var dayBuckets: [UsageBucket]
@@ -1606,14 +1640,15 @@ final class UsageService {
     /// 用户在设置页手动触发的强制重算，与自动重建走同一流程。候选在独立的聚合器上从现有日志完整重建，
     /// 日志已删除的对话按 `UsageRebuildMerge` 保留原用量、按现价重新计费；
     /// 来源读取不完整或持久化失败时一律保留原历史。历史受限时只做受限恢复的核对。
-    func forceRescan() async {
-        guard !suspendedForTermination, !isPersistingForTermination else { return }
+    @discardableResult
+    func forceRescan() async -> UsageRebuildOutcome? {
+        guard !suspendedForTermination, !isPersistingForTermination else { return nil }
         // 撞上另一次进行中的扫描(常见于 App 冷启动自动扫描、或 Scheduler 定时扫描)时,
         // 不再静默丢弃这次操作:等它跑完再真正强制重算,保证用户点的这次一定生效。
         // 设置页按钮的 spinner 在等待期间会一直转,用户感知不到差异,只是变"诚实"了。
         while isScanning {
             try? await Task.sleep(nanoseconds: 150_000_000)
-            guard !suspendedForTermination, !isPersistingForTermination else { return }
+            guard !suspendedForTermination, !isPersistingForTermination else { return nil }
         }
         isScanning = true
         defer {
@@ -1628,7 +1663,7 @@ final class UsageService {
         PricingCatalogStore.shared.commitPending()
         guard !storeWriteDisabled else {
             lastRebuildOutcome = .commitFailed("usage history store is read-only")
-            return
+            return lastRebuildOutcome
         }
 
         if historyRecoveryState != .complete {
@@ -1643,7 +1678,7 @@ final class UsageService {
                 lastRebuildOutcome = .restrictedRecoveryRejected
                 lastError = Self.restrictedHistoryMessage
             }
-            return
+            return lastRebuildOutcome
         }
 
         isRebuildingHistory = true
@@ -1651,7 +1686,7 @@ final class UsageService {
         // 基准必须与磁盘一致：先把上一次常规扫描之后积压的增量提交掉。
         guard await drainPendingIncrements() else {
             lastRebuildOutcome = .commitFailed(lastError ?? "pending changes could not be committed")
-            return
+            return lastRebuildOutcome
         }
 
         let first = await runCandidateRebuild(purpose: .manualRecalculation)
@@ -1672,6 +1707,7 @@ final class UsageService {
         }
         lastRebuildOutcome = outcome
         if case .replaced = first { didCommitFullRebuild() }
+        return outcome
     }
 
     /// 完整重建提交后的收尾。周期桶已按全部现有日志和周期记录重建（日志已删除的部分原样保留），
@@ -2219,6 +2255,17 @@ final class UsageService {
             Task { await scanNow() }
         }
         return succeeded
+    }
+
+    /// 设置页的合并操作：先强制更新价格，再按同一目录完整重算一次；目录更新失败也仍允许重算。
+    @discardableResult
+    func refreshPricingCatalogAndRecalculateUsage() async -> PricingRecalculationResult? {
+        guard !suspendedForTermination, !isPersistingForTermination, !isRefreshingPricingCatalog else { return nil }
+        isRefreshingPricingCatalog = true
+        defer { isRefreshingPricingCatalog = false }
+        let refresh = await PricingCatalogStore.shared.forceRefreshWithResults()
+        let outcome = await forceRescan()
+        return PricingRecalculationResult(modelsDevUpdated: refresh.modelsDev, rebuildOutcome: outcome)
     }
 
     // MARK: - 常规扫描实现
