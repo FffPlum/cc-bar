@@ -765,6 +765,10 @@ struct PopoverIconButtonStyle: ButtonStyle {
     @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
 
+    init(width: CGFloat? = 26) {
+        self.width = width
+    }
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .frame(width: width, height: 22)
