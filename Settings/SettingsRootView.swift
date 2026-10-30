@@ -50,6 +50,7 @@ struct SettingsRootView: View {
     @State private var isRecalculatingUsage = false
     @State private var pricingCatalogMessage: String?
     @State private var pricingCatalogMessageIsError = false
+    @State private var showPricingCatalog = false
     @State private var isTestingProxy = false
     @State private var proxyTestMessage: String?
     @State private var proxyTestMessageIsError = false
@@ -63,6 +64,7 @@ struct SettingsRootView: View {
     @State private var showQuotaAlertRebuildConfirm = false
     @State private var quotaNotificationSettingsOpened = false
     @State private var showBrandColorsResetConfirm = false
+    @State private var hoveredCurrencyTooltip: PopoverTooltip?
 
     var body: some View {
         @Bindable var settings = SettingsStore.shared
@@ -74,11 +76,17 @@ struct SettingsRootView: View {
                 .ignoresSafeArea(.container, edges: .top)
             contentArea(settings: settings)
         }
+        .modifier(PopoverTooltipOverlay(hovered: $hoveredCurrencyTooltip) { _ in
+            tr("Refresh exchange rates", "刷新汇率")
+        })
         .sheet(isPresented: $showCommandCodeSheet) {
             CommandCodeCredentialSheet()
         }
         .sheet(isPresented: $showOpenCodeGoSheet) {
             OpenCodeGoCredentialSheet()
+        }
+        .sheet(isPresented: $showPricingCatalog) {
+            PricingCatalogView()
         }
         .confirmationDialog(
             tr("Export diagnostics?", "导出诊断日志？"),
@@ -607,6 +615,56 @@ struct SettingsRootView: View {
 
         proxyGroup(settings: settings)
 
+        PrefsGroup(title: "Currency", chinese: "货币") {
+            PrefsRow(
+                label: "Display currency",
+                chinese: "货币单位",
+                desc: currencyRateDescription.english,
+                chineseDesc: currencyRateDescription.chinese
+            ) {
+                HStack(spacing: 8) {
+                    Picker("", selection: Binding(
+                        get: { settings.displayCurrency },
+                        set: { currency in
+                            settings.displayCurrency = currency
+                            CurrencyStore.shared.refreshIfNeeded()
+                        }
+                    )) {
+                        ForEach(DisplayCurrency.allCases) { currency in
+                            Text("\(currency.code) · \(currency.displayName)").tag(currency)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+
+                    Button {
+                        hoveredCurrencyTooltip = nil
+                        Task { await CurrencyStore.shared.refresh() }
+                    } label: {
+                        if CurrencyStore.shared.isRefreshing {
+                            ProgressView().controlSize(.small).frame(width: 13, height: 13)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(CurrencyStore.shared.isRefreshing)
+                    .accessibilityLabel(tr("Refresh exchange rates", "刷新汇率"))
+                    .anchorPreference(key: PopoverTooltipAnchorKey.self, value: .bounds) { [.currencyRefresh: $0] }
+                    .onHover { hovering in
+                        if hovering && !CurrencyStore.shared.isRefreshing {
+                            hoveredCurrencyTooltip = .currencyRefresh
+                        } else if hoveredCurrencyTooltip == .currencyRefresh {
+                            hoveredCurrencyTooltip = nil
+                        }
+                    }
+                    .onDisappear { hoveredCurrencyTooltip = nil }
+                }
+            }
+        }
+
         PrefsGroup(
             title: "Data Maintenance",
             chinese: "数据维护"
@@ -614,49 +672,24 @@ struct SettingsRootView: View {
             PrefsRow(
                 label: "Price catalog",
                 chinese: "价格目录",
-                desc: "Past costs are recalculated automatically when prices change.",
-                chineseDesc: "价格变化后自动重算历史费用"
+                desc: "Official provider prices from models.dev.",
+                chineseDesc: "models.dev 官方提供商价格"
             ) {
-                HStack(spacing: 8) {
-                    if let pricingCatalogMessage {
-                        Text(pricingCatalogMessage)
-                            .font(.system(size: 11))
-                            .foregroundStyle(pricingCatalogMessageIsError ? Color.red : Color.secondary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.trailing)
-                    }
-                    Button {
-                        pricingCatalogMessage = nil
-                        Task {
-                            let succeeded = await appState.usageService.refreshPricingCatalog()
-                            pricingCatalogMessageIsError = !succeeded
-                            pricingCatalogMessage = succeeded
-                                ? tr("Updated", "已更新")
-                                : tr("Update failed", "更新失败")
-                        }
-                    } label: {
-                        if appState.usageService.isRefreshingPricingCatalog {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Text(tr("Update", "更新"))
-                        }
-                    }
+                Button(tr("View", "查看")) { showPricingCatalog = true }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .disabled(appState.usageService.isRefreshingPricingCatalog)
-                }
             }
             InsetDivider()
             PrefsRow(
-                label: "Recalculate usage",
-                chinese: "重新计算用量",
-                desc: "Recompute history with the latest prices and rules. Usage from deleted logs is kept.",
-                chineseDesc: "用最新价格表和统计规则重算历史；已删除日志的对话保留用量",
+                label: "Update prices & recalculate usage",
+                chinese: "更新价格并重算用量",
+                desc: "Fetch models.dev, then recompute history with the latest prices and rules. Usage from deleted logs is kept.",
+                chineseDesc: "先更新 models.dev 价格，再按最新价格和规则重算历史；已删除日志的对话保留用量",
                 detail: recalculateOutcomeDetail
             ) {
-                // 自动重建进行中同样显示进度并禁用按钮，避免再排一次完整重建。
-                let recalculating = isRecalculatingUsage || appState.usageService.isRebuildingHistory
+                let recalculating = isRecalculatingUsage
+                    || appState.usageService.isRebuildingHistory
+                    || appState.usageService.isRefreshingPricingCatalog
                 HStack(spacing: 8) {
                     if appState.usageService.cycleUsageNeedsManualRecalculation, !recalculating {
                         HStack(spacing: 4) {
@@ -667,7 +700,7 @@ struct SettingsRootView: View {
                         .foregroundStyle(.orange)
                         .help(tr(
                             "Some past cycles are missing usage data. Recalculate to fill it in.",
-                            "部分历史周期缺少用量数据，点「重新计算」补齐"
+                            "部分历史周期缺少用量数据，点「更新并重算」补齐"
                         ))
                     }
                     if let progress = appState.usageService.scanProgress, recalculating {
@@ -676,11 +709,22 @@ struct SettingsRootView: View {
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                             .lineLimit(1)
+                    } else if let pricingCatalogMessage, !recalculating {
+                        Text(pricingCatalogMessage)
+                            .font(.system(size: 11))
+                            .foregroundStyle(pricingCatalogMessageIsError ? Color.orange : Color.secondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.trailing)
                     }
                     Button {
+                        pricingCatalogMessage = nil
                         isRecalculatingUsage = true
                         Task {
-                            await appState.usageService.forceRescan()
+                            let succeeded = await appState.usageService.refreshPricingCatalogAndRecalculateUsage()
+                            pricingCatalogMessageIsError = !succeeded
+                            pricingCatalogMessage = succeeded
+                                ? tr("Updated and recalculated", "价格已更新，用量已重算")
+                                : tr("Price update failed; recalculated with cached prices", "价格更新失败，已用缓存价格重算")
                             isRecalculatingUsage = false
                         }
                     } label: {
@@ -688,7 +732,7 @@ struct SettingsRootView: View {
                             ProgressView()
                                 .controlSize(.small)
                         } else {
-                            Text(tr("Recalculate", "重新计算"))
+                            Text(tr("Update & Recalculate", "更新并重算"))
                         }
                     }
                     .buttonStyle(.bordered)
@@ -697,6 +741,46 @@ struct SettingsRootView: View {
                 }
             }
         }
+    }
+
+    private var currencyRateDescription: (english: String, chinese: String) {
+        let currency = SettingsStore.shared.displayCurrency
+        if currency == .usd {
+            return (
+                "Amounts are stored in USD. Currency selection changes display only.",
+                "金额以美元存储，切换币种只改变显示"
+            )
+        }
+        if let rate = CurrencyStore.shared.rate(for: currency) {
+            let formatter = NumberFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.maximumFractionDigits = 6
+            let value = formatter.string(from: NSDecimalNumber(decimal: rate)) ?? rate.description
+            let age = CurrencyStore.shared.snapshot.map { PopoverRootView.relativeAge(from: $0.fetchedAt) } ?? "—"
+            if CurrencyStore.shared.lastRefreshFailedAt != nil {
+                return (
+                    "Refresh failed · 1 USD = \(value) \(currency.code) · updated \(age) ago",
+                    "刷新失败 · 1 USD = \(value) \(currency.code) · \(age) 前更新"
+                )
+            }
+            return (
+                "1 USD = \(value) \(currency.code) · updated \(age) ago",
+                "1 USD = \(value) \(currency.code) · \(age) 前更新"
+            )
+        }
+        if CurrencyStore.shared.isRefreshing {
+            return ("Fetching the current exchange rate…", "正在获取当前汇率…")
+        }
+        if CurrencyStore.shared.lastRefreshFailedAt != nil {
+            return (
+                "Refresh failed. Amounts remain in USD until a \(currency.code) rate is available.",
+                "刷新失败，获得 \(currency.code) 汇率前仍显示美元"
+            )
+        }
+        return (
+            "Refresh to fetch the current exchange rate. Amounts remain in USD until then.",
+            "刷新获取当前汇率，在此之前金额仍显示美元"
+        )
     }
 
     // MARK: - Network proxy

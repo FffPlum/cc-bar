@@ -52,9 +52,8 @@ nonisolated enum Pricing {
     /// `deepseek-official/` 和末尾 `-YYYYMMDD` /
     /// `-YYYY-MM-DD` 日期段）。
     ///
-    /// Google Gemini、Cursor / xAI、Z.ai、MiniMax 的价格只能在这里维护：远端价格目录只收
-    /// anthropic / openai / deepseek（见 `LiteLLMPricingDecoder` 与 `ModelsDevPricingDecoder` 的
-    /// `allowedProviders`），这几家厂商的 key 在远端目录里永远命中不到。
+    /// models.dev 提供当前服务涉及的官方 Provider 价格，LiteLLM 与这张表依次兜底。
+    /// 阶梯、分段和 Cursor 私有型号等远端无法表达的规则仍只在这里维护。
     static let table: [String: ModelPrice] = [
         // —— Claude 4.x / 5.x 系（input 已不含 cache_read）——
         // Fable 5.1 自发布起缓存读取即为 0.025x 基础输入价（$0.25）；Fable 5 仍为 0.1x。
@@ -156,7 +155,7 @@ nonisolated enum Pricing {
         "grok-4-6":             .init(input: 2,    output: 6,    cacheRead: 0.50, cacheCreation: 0),
         "grok-4-5":             .init(input: 2,    output: 6,    cacheRead: 0.50, cacheCreation: 0),
 
-        // —— Google Gemini 系列（远端目录不收 Google，只能靠本表）——
+        // —— Google Gemini 系列（models.dev 官方价优先，本表兜底；特殊规则只在本表）——
         // 3.6 / 3.7 / 3.8 Flash 同为 $0.75 / $3.75（促销价，到 2026-12-31）；2027-01-01 起的原价见 timedOverrides。
         "gemini-3.8-flash":  .init(input: 0.75, output: 3.75,  cacheRead: 0.075, cacheCreation: 0),
         "gemini-3.7-flash":  .init(input: 0.75, output: 3.75,  cacheRead: 0.075, cacheCreation: 0),
@@ -358,7 +357,7 @@ nonisolated enum Pricing {
             shortContext: .init(input: 2.50, output: 15, cacheRead: 0.25, cacheCreation: 0),
             longContext: .init(input: 5, output: 22.50, cacheRead: 0.50, cacheCreation: 0)
         ),
-        // 远端目录只收 anthropic / openai / deepseek，Gemini 的阶梯只能在这里表达。
+        // models.dev 只有当前扁平价，Gemini 的上下文阶梯只能在这里表达。
         "gemini-3.1-pro": .init(
             longContextThreshold: 200_000,
             shortContext: .init(input: 2, output: 12, cacheRead: 0.20, cacheCreation: 0),

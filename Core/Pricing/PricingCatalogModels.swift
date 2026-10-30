@@ -17,11 +17,24 @@ nonisolated struct PricingUsageKey: Sendable, Hashable {
     }
 }
 
+nonisolated struct ModelsDevModelPricing: Sendable, Codable, Equatable, Identifiable {
+    let id: String
+    let name: String
+    let price: ModelPrice
+}
+
+nonisolated struct ModelsDevProviderPricing: Sendable, Codable, Equatable, Identifiable {
+    let id: String
+    let name: String
+    let models: [ModelsDevModelPricing]
+}
+
 /// 单次远端解码结果。Standard 与两种 App 的 Fast 必须分开保存，不能跨档位或跨 App 兜底。
 nonisolated struct DecodedPricingRates: Sendable, Equatable {
     var standard: [String: ModelPrice] = [:]
     var codexFast: [String: ModelPrice] = [:]
     var claudeFast: [String: ModelPrice] = [:]
+    var providers: [ModelsDevProviderPricing] = []
 }
 
 /// 单个远端价格源（LiteLLM / models.dev）的内存态与磁盘态。
@@ -35,6 +48,8 @@ nonisolated struct PricingSourceState: Sendable, Codable {
     /// Fast 价格采用 last-known 合并语义：上游移除已下线型号时仍保留历史日志计价能力。
     var codexFastRates: [String: ModelPrice] = [:]
     var claudeFastRates: [String: ModelPrice] = [:]
+    /// models.dev 官方 Provider 的展示目录；旧缓存没有该字段，下次刷新后补齐。
+    var providers: [ModelsDevProviderPricing]? = nil
 }
 
 /// `pricing-catalog.json` 的持久化结构。

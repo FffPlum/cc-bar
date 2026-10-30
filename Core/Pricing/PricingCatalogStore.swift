@@ -8,6 +8,7 @@ import os
 /// 计价链路改成 async。刷新（网络 I/O）本身仍然是 `Task.detached` 里的 async 工作，只是读侧保持同步。
 nonisolated final class PricingCatalogStore: @unchecked Sendable {
     static let shared = PricingCatalogStore()
+    static let didChangeNotification = Notification.Name("CCBar.pricingCatalogDidChange")
 
     /// `active` 是当前扫描可读取的冻结价格快照；后台刷新只更新 `pending`，由下一次
     /// 扫描开始时统一提交，避免同一批 JSONL 前后读到不同价格。
@@ -56,14 +57,13 @@ nonisolated final class PricingCatalogStore: @unchecked Sendable {
         state = OSAllocatedUnfairLock(initialState: CatalogState(active: AppRuntime.isRunningUnitTests ? PricingCatalogCachePayload() : PricingCatalogCache.load()))
     }
 
-    /// 快速同步读取，零 I/O，不阻塞调用方。Standard 沿用 LiteLLM 优先；
-    /// Fast 统一 models.dev 优先（其官方 provider 的显式 fast mode 已核对），LiteLLM Priority 只兜底。
+    /// 快速同步读取，零 I/O，不阻塞调用方。远端价格统一 models.dev 优先，LiteLLM 只作离线兜底。
     func rate(for normalizedKey: String, app: UsageApp, speed: UsageSpeed) -> ModelPrice? {
         state.withLock { catalog in
             switch speed {
             case .standard:
-                return catalog.active.liteLLM.standardRates[normalizedKey]
-                    ?? catalog.active.modelsDev.standardRates[normalizedKey]
+                return catalog.active.modelsDev.standardRates[normalizedKey]
+                    ?? catalog.active.liteLLM.standardRates[normalizedKey]
             case .fast:
                 switch app {
                 case .codex:
@@ -87,6 +87,27 @@ nonisolated final class PricingCatalogStore: @unchecked Sendable {
             case .unknown:
                 return nil
             }
+        }
+    }
+
+    var providerCatalog: [ModelsDevProviderPricing] {
+        state.withLock { ($0.pending ?? $0.active).modelsDev.providers ?? [] }
+    }
+
+    var modelsDevFetchedAt: Date? {
+        state.withLock { ($0.pending ?? $0.active).modelsDev.fetchedAt }
+    }
+
+    var modelsDevRefreshFailed: Bool {
+        state.withLock { ($0.pending ?? $0.active).modelsDev.failedAt != nil }
+    }
+
+    /// 价格弹窗等待首次加载结束；取消页面任务不会取消共享的后台刷新。
+    func loadProviderCatalogIfNeeded() async {
+        refreshIfNeeded()
+        while refreshRunning.withLock({ $0 }) {
+            do { try await Task.sleep(nanoseconds: 100_000_000) }
+            catch { return }
         }
     }
 
@@ -297,6 +318,7 @@ nonisolated final class PricingCatalogStore: @unchecked Sendable {
                         // Fast 支持可能下线，但历史日志仍需按最后可靠价格计费；新增/改价覆盖，缺失不删除。
                         $0.codexFastRates.merge(rates.codexFast) { _, new in new }
                         $0.claudeFastRates.merge(rates.claudeFast) { _, new in new }
+                        if case .modelsDev = source { $0.providers = rates.providers }
                         $0.etag = newEtag
                         $0.fetchedAt = now
                         $0.failedAt = nil
@@ -332,6 +354,9 @@ nonisolated final class PricingCatalogStore: @unchecked Sendable {
             var payload = catalog.pending ?? catalog.active
             update(&payload)
             catalog.pending = payload
+        }
+        Task { @MainActor in
+            NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
         }
     }
 
@@ -396,8 +421,18 @@ enum PricingCatalogCache {
         guard let data = try? Data(contentsOf: url) else {
             return PricingCatalogCachePayload()
         }
-        if let payload = try? JSONDecoder().decode(PricingCatalogCachePayload.self, from: data),
+        return decode(data)
+    }
+
+    nonisolated static func decode(_ data: Data) -> PricingCatalogCachePayload {
+        if var payload = try? JSONDecoder().decode(PricingCatalogCachePayload.self, from: data),
            payload.version == PricingCatalogCachePayload.currentVersion {
+            // 早期 v2 只有计价表，没有展示分组。必须完整拉取，304 无法补齐新字段。
+            // 仍保留离线价格及失败退避，不影响扫描使用的价格快照。
+            if payload.modelsDev.providers?.isEmpty != false {
+                payload.modelsDev.etag = nil
+                payload.modelsDev.fetchedAt = nil
+            }
             return payload
         }
         // v1 只有 Standard rates；迁移时保留离线缓存，但清掉 ETag/刷新时间，
