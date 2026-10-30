@@ -11,8 +11,8 @@ import AppKit
 // Footer 左侧为当前版本与发布页入口，右侧为设置。
 
 struct PopoverRootView: View {
+    let openMain: (MainTab) -> Void
     @Environment(AppState.self) private var appState
-    @Environment(\.openWindow) private var openWindow
     @State private var refreshRotation: Double = 0
     @State private var hoveredPopoverTooltip: PopoverTooltip?
 
@@ -29,7 +29,7 @@ struct PopoverRootView: View {
             HStack(alignment: .center, spacing: 8) {
                 Button {
                     clearPopoverTooltip()
-                    AppUpdater.shared.openReleasePage()
+                    AppUpdater.shared.openReleasePage(activates: false)
                 } label: {
                     HStack(alignment: .center, spacing: 6) {
                         Text("v\(AppUpdater.shared.currentVersion)")
@@ -478,14 +478,8 @@ struct PopoverRootView: View {
 
     // MARK: Open main window
 
-    /// 菜单栏 App (`.accessory`) 默认不抢焦点,打开窗口后会被压在其他 App 后面;
-    /// 先 `activate(ignoringOtherApps:)` 把进程置前,再 `openWindow` 才会出现在最前。
-    /// 先设置 `mainTab` 再 openWindow,确保点「统计」/「设置」总是落到对应 tab,
-    /// 不受上次窗口停留 tab 影响(与 ⌘, / ⌘1 命令行为一致)。
     private func activateAndOpenMain(tab: MainTab) {
-        appState.mainTab = tab
-        NSApp.activate(ignoringOtherApps: true)
-        openWindow(id: "main")
+        openMain(tab)
     }
 
     // MARK: Refresh
@@ -1044,7 +1038,6 @@ struct ServiceStatusDot: View {
 
 private struct ServiceStatusDetailView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.openURL) private var openURL
     let status: ServiceStatus
     let title: String
     let statusPageURL: URL?
@@ -1104,7 +1097,9 @@ private struct ServiceStatusDetailView: View {
                 if let statusPageURL {
                     Button {
                         hoveredTooltip = nil
-                        openURL(statusPageURL)
+                        let configuration = NSWorkspace.OpenConfiguration()
+                        configuration.activates = false
+                        NSWorkspace.shared.open(statusPageURL, configuration: configuration)
                     } label: {
                         PopoverButtonIcon(systemName: "arrow.up.forward.square")
                     }

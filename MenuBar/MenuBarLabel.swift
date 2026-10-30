@@ -3,24 +3,28 @@ import AppKit
 import CoreImage
 
 struct MenuBarLabel: View {
+    let updateImage: (NSImage, String) -> Void
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        Image(nsImage: MenuBarBadgeImage.make(
-            providers: visibleProviders,
-            snapshots: snapshots,
-            managedKimiSnapshots: managedKimiSnapshots,
-            moonshotBalanceTexts: moonshotBalanceTexts,
-            window: SettingsStore.shared.menuBarWindow
-        ))
-        .fixedSize(horizontal: true, vertical: false)
-        .accessibilityLabel(MenuBarBadgeImage.accessibilityLabel(
-            providers: visibleProviders,
-            snapshots: snapshots,
-            managedKimiSnapshots: managedKimiSnapshots,
-            moonshotBalanceTexts: moonshotBalanceTexts,
-            window: SettingsStore.shared.menuBarWindow
-        ))
+        StatusItemImageUpdate(
+            image: MenuBarBadgeImage.make(
+                providers: visibleProviders,
+                snapshots: snapshots,
+                managedKimiSnapshots: managedKimiSnapshots,
+                moonshotBalanceTexts: moonshotBalanceTexts,
+                window: SettingsStore.shared.menuBarWindow
+            ),
+            label: MenuBarBadgeImage.accessibilityLabel(
+                providers: visibleProviders,
+                snapshots: snapshots,
+                managedKimiSnapshots: managedKimiSnapshots,
+                moonshotBalanceTexts: moonshotBalanceTexts,
+                window: SettingsStore.shared.menuBarWindow
+            ),
+            updateImage: updateImage
+        )
+        .frame(width: 1, height: 1)
     }
 
     private var visibleProviders: [QuotaProviderDescriptor] {
@@ -48,6 +52,19 @@ struct MenuBarLabel: View {
                 CurrencyFormatter.balance($0.available, from: $0.currencyCode)
             }
         }
+    }
+}
+
+/// SwiftUI 只观察额度变化；图像由原生状态栏按钮绘制和测量，避免宿主视图裁切。
+private struct StatusItemImageUpdate: NSViewRepresentable {
+    let image: NSImage
+    let label: String
+    let updateImage: (NSImage, String) -> Void
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        updateImage(image, label)
     }
 }
 

@@ -3,46 +3,26 @@ import SwiftUI
 @main
 struct CCBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var appState = AppState()
-
     var body: some Scene {
-        MenuBarExtra {
-            PopoverRootView()
-                .environment(appState)
-        } label: {
-            MenuBarLabelRoot(appDelegate: appDelegate)
-                .environment(appState)
+        Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
-
-        Window("CCBar", id: "main") {
-            MainWindowRootView()
-                .environment(appState)
-        }
-        // 1440 宽放得下所有在售 MacBook 的默认分辨率；900 高在 13/14 寸屏上完整或接近完整显示，
-        // 统计页按画布高度分配一屏（见 `StatsView.overviewBottomRowMinHeight`）。
-        .defaultSize(width: 1440, height: 900)
         .commands {
-            AppCommands(appState: appState)
+            AppCommands(appState: appDelegate.appState, openMain: { appDelegate.openMainWindow() })
         }
-
-        Window(tr("Welcome", "欢迎"), id: "onboarding") {
-            OnboardingView()
-                .environment(appState)
-        }
-        .defaultSize(width: 620, height: 520)
-        .windowResizability(.contentSize)
     }
 }
 
-/// 包一层 view 以便用 @Environment(\.openWindow) 触发 Onboarding。
-private struct MenuBarLabelRoot: View {
+/// 菜单栏标签同时承载启动任务及系统通知处理。
+struct MenuBarLabelRoot: View {
     let appDelegate: AppDelegate
     @Environment(AppState.self) private var appState
-    @Environment(\.openWindow) private var openWindow
+    let openMain: () -> Void
+    let openOnboarding: () -> Void
+    let updateStatusImage: (NSImage, String) -> Void
 
     var body: some View {
-        MenuBarLabel()
+        MenuBarLabel(updateImage: updateStatusImage)
             .onChange(of: appState.kimiManagedAccounts) { _, _ in
                 guard !AppRuntime.isRunningUnitTests else { return }
                 FloatingPanelController.shared.sync()
@@ -76,8 +56,7 @@ private struct MenuBarLabelRoot: View {
                     // 首次启动仍由 Onboarding 接管，不同时打开主窗口。
                     guard SettingsStore.shared.didCompleteOnboarding else { return }
                     appState.mainTab = .stats
-                    NSApp.activate(ignoringOtherApps: true)
-                    openWindow(id: "main")
+                    openMain()
                 }
             }
             .task {
@@ -93,16 +72,14 @@ private struct MenuBarLabelRoot: View {
                 FloatingPanelController.shared.attach(appState: appState)
                 FloatingPanelController.shared.openSettingsHandler = {
                     appState.mainTab = .settings
-                    NSApp.activate(ignoringOtherApps: true)
-                    openWindow(id: "main")
+                    openMain()
                 }
                 FloatingPanelController.shared.sync()
             }
             .onChange(of: appState.shouldShowOnboarding) { _, show in
                 guard show else { return }
                 appState.shouldShowOnboarding = false
-                NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: "onboarding")
+                openOnboarding()
             }
     }
 }
@@ -125,10 +102,10 @@ nonisolated enum AppRuntime {
 }
 
 /// 主窗口 / 刷新 / 设置 的全局快捷键。
-/// ⌘Q 由 SwiftUI 默认提供;Esc 关闭 popover 由 MenuBarExtra(.window) 默认提供。
+/// ⌘Q 由 SwiftUI 默认提供。
 private struct AppCommands: Commands {
     let appState: AppState
-    @Environment(\.openWindow) private var openWindow
+    let openMain: () -> Void
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
@@ -139,16 +116,14 @@ private struct AppCommands: Commands {
         CommandGroup(replacing: .appSettings) {
             Button(tr("Preferences…", "设置")) {
                 appState.mainTab = .settings
-                NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: "main")
+                openMain()
             }
             .keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(after: .windowList) {
             Button(tr("Statistics", "统计")) {
                 appState.mainTab = .stats
-                NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: "main")
+                openMain()
             }
             .keyboardShortcut("1", modifiers: .command)
 
