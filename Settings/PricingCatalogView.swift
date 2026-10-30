@@ -98,12 +98,11 @@ struct PricingCatalogView: View {
                 Button {
                     updateMessage = nil
                     Task {
-                        let succeeded = await appState.usageService.refreshPricingCatalogAndRecalculateUsage()
+                        let result = await appState.usageService.refreshPricingCatalogAndRecalculateUsage()
                         reloadCatalogSnapshot()
-                        updateMessageIsError = !succeeded || loadFailed
-                        updateMessage = !updateMessageIsError
-                            ? tr("Prices updated and usage recalculated", "价格已更新，用量已重算")
-                            : tr("Price update failed; usage recalculated with cached prices", "价格更新失败，已用缓存价格重算用量")
+                        updateMessageIsError = result?.isError ?? true
+                        updateMessage = result?.message
+                            ?? tr("Update and recalculation did not start", "更新和重算未执行")
                     }
                 } label: {
                     if appState.usageService.isRefreshingPricingCatalog {
