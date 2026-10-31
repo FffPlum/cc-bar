@@ -8,20 +8,22 @@ cc-bar 是一个原生 macOS 菜单栏 App，用 Swift / SwiftUI 实现。
 
 - 额度 Provider（`QuotaApp`）：Codex、Claude Code、Antigravity、Cursor、Command Code、OpenCode Go、Kimi Code，外加用户手动导入的其他 Codex 账号。
 - 本地用量数据源（`UsageApp`）：Codex、Claude Code、Antigravity、Pi、OpenCode、DSH、Kimi Code 走本机日志扫描，Cursor 走远端计量。
-- 展示位：菜单栏标签、Popover、主窗口（统计 / 设置）、桌面悬浮窗、首次启动引导。
+- 展示位：菜单栏标签、Popover、主窗口（应用 / 额度管理 / 用量统计 / 设置）、桌面悬浮窗、首次启动引导。
 
 项目主体功能已开发完成，后续以新需求和迭代为主，不再按初始里程碑推进。
 
 工程结构：
 
-- 入口：`CCBarApp.swift`
-- 全局状态：`Core/AppState.swift`
-- 菜单栏：`MenuBar/`
-- 主窗口：`Main/`
-- 悬浮窗：`Floating/`
-- 引导：`Onboarding/`
-- 设置：`Settings/`
-- 凭据 / 额度 / 调度 / 用量 / 定价 / 存储 / 本地化：`Core/`（`Credentials` `Quota` `Scheduler` `Usage` `Pricing` `Storage`、`L10n.swift`）
+- 入口：`Sources/CCBar/CCBarApp.swift`
+- 全局状态：`Sources/CCBar/Core/AppState.swift`
+- 菜单栏：`Sources/CCBar/MenuBar/`
+- 主窗口：`Sources/CCBar/Main/`
+- 悬浮窗：`Sources/CCBar/Floating/`
+- 引导：`Sources/CCBar/Onboarding/`
+- 设置：`Sources/CCBar/Settings/`
+- 凭据 / 额度 / 调度 / 用量 / 定价 / 存储 / 本地化：`Sources/CCBar/Core/`（`Credentials` `Quota` `Scheduler` `Usage` `Pricing` `Storage`、`L10n.swift`）
+- 应用与授权：`Sources/CCBar/Applications/`、`Sources/CCBar/Authorization/`
+- 独立配置核心：`Sources/CCBarConfiguration/`；测试：`Tests/`；包入口：`Package.swift`
 - Xcode 工程：`ccbar.xcodeproj`
 
 ## 必读文档
@@ -84,9 +86,9 @@ cc-bar 是一个原生 macOS 菜单栏 App，用 Swift / SwiftUI 实现。
   - 额度状态色按剩余比例分 3 档（统一走 `statusColor`）：剩余 `>=20%` 中性石墨灰、`<20%` 橙、`=0` 红。
   - 数字使用 `.monospacedDigit()`。
   - 图标优先使用 SF Symbols。
-  - 界面文案遵守 `设计风格.md` §5.4：标题能说清的不加说明，说明不复述标题，状态提示先说结果再说下一步，涉及隐私和凭据的说法要与代码行为一致。
+  - 界面文案遵守 `设计风格.md` `5.4：标题能说清的不加说明，说明不复述标题，状态提示先说结果再说下一步，涉及隐私和凭据的说法要与代码行为一致。
 - 不自造大面积背景、玻璃阴影、Web 风格控件或无关装饰。
-- 额度 Provider 默认顺序为 Codex → Claude Code → Antigravity → Cursor → Command Code → OpenCode Go → Kimi Code（`QuotaProviderDescriptor.allProviders`）；其后是只有用量的 Pi → OpenCode → DSH。用户可在「设置 → 服务与账号」拖拽调整（全部服务混排），顺序存 `SettingsStore.serviceOrder`：设置列表读全部，菜单栏 / Popover / 悬浮窗只取额度服务，主窗口统计只取有用量的服务。导入的其他 Codex 账号仍挂在 Codex 下，用既有独立排序。
+- 额度 Provider 默认顺序为 Codex → Claude Code → Antigravity → Cursor → Command Code → OpenCode Go → Kimi Code（`QuotaProviderDescriptor.allProviders`）；其后是只有用量的 Pi → OpenCode → DSH。用户可在「额度管理」调整额度账号组顺序（应用用量开关位于应用管理页），顺序存 `SettingsStore.serviceOrder`：设置列表读全部，菜单栏 / Popover / 悬浮窗只取额度服务，主窗口统计只取有用量的服务。导入的其他 Codex 账号仍挂在 Codex 下，用既有独立排序。
 - 网络请求失败时保留已有快照，不要清空可展示数据。
 - 429 后必须遵守现有退避策略，不要为了手动刷新绕过限流。
 

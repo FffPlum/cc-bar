@@ -62,3 +62,6 @@ usage-rollup.json
 *.cer
 *.key
 *.pem
+.build/
+Sources/CCBar/Resources/AppIcon.iconset/
+Sources/CCBar/Resources/AppIcon.icns

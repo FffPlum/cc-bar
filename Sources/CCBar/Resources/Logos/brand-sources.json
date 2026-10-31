@@ -1,0 +1,106 @@
+{
+  "extractedAt": "2026-10-31",
+  "tool": "openbrand@0.2.3",
+  "entries": [
+    {
+      "id": "deepseek",
+      "website": "https://www.deepseek.com",
+      "brandName": "深度求索",
+      "logos": [
+        {
+          "url": "https://www.deepseek.com/favicon.ico",
+          "type": "favicon",
+          "resolution": {
+            "width": 225,
+            "height": 225,
+            "aspect_ratio": 1
+          }
+        }
+      ],
+      "extractedColors": [],
+      "file": "favicon-deepseek.ico",
+      "light": "#4D6BFE",
+      "dark": "#4D6BFE",
+      "note": "OpenBrand returned no colors for ICO. Verified official CSS --ds-rgb-primary:77,107,254. Component token --dsw-static-deepseek-500 is separately #3964FE.",
+      "colorSource": "https://www.deepseek.com/_next/static/css/ddd6172044536759.css",
+      "sha256": "30a4420e6e4dcb17fd7de560c5004346c2bc8cd971d2d5f5ee15326603e51321"
+    },
+    {
+      "id": "grok",
+      "website": "https://grok.com",
+      "brandName": "Grok",
+      "logos": [
+        {
+          "url": "https://grok.com/images/favicon.svg",
+          "type": "favicon"
+        },
+        {
+          "url": "https://grok.com/images/favicon.ico",
+          "type": "favicon"
+        },
+        {
+          "url": "https://grok.com/images/android-chrome-192x192.png",
+          "type": "favicon"
+        },
+        {
+          "url": "https://grok.com/images/android-chrome-512x512.png",
+          "type": "favicon"
+        },
+        {
+          "url": "https://grok.com/images/apple-touch-icon.png",
+          "type": "apple-touch-icon"
+        }
+      ],
+      "extractedColors": [
+        {
+          "hex": "#f9f8f7",
+          "usage": "primary"
+        },
+        {
+          "hex": "#1e1f22",
+          "usage": "secondary"
+        },
+        {
+          "hex": "#818181",
+          "usage": "accent"
+        }
+      ],
+      "file": "favicon-grok.png",
+      "light": "#1E1F22",
+      "dark": "#F9F8F7",
+      "note": "Grok product site, rather than the x.ai corporate logo. Light/dark colors selected for contrast.",
+      "selectedLogoURL": "https://grok.com/images/android-chrome-512x512.png",
+      "sha256": "3a462c3c2524733c173bb05c431de737812f8219db8fa115b0025d12a347e086"
+    },
+    {
+      "id": "gemini",
+      "website": "https://gemini.google/overview/",
+      "brandName": "Gemini",
+      "logos": [
+        {
+          "url": "https://gemini.google/images/spark_4c.png",
+          "type": "favicon"
+        }
+      ],
+      "extractedColors": [
+        {
+          "hex": "#3286ff",
+          "usage": "primary"
+        },
+        {
+          "hex": "#f5b612",
+          "usage": "secondary"
+        },
+        {
+          "hex": "#0fb964",
+          "usage": "accent"
+        }
+      ],
+      "file": "favicon-gemini.png",
+      "light": "#3286FF",
+      "dark": "#3286FF",
+      "note": "Keep the official multicolor sparkle. Blue is an interface accent, not a replacement for the gradient.",
+      "sha256": "f39c8b1c0dbdf1411a52b203cd7d2815ef1dc5f899f457499e7d5aa57f25b6c8"
+    }
+  ]
+}

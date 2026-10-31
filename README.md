@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Resources/Assets.xcassets/AppIcon.appiconset/icon_256.png" width="128" alt="cc-bar Logo">
+  <img src="Sources/CCBar/Resources/Assets.xcassets/AppIcon.appiconset/icon_256.png" width="128" alt="cc-bar Logo">
 </p>
 
 <h1 align="center">cc-bar</h1>
@@ -197,3 +197,5 @@ SPARKLE_PUBLIC_ED_KEY="你的更新公钥" ./scripts/build.sh
 ## 📄 许可证
 
 本项目基于 [MIT License](LICENSE) 开源。
+
+源码按 Swift Package 组织：App 位于 `Sources/CCBar/`，可独立测试的配置核心位于 `Sources/CCBarConfiguration/`，测试位于 `Tests/`。Xcode 工程链接同一份本地 package；日常运行和打包仍使用 Xcode 与仓库脚本。
