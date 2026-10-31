@@ -5010,7 +5010,7 @@ final class QuotaParsingTests: XCTestCase {
 
     private func copyFixture(named name: String, to destination: URL) throws -> URL {
         let source = try XCTUnwrap(
-            Bundle(for: QuotaParsingTests.self).url(forResource: name, withExtension: "jsonl")
+            TestResources.bundle.url(forResource: name, withExtension: "jsonl")
         )
         try FileManager.default.copyItem(at: source, to: destination)
         return destination
@@ -5018,7 +5018,7 @@ final class QuotaParsingTests: XCTestCase {
 
     private func fixtureLine(named name: String, containing needle: String) throws -> String {
         let source = try XCTUnwrap(
-            Bundle(for: QuotaParsingTests.self).url(forResource: name, withExtension: "jsonl")
+            TestResources.bundle.url(forResource: name, withExtension: "jsonl")
         )
         let text = try String(contentsOf: source, encoding: .utf8)
         return try XCTUnwrap(text.split(separator: "\n").map(String.init).first { $0.contains(needle) })

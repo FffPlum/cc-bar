@@ -286,12 +286,12 @@ final class ServiceIconTests: XCTestCase {
         // 微弱系统阴影不能被当作图标主体边界。
         for y in 10..<90 {
             for x in 10..<90 {
-                bitmap.setColor(NSColor.black.withAlphaComponent(0.1), atX: x, y: y)
+                bitmap.setColor(NSColor(deviceRed: 0, green: 0, blue: 0, alpha: 0.1), atX: x, y: y)
             }
         }
         for y in 20..<80 {
             for x in 20..<80 {
-                bitmap.setColor(.black, atX: x, y: y)
+                bitmap.setColor(NSColor(deviceRed: 0, green: 0, blue: 0, alpha: 1), atX: x, y: y)
             }
         }
         let image = NSImage(size: NSSize(width: 100, height: 100))

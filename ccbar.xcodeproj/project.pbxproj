@@ -174,6 +174,7 @@
 		B71D3000000000000000AABB /* KimiTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D3000000000000000AAAA /* KimiTokenRefresher.swift */; };
 		B71D4000000000000000AABB /* KimiQuotaClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D4000000000000000AAAA /* KimiQuotaClientTests.swift */; };
 		B71D5000000000000000AABB /* KimiQuotaIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71D5000000000000000AAAA /* KimiQuotaIntegrationTests.swift */; };
+		C0B10004000000000000AABB /* TestResources.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B10004000000000000AAAA /* TestResources.swift */; };
 		FA11C0DE0000000000000110 /* ServiceIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11C0DE0000000000000010 /* ServiceIconTests.swift */; };
 		B71D6000000000000000AABB /* kimi.ico in Resources */ = {isa = PBXBuildFile; fileRef = B71D6000000000000000AAAA /* kimi.ico */; };
 		B71E0100000000000000AABB /* KimiManagedAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0100000000000000AAAA /* KimiManagedAccountStore.swift */; };
@@ -392,6 +393,7 @@
 		49C2AD04000000000001AAAA /* SystemNotificationClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemNotificationClient.swift; sourceTree = "<group>"; };
 		49C2AD05000000000001AAAA /* QuotaAlertStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaAlertStore.swift; sourceTree = "<group>"; };
 		49C2AD06000000000001AAAA /* QuotaAlertTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaAlertTests.swift; sourceTree = "<group>"; };
+		C0B10004000000000000AAAA /* TestResources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestResources.swift; sourceTree = "<group>"; };
 		FA11C0DE0000000000000010 /* ServiceIconTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceIconTests.swift; sourceTree = "<group>"; };
 		49C2AF01000000000001AAAA /* NetworkProxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProxy.swift; sourceTree = "<group>"; };
 		A6A1B90000000000000FAAAA /* AntigravityScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityScanner.swift; sourceTree = "<group>"; };
@@ -764,6 +766,7 @@
 				C3A3F6130518C1ACF13DAB30 /* AuthorizationStoreTests.swift */,
 				37B54ABD4AFC6A95E560DFC5 /* ProviderConfigurationTests.swift */,
 				49C2AD06000000000001AAAA /* QuotaAlertTests.swift */,
+				C0B10004000000000000AAAA /* TestResources.swift */,
 				FA11C0DE0000000000000010 /* ServiceIconTests.swift */,
 				B12AAD000000000000000003 /* BrandAppearanceTests.swift */,
 				49C1B300000000000001AAAA /* QuotaParsingTests.swift */,
@@ -1162,6 +1165,7 @@
 				74699E13ADB9FC95742B6151 /* AuthorizationStoreTests.swift in Sources */,
 				A3919CC3912B2C5F2371EB37 /* ProviderConfigurationTests.swift in Sources */,
 				49C2AD06000000000001AABB /* QuotaAlertTests.swift in Sources */,
+				C0B10004000000000000AABB /* TestResources.swift in Sources */,
 				FA11C0DE0000000000000110 /* ServiceIconTests.swift in Sources */,
 				B12AAD000000000000000103 /* BrandAppearanceTests.swift in Sources */,
 				49C1B300000000000001AABB /* QuotaParsingTests.swift in Sources */,

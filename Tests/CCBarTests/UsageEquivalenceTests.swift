@@ -275,7 +275,7 @@ final class UsageEquivalenceTests: XCTestCase {
 
     private func copyFixture(named name: String, to destination: URL) throws {
         let source = try XCTUnwrap(
-            Bundle(for: UsageEquivalenceTests.self).url(forResource: name, withExtension: "jsonl")
+            TestResources.bundle.url(forResource: name, withExtension: "jsonl")
         )
         try FileManager.default.copyItem(at: source, to: destination)
     }

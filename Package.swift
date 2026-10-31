@@ -26,6 +26,7 @@ let package = Package(
         .testTarget(
             name: "CCBarTests",
             dependencies: ["CCBar", "CCBarConfiguration", .product(name: "libzstd", package: "zstd"), "Sparkle"],
+            resources: [.process("Fixtures")],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         )
     ],

@@ -4,7 +4,7 @@ import XCTest
 
 /// OpenBrand 品牌外观更新测试。
 ///
-/// 覆盖 ServiceBrand 九套默认明暗色、Hex 解析、品牌 / 自定义配色持久化、
+/// 覆盖 ServiceBrand 默认明暗色、Hex 解析、品牌 / 自定义配色持久化、
 /// 重置、OpenCode Go 与 OpenCode 共用品牌，以及 QuotaApp / UsageApp → ServiceBrand 完整映射。
 /// 生产侧契约见 `Main/DesignSystem.swift` 的 `BrandColorResolver`、`Core/Branding` 的
 /// `ServiceBrand`，以及 `SettingsStore` 的品牌配色 API。
@@ -41,6 +41,9 @@ final class BrandAppearanceTests: XCTestCase {
             (.kimi, "#1783FF", "#1783FF"),
             (.pi, "#4D9ABF", "#4D9ABF"),
             (.dsh, "#4D6BFE", "#4D6BFE"),
+            (.deepseek, "#4D6BFE", "#4D6BFE"),
+            (.grok, "#1E1F22", "#F9F8F7"),
+            (.gemini, "#3286FF", "#3286FF"),
         ]
         XCTAssertEqual(ServiceBrand.allCases.count, expected.count)
         for (brand, light, dark) in expected {
@@ -60,6 +63,9 @@ final class BrandAppearanceTests: XCTestCase {
             (.kimi, "kimi"),
             (.pi, "pi"),
             (.dsh, "dsh"),
+            (.deepseek, "deepseek"),
+            (.grok, "grok"),
+            (.gemini, "gemini"),
         ]
         for (brand, logoName) in expected {
             XCTAssertEqual(brand.logoName, logoName, "\(brand)")

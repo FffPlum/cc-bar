@@ -33,7 +33,7 @@ final class ScannerIncrementalTests: XCTestCase {
 
     private func copyFixture(named name: String, to destination: URL) throws -> URL {
         let source = try XCTUnwrap(
-            Bundle(for: ScannerIncrementalTests.self).url(forResource: name, withExtension: "jsonl")
+            TestResources.bundle.url(forResource: name, withExtension: "jsonl")
         )
         try FileManager.default.copyItem(at: source, to: destination)
         return destination
@@ -249,7 +249,7 @@ final class ScannerIncrementalTests: XCTestCase {
 
     private func codexFixtureData() throws -> Data {
         let source = try XCTUnwrap(
-            Bundle(for: ScannerIncrementalTests.self).url(forResource: "codex-fast-scan", withExtension: "jsonl")
+            TestResources.bundle.url(forResource: "codex-fast-scan", withExtension: "jsonl")
         )
         return try Data(contentsOf: source)
     }

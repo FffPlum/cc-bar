@@ -212,12 +212,13 @@ final class KimiUsageIntegrationTests: XCTestCase {
         XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.kimi], enabled: true), "—")
         let help = KimiModelPresentation.missingPriceHelp(totals, apps: [.kimi], enabled: true)
         XCTAssertTrue(help.contains("public reference price") || help.contains("公开参考价格"))
-        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.kimi], enabled: false), "$0.00")
-        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.codex], enabled: true), "$0.00")
-        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.kimi, .codex], enabled: true), "$0.00")
+        let standardZero = StatsFormatter.cost(0)
+        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.kimi], enabled: false), standardZero)
+        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.codex], enabled: true), standardZero)
+        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.kimi, .codex], enabled: true), standardZero)
         XCTAssertEqual(KimiModelPresentation.missingPriceHelp(totals, apps: [.codex], enabled: true), "")
         totals.costUSD = Decimal(string: "1.25")!
-        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.kimi], enabled: true), "$1.25",
+        XCTAssertEqual(KimiModelPresentation.cost(totals, apps: [.kimi], enabled: true), StatsFormatter.cost(totals.costUSD),
                        "只有完全无已知金额的 Kimi 模型行使用缺价占位")
     }
 
