@@ -1,0 +1,1924 @@
+import AppKit
+import SwiftUI
+
+// MARK: - SettingsCategory
+
+enum SettingsCategory: String, CaseIterable, Identifiable {
+    case appearance
+    case data
+    case general
+
+    var id: String { rawValue }
+
+    var englishTitle: String {
+        switch self {
+        case .appearance: return "Appearance & Display"
+        case .data: return "Data & Refresh"
+        case .general: return "General"
+        }
+    }
+
+    var chineseTitle: String {
+        switch self {
+        case .appearance: return "外观与显示"
+        case .data: return "数据与刷新"
+        case .general: return "通用"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .appearance: return "macwindow"
+        case .data: return "arrow.triangle.2.circlepath"
+        case .general: return "gearshape"
+        }
+    }
+}
+
+// MARK: - SettingsRootView
+
+struct SettingsRootView: View {
+    @Environment(AppState.self) private var appState
+    private let updater = AppUpdater.shared
+    @State private var selectedCategory: SettingsCategory = .appearance
+    @State private var launchAtLoginMessage: String?
+    @State private var launchAtLoginMessageIsError = false
+    @State private var isRecalculatingUsage = false
+    @State private var pricingCatalogMessage: String?
+    @State private var pricingCatalogMessageIsError = false
+    @State private var showPricingCatalog = false
+    @State private var isTestingProxy = false
+    @State private var proxyTestMessage: String?
+    @State private var proxyTestMessageIsError = false
+    @State private var isExportingDiagnostics = false
+    @State private var diagnosticsMessage: String?
+    @State private var diagnosticsMessageIsError = false
+    @State private var showDiagnosticsConfirm = false
+    @State private var showQuotaAlertRebuildConfirm = false
+    @State private var quotaNotificationSettingsOpened = false
+    @State private var showBrandColorsResetConfirm = false
+    @State private var hoveredCurrencyTooltip: PopoverTooltip?
+
+    var body: some View {
+        @Bindable var settings = SettingsStore.shared
+
+        VStack(spacing: 0) {
+            Picker(tr("Settings", "设置"), selection: $selectedCategory) {
+                ForEach(SettingsCategory.allCases) { category in
+                    Text(tr(category.englishTitle, category.chineseTitle)).tag(category)
+                }
+            }
+            .pickerStyle(.segmented).labelsHidden().padding(20)
+            contentArea(settings: settings)
+        }
+        .modifier(PopoverTooltipOverlay(hovered: $hoveredCurrencyTooltip) { _ in
+            tr("Refresh exchange rates", "刷新汇率")
+        })
+        .sheet(isPresented: $showPricingCatalog) {
+            PricingCatalogView()
+        }
+        .confirmationDialog(
+            tr("Export diagnostics?", "导出诊断日志？"),
+            isPresented: $showDiagnosticsConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(tr("Export", "导出")) { exportDiagnostics() }
+            Button(tr("Cancel", "取消"), role: .cancel) {}
+        } message: {
+            Text(diagnosticsDisclosure)
+        }
+        .confirmationDialog(
+            tr("Rebuild alert history?", "重建提醒记录？"),
+            isPresented: $showQuotaAlertRebuildConfirm, titleVisibility: .visible
+        ) {
+            Button(tr("Rebuild", "重建")) {
+                Task { await appState.quotaNotifications.rebuild(entries: appState.quotaAlertEntries) }
+            }
+            Button(tr("Cancel", "取消"), role: .cancel) {}
+        } message: {
+            Text(tr(
+                "Current low quotas will be recorded as already alerted. Alerts resume after recovery or reset. The original file is kept as a backup.",
+                "当前低额度先记录为已提醒，恢复或重置后再提醒。原记录文件保留为备份。"
+            ))
+        }
+        .confirmationDialog(
+            tr("Reset to Brand Colors?", "恢复品牌主题色？"),
+            isPresented: $showBrandColorsResetConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(tr("Reset", "恢复")) {
+                settings.resetBrandColors()
+            }
+            Button(tr("Cancel", "取消"), role: .cancel) {}
+        } message: {
+            Text(tr(
+                "Restore every service to its default brand color. Custom colors are discarded.",
+                "将所有服务恢复为默认品牌主题色，自定义颜色会被清除。"
+            ))
+        }
+        .onAppear {
+            settings.syncLaunchAtLoginStatus()
+            if settings.launchAtLoginRequiresApproval {
+                launchAtLoginMessage = launchAtLoginApprovalMessage
+                launchAtLoginMessageIsError = false
+            } else {
+                launchAtLoginMessage = nil
+            }
+        }
+    }
+
+    // MARK: - Content Area
+
+    private func contentArea(settings: SettingsStore) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                switch selectedCategory {
+                case .appearance:
+                    appearanceSection(settings: settings)
+                case .data:
+                    dataSection(settings: settings)
+                case .general:
+                    generalSection(settings: settings)
+                }
+            }
+            // 内容栏居中、限宽，同系统设置；四个分类共用，切换时宽度不跳。
+            .frame(maxWidth: SettingsLayout.contentMaxWidth, alignment: .topLeading)
+            .padding(.horizontal, 36)
+            .padding(.vertical, 24)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .id(selectedCategory)
+    }
+
+    // MARK: - Section 2: Appearance & Display
+
+    @ViewBuilder
+    private func appearanceSection(settings: SettingsStore) -> some View {
+        PrefsGroup(
+            title: "Menu Bar",
+            chinese: "菜单栏"
+        ) {
+            PrefsRow(
+                label: "Quota period",
+                chinese: "额度周期"
+            ) {
+                Picker("", selection: Binding(get: { settings.menuBarWindow }, set: { settings.menuBarWindow = $0 })) {
+                    Text(tr("Main", "主额度")).tag(MenuBarWindowChoice.primary)
+                    Text(tr("Weekly", "周额度")).tag(MenuBarWindowChoice.weekly)
+                    Text(tr("Both", "都显示")).tag(MenuBarWindowChoice.both)
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+        }
+
+        PrefsGroup(
+            title: "Floating HUD",
+            chinese: "桌面悬浮窗"
+        ) {
+            PrefsRow(
+                label: "Show floating window",
+                chinese: "显示悬浮窗",
+                desc: "Choose accounts in Quota Management.",
+                chineseDesc: "显示哪些账号在「额度管理」中设置"
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { settings.floatingEnabled },
+                    set: { newValue in
+                        settings.floatingEnabled = newValue
+                        FloatingPanelController.shared.sync()
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(.green)
+            }
+        }
+
+        PrefsGroup(
+            title: "Display Details",
+            chinese: "显示细节"
+        ) {
+            PrefsRow(
+                label: "Reset time",
+                chinese: "重置时间"
+            ) {
+                Picker("", selection: Binding(
+                    get: { settings.resetTimeDisplay },
+                    set: { settings.resetTimeDisplay = $0 }
+                )) {
+                    Text(tr("Remaining", "剩余时长")).tag(ResetTimeDisplay.relative)
+                    Text(tr("Exact time", "具体时间")).tag(ResetTimeDisplay.absolute)
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+            InsetDivider()
+            PrefsRow(
+                label: "Official status dot",
+                chinese: "官方状态圆点"
+            ) {
+                Toggle("", isOn: Binding(get: { settings.showServiceStatus }, set: { settings.showServiceStatus = $0 }))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(.green)
+            }
+            InsetDivider()
+            PrefsRow(
+                label: "Follow installed app icons",
+                chinese: "跟随已安装 App 图标",
+                desc: "When enabled, use the app icon for this service.",
+                chineseDesc: "启用后使用此服务对应 App 的图标"
+            ) {
+                Toggle("", isOn: Binding(get: { settings.useInstalledAppIcons }, set: { settings.useInstalledAppIcons = $0 }))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(.green)
+            }
+            InsetDivider()
+            PrefsRow(
+                label: "Privacy mode",
+                chinese: "隐私模式",
+                desc: "Hide account, project, and conversation names for screenshots. Usage numbers stay visible.",
+                chineseDesc: "隐藏账号、项目和对话名称，用量数据照常显示，便于截图分享"
+            ) {
+                Toggle("", isOn: Binding(get: { settings.privacyMode }, set: { settings.privacyMode = $0 }))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(.green)
+            }
+        }
+
+        brandColorsGroup(settings: settings)
+
+        PrefsGroup(
+            title: "Statistics",
+            chinese: "统计"
+        ) {
+            PrefsRow(
+                label: "Ranking metric",
+                chinese: "排行口径",
+                desc: "Used for sorting and shares in Overview and Projects.",
+                chineseDesc: "用于概览和项目页的排序与占比"
+            ) {
+                Picker("", selection: Binding(
+                    get: { settings.statsRankMetric },
+                    set: { settings.statsRankMetric = $0 }
+                )) {
+                    Text("Tokens").tag(StatsRankMetric.tokens)
+                    Text(tr("Cost", "费用")).tag(StatsRankMetric.cost)
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+            InsetDivider()
+            PrefsRow(
+                label: "Include Codex subscription usage in Pi, OpenCode and DSH",
+                chinese: "包含 Pi、OpenCode、DSH 中的 Codex 订阅用量",
+                desc: "When on, the Codex cards in the full-quota estimate and the Codex spend in the popover add Codex subscription usage in Pi, OpenCode and DSH on top of Codex's own usage, all toward the Codex primary account.",
+                chineseDesc: "打开后，额度用满预估的 Codex 卡和弹出面板的 Codex 花费，除了 Codex 本身的用量，还会加上在 Pi、OpenCode、DSH 中使用 Codex 订阅产生的用量，一律算到 Codex 主账号"
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { settings.cycleIncludesOtherAgents },
+                    set: { settings.cycleIncludesOtherAgents = $0 }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(.green)
+            }
+            InsetDivider()
+            PrefsRow(
+                label: "Estimate Pi output speed",
+                chinese: "估算 Pi 输出速度",
+                desc: "Pi logs only record total request time, including the wait before the first token, so the estimate reads low. Requests timed by the Pi timing plugin always use actual generation time.",
+                chineseDesc: "Pi 日志只记录请求总耗时，包含首字前的等待，估算值偏低。装了 Pi 计时插件的请求始终按实际生成时间计算，不受此开关影响",
+                detail: AnyView(PiTimingGuideButton())
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { settings.piEstimatedOutputSpeed },
+                    set: { settings.piEstimatedOutputSpeed = $0 }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(.green)
+            }
+        }
+    }
+
+    // MARK: - Brand Colors
+
+    @ViewBuilder
+    private func brandColorsGroup(settings: SettingsStore) -> some View {
+        PrefsGroup(
+            title: "Brand Colors",
+            chinese: "品牌颜色",
+            desc: "Customize the color used to identify each service in charts and legends.",
+            chineseDesc: "自定义各服务在图表和图例中的识别色"
+        ) {
+            let brands = ServiceBrand.allCases
+            ForEach(brands.indices, id: \.self) { index in
+                brandColorRow(brands[index], settings: settings)
+                if index < brands.count - 1 {
+                    InsetDivider()
+                }
+            }
+            InsetDivider()
+            PrefsRow(
+                label: "Reset to Brand Colors",
+                chinese: "恢复品牌主题色",
+                desc: "Restore every service to its default brand color.",
+                chineseDesc: "将所有服务恢复为默认品牌主题色"
+            ) {
+                Button(tr("Reset", "恢复")) {
+                    showBrandColorsResetConfirm = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private func brandColorRow(_ brand: ServiceBrand, settings: SettingsStore) -> some View {
+        let (english, chinese) = brandDisplayName(brand)
+        let resolvedColor = BrandColorResolver.color(for: brand, settings: settings)
+
+        return PrefsRow(
+            label: english,
+            chinese: chinese,
+            leading: AnyView(
+                ServiceTile(
+                    logoName: brand.logoName,
+                    fallback: String(english.prefix(1)),
+                    tint: resolvedColor,
+                    size: 22,
+                    logoSize: 14,
+                    cornerRadius: 6
+                )
+            )
+        ) {
+            BrandColorControl(brand: brand, settings: settings)
+        }
+    }
+
+    private func brandDisplayName(_ brand: ServiceBrand) -> (english: String, chinese: String) {
+        let name: String
+        switch brand {
+        case .codex: name = "Codex"
+        case .claude: name = "Claude Code"
+        case .antigravity: name = "Antigravity"
+        case .cursor: name = "Cursor"
+        case .commandCode: name = "Command Code"
+        case .opencode: name = "OpenCode"
+        case .kimi: name = "Kimi Code"
+        case .pi: name = "Pi"
+        case .dsh: name = "DSH"
+        case .deepseek: name = "DeepSeek"
+        case .grok: name = "Grok"
+        case .gemini: name = "Gemini"
+        }
+        return (name, name)
+    }
+
+    // MARK: - Section 3: Data & Refresh
+
+    @ViewBuilder
+    private func dataSection(settings: SettingsStore) -> some View {
+        PrefsGroup(
+            title: "Polling Intervals",
+            chinese: "后台刷新"
+        ) {
+            PrefsRow(label: "Quota refresh", chinese: "额度刷新") {
+                Picker("", selection: Binding(
+                    get: { settings.quotaInterval },
+                    set: { newValue in
+                        settings.quotaInterval = newValue
+                        appState.applySettingsChange()
+                    }
+                )) {
+                    ForEach(QuotaIntervalChoice.allCases) { choice in
+                        Text(choice.bilingualDisplayName).tag(choice)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+            InsetDivider()
+            PrefsRow(label: "Log scan", chinese: "日志扫描") {
+                Picker("", selection: Binding(
+                    get: { settings.usageInterval },
+                    set: { newValue in
+                        settings.usageInterval = newValue
+                        appState.applySettingsChange()
+                    }
+                )) {
+                    ForEach(UsageIntervalChoice.allCases) { choice in
+                        Text(choice.bilingualDisplayName).tag(choice)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+            InsetDivider()
+            PrefsRow(label: "Last refresh", chinese: "上次刷新") {
+                HStack(spacing: 6) {
+                    if appState.isRefreshing {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(lastRefreshText)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+        }
+
+        proxyGroup(settings: settings)
+
+        PrefsGroup(title: "Currency", chinese: "货币") {
+            PrefsRow(
+                label: "Display currency",
+                chinese: "货币单位",
+                desc: currencyRateDescription.english,
+                chineseDesc: currencyRateDescription.chinese
+            ) {
+                HStack(spacing: 8) {
+                    Picker("", selection: Binding(
+                        get: { settings.displayCurrency },
+                        set: { currency in
+                            settings.displayCurrency = currency
+                            CurrencyStore.shared.refreshIfNeeded()
+                        }
+                    )) {
+                        ForEach(DisplayCurrency.allCases) { currency in
+                            Text("\(currency.code) · \(currency.displayName)").tag(currency)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+
+                    Button {
+                        hoveredCurrencyTooltip = nil
+                        Task { await CurrencyStore.shared.refresh() }
+                    } label: {
+                        if CurrencyStore.shared.isRefreshing {
+                            ProgressView().controlSize(.small).frame(width: 13, height: 13)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(CurrencyStore.shared.isRefreshing)
+                    .accessibilityLabel(tr("Refresh exchange rates", "刷新汇率"))
+                    .anchorPreference(key: PopoverTooltipAnchorKey.self, value: .bounds) { [.currencyRefresh: $0] }
+                    .onHover { hovering in
+                        if hovering && !CurrencyStore.shared.isRefreshing {
+                            hoveredCurrencyTooltip = .currencyRefresh
+                        } else if hoveredCurrencyTooltip == .currencyRefresh {
+                            hoveredCurrencyTooltip = nil
+                        }
+                    }
+                    .onDisappear { hoveredCurrencyTooltip = nil }
+                }
+            }
+        }
+
+        PrefsGroup(
+            title: "Data Maintenance",
+            chinese: "数据维护"
+        ) {
+            PrefsRow(
+                label: "Price catalog",
+                chinese: "价格目录",
+                desc: "Official provider prices from models.dev.",
+                chineseDesc: "models.dev 官方提供商价格"
+            ) {
+                Button(tr("View", "查看")) { showPricingCatalog = true }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            InsetDivider()
+            PrefsRow(
+                label: "Update prices & recalculate usage",
+                chinese: "更新价格并重算用量",
+                desc: "Fetch models.dev, then recompute history with the latest prices and rules. Usage from deleted logs is kept.",
+                chineseDesc: "先更新 models.dev 价格，再按最新价格和规则重算历史；已删除日志的对话保留用量",
+                detail: recalculateOutcomeDetail
+            ) {
+                let recalculating = isRecalculatingUsage
+                    || appState.usageService.isRebuildingHistory
+                    || appState.usageService.isRefreshingPricingCatalog
+                HStack(spacing: 8) {
+                    if appState.usageService.cycleUsageNeedsManualRecalculation, !recalculating {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle")
+                            Text(tr("Cycle usage incomplete", "周期用量不完整"))
+                        }
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                        .help(tr(
+                            "Some past cycles are missing usage data. Recalculate to fill it in.",
+                            "部分历史周期缺少用量数据，点「更新并重算」补齐"
+                        ))
+                    }
+                    if let progress = appState.usageService.scanProgress, recalculating {
+                        Text(scanProgressText(progress))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    } else if let pricingCatalogMessage, !recalculating {
+                        Text(pricingCatalogMessage)
+                            .font(.system(size: 11))
+                            .foregroundStyle(pricingCatalogMessageIsError ? Color.orange : Color.secondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Button {
+                        pricingCatalogMessage = nil
+                        isRecalculatingUsage = true
+                        Task {
+                            let result = await appState.usageService.refreshPricingCatalogAndRecalculateUsage()
+                            pricingCatalogMessageIsError = result?.isError ?? true
+                            pricingCatalogMessage = result?.message
+                                ?? tr("Update and recalculation did not start", "更新和重算未执行")
+                            isRecalculatingUsage = false
+                        }
+                    } label: {
+                        if recalculating {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text(tr("Update & Recalculate", "更新并重算"))
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(recalculating)
+                }
+            }
+        }
+    }
+
+    private var currencyRateDescription: (english: String, chinese: String) {
+        let currency = SettingsStore.shared.displayCurrency
+        if currency == .usd {
+            return (
+                "Amounts are stored in USD. Currency selection changes display only.",
+                "金额以美元存储，切换币种只改变显示"
+            )
+        }
+        if let rate = CurrencyStore.shared.rate(for: currency) {
+            let formatter = NumberFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.maximumFractionDigits = 6
+            let value = formatter.string(from: NSDecimalNumber(decimal: rate)) ?? rate.description
+            let age = CurrencyStore.shared.snapshot.map { PopoverRootView.relativeAge(from: $0.fetchedAt) } ?? "—"
+            if CurrencyStore.shared.lastRefreshFailedAt != nil {
+                return (
+                    "Refresh failed · 1 USD = \(value) \(currency.code) · updated \(age) ago",
+                    "刷新失败 · 1 USD = \(value) \(currency.code) · \(age) 前更新"
+                )
+            }
+            return (
+                "1 USD = \(value) \(currency.code) · updated \(age) ago",
+                "1 USD = \(value) \(currency.code) · \(age) 前更新"
+            )
+        }
+        if CurrencyStore.shared.isRefreshing {
+            return ("Fetching the current exchange rate…", "正在获取当前汇率…")
+        }
+        if CurrencyStore.shared.lastRefreshFailedAt != nil {
+            return (
+                "Refresh failed. Amounts remain in USD until a \(currency.code) rate is available.",
+                "刷新失败，获得 \(currency.code) 汇率前仍显示美元"
+            )
+        }
+        return (
+            "Refresh to fetch the current exchange rate. Amounts remain in USD until then.",
+            "刷新获取当前汇率，在此之前金额仍显示美元"
+        )
+    }
+
+    // MARK: - Network proxy
+
+    /// 跟随系统时只有一行；手动时展开类型、地址和连接测试。改动写入 UserDefaults，下一次请求即生效。
+    private func proxyGroup(settings: SettingsStore) -> some View {
+        PrefsGroup(title: "Network Proxy", chinese: "网络代理") {
+            PrefsRow(
+                label: "Proxy",
+                chinese: "代理",
+                desc: settings.proxyMode == .system
+                    ? nil : "If the proxy is unavailable, requests stop instead of connecting directly.",
+                chineseDesc: settings.proxyMode == .system
+                    ? nil : "代理不可用时停止取数，不改为直连"
+            ) {
+                Picker("", selection: Binding(
+                    get: { settings.proxyMode },
+                    set: { newValue in
+                        settings.proxyMode = newValue
+                        proxyTestMessage = nil
+                    }
+                )) {
+                    ForEach(ProxyMode.allCases) { mode in
+                        Text(mode.bilingualDisplayName).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+
+            switch settings.proxyMode {
+            case .system:
+                EmptyView()
+            case .manual:
+                InsetDivider()
+                PrefsRow(
+                    label: "Type",
+                    chinese: "类型",
+                    desc: settings.proxyType == .socks5
+                        ? "The claude and agy command-line quota queries are skipped." : nil,
+                    chineseDesc: settings.proxyType == .socks5
+                        ? "SOCKS5 下不调用 claude、agy 命令行查询额度" : nil
+                ) {
+                    Picker("", selection: Binding(
+                        get: { settings.proxyType },
+                        set: { newValue in
+                            settings.proxyType = newValue
+                            proxyTestMessage = nil
+                        }
+                    )) {
+                        Text("HTTP").tag(ProxyType.http)
+                        Text("SOCKS5").tag(ProxyType.socks5)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                }
+                InsetDivider()
+                PrefsRow(label: "Address", chinese: "地址") {
+                    HStack(spacing: 6) {
+                        // 占位不写具体地址：看起来像已填好，用户会以为不用填。
+                        TextField(tr("Host", "主机"), text: Binding(
+                            get: { settings.proxyHost },
+                            set: { newValue in
+                                settings.proxyHost = newValue.trimmingCharacters(in: .whitespaces)
+                                proxyTestMessage = nil
+                            }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 140)
+                        Text(":")
+                            .foregroundStyle(.secondary)
+                        // 用文本绑定逐字写入：数值格式的输入框要回车或失焦才提交，填完直接点「测试」会读到空端口。
+                        TextField(tr("Port", "端口"), text: Binding(
+                            get: { settings.proxyPort == 0 ? "" : String(settings.proxyPort) },
+                            set: { newValue in
+                                settings.proxyPort = Int(String(newValue.filter(\.isASCII).filter(\.isNumber).prefix(5))) ?? 0
+                                proxyTestMessage = nil
+                            }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .monospacedDigit()
+                        .frame(width: 64)
+                    }
+                }
+            }
+
+            if settings.proxyMode != .system {
+                InsetDivider()
+                PrefsRow(label: "Connection test", chinese: "连接测试") {
+                    HStack(spacing: 8) {
+                        if let proxyTestMessage {
+                            Text(proxyTestMessage)
+                                .font(.system(size: 11))
+                                .foregroundStyle(proxyTestMessageIsError ? Color.red : Color.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        Button {
+                            proxyTestMessage = nil
+                            isTestingProxy = true
+                            Task {
+                                let result = await NetworkProxy.testConnection()
+                                isTestingProxy = false
+                                switch result {
+                                case .success:
+                                    proxyTestMessageIsError = false
+                                    proxyTestMessage = tr("Connected", "可连接")
+                                case .failure(let error):
+                                    proxyTestMessageIsError = true
+                                    proxyTestMessage = proxyTestFailureMessage(error)
+                                }
+                            }
+                        } label: {
+                            if isTestingProxy {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Text(tr("Test", "测试"))
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(isTestingProxy)
+                    }
+                }
+            }
+        }
+    }
+
+    /// `userMessage` 是给 Popover 的，地址或端口未填、填错会带「请到「设置 → 数据与刷新」…」，
+    /// TLS 失败会说「请检查代理设置」，用户此时就在这一页，所以这里只说原因。
+    /// 连不上、超时的文案不带跳转，照常使用。
+    private func proxyTestFailureMessage(_ error: QuotaError) -> String {
+        if case .network(.tls) = error {
+            return tr(
+                "Secure connection failed — the proxy's certificate may not be trusted by the system",
+                "安全连接失败,代理的证书可能未被系统信任"
+            )
+        }
+        guard case .network(.proxyUnavailable) = error else { return error.userMessage }
+        switch NetworkProxy.resolve() {
+        case .unavailable(.manualIncomplete):
+            return tr("Enter the address and port", "请填写地址和端口")
+        case .unavailable(.invalidPort):
+            return tr("Port must be between 1 and 65535", "端口需在 1–65535 之间")
+        case .unavailable(.invalidHost):
+            return tr(
+                "Enter only a hostname or IP, without http:// or a port",
+                "地址只填主机名或 IP,不带 http:// 和端口"
+            )
+        case .system, .proxy:
+            return tr("Proxy unavailable", "代理不可用")
+        }
+    }
+
+    // MARK: - Section 4: General
+
+    @ViewBuilder
+    private func generalSection(settings: SettingsStore) -> some View {
+        PrefsGroup(title: "System", chinese: "系统") {
+            PrefsRow(label: "Language", chinese: "语言") {
+                Picker("", selection: Binding(
+                    get: { settings.appLanguage },
+                    set: { settings.appLanguage = $0 }
+                )) {
+                    ForEach(AppLanguage.allCases) { lang in
+                        Text(lang.displayName).tag(lang)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+            InsetDivider()
+            PrefsRow(label: "Launch at login", chinese: "开机自动启动", detail: launchAtLoginDetail) {
+                Toggle("", isOn: Binding(
+                    get: { settings.launchAtLogin },
+                    set: { newValue in
+                        do {
+                            try settings.setLaunchAtLogin(newValue)
+                            if settings.launchAtLoginRequiresApproval {
+                                launchAtLoginMessage = launchAtLoginApprovalMessage
+                                launchAtLoginMessageIsError = false
+                            } else {
+                                launchAtLoginMessage = nil
+                            }
+                        } catch {
+                            settings.syncLaunchAtLoginStatus()
+                            launchAtLoginMessage = launchAtLoginErrorMessage(error)
+                            launchAtLoginMessageIsError = true
+                        }
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(.green)
+            }
+        }
+
+        quotaAlertGroup(settings: settings)
+
+        PrefsGroup(title: "Diagnostics", chinese: "诊断") {
+            PrefsRow(
+                label: "Export diagnostics",
+                chinese: "导出诊断日志",
+                desc: "A redacted zip for reporting issues.",
+                chineseDesc: "生成脱敏的 zip，用于反馈问题"
+            ) {
+                HStack(spacing: 8) {
+                    if let diagnosticsMessage {
+                        Text(diagnosticsMessage)
+                            .font(.system(size: 11))
+                            .foregroundStyle(diagnosticsMessageIsError ? Color.red : Color.secondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 300, alignment: .trailing)
+                    }
+                    Button {
+                        showDiagnosticsConfirm = true
+                    } label: {
+                        if isExportingDiagnostics {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text(tr("Export", "导出"))
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isExportingDiagnostics)
+                }
+            }
+            InsetDivider()
+            PrefsRow(
+                label: "Reveal log folder",
+                chinese: "打开日志目录",
+                desc: "~/Library/Logs/CCBar",
+                chineseDesc: "~/Library/Logs/CCBar"
+            ) {
+                Button(tr("Open", "打开")) {
+                    DiagnosticsBundle.revealLogDirectory()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            InsetDivider()
+            PrefsRow(
+                label: "Verbose logging",
+                chinese: "详细日志",
+                desc: "Turn on while troubleshooting, then turn it off.",
+                chineseDesc: "排查问题时开启，用完建议关闭"
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { settings.verboseLogging },
+                    set: { settings.verboseLogging = $0 }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(.green)
+            }
+        }
+
+        PrefsGroup(title: "Updates & About", chinese: "更新与关于") {
+            PrefsRow(label: "Version", chinese: "版本") {
+                Text(appVersion)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            InsetDivider()
+            PrefsRow(
+                label: "Check for updates",
+                chinese: "检查更新"
+            ) {
+                Button(updateButtonTitle) {
+                    updater.checkForUpdates()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            InsetDivider()
+            PrefsRow(label: "Last checked", chinese: "上次检查") {
+                if let date = updater.lastCheckedAt {
+                    Text(date, format: .dateTime.month().day().hour().minute())
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                } else {
+                    Text("—").foregroundStyle(.secondary)
+                }
+            }
+            InsetDivider()
+            PrefsRow(label: "Automatically check for updates", chinese: "自动检查更新") {
+                Toggle("", isOn: Binding(
+                    get: { updater.automaticChecks },
+                    set: { updater.setAutomaticChecks($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(.green)
+            }
+        }
+    }
+
+    // MARK: - Bindings & Actions Helpers
+
+    private func quotaAlertGroup(settings: SettingsStore) -> some View {
+        let service = appState.quotaNotifications
+        return PrefsGroup(
+            title: "Quota alerts", chinese: "额度提醒",
+            desc: "Checks enabled quota services and imported Codex accounts after successful refreshes.",
+            chineseDesc: "包含已启用的额度服务和导入 Codex 账号，成功刷新后检查"
+        ) {
+            PrefsRow(label: "Enable quota alerts", chinese: "开启额度提醒", detail: quotaAlertDetail) {
+                Toggle(tr("Enable quota alerts", "开启额度提醒"), isOn: Binding(
+                    get: { settings.quotaAlertsEnabled },
+                    set: { enabled in
+                        settings.quotaAlertsEnabled = enabled
+                        if enabled { Task { await service.requestPermissionIfNeeded() } }
+                    }
+                ))
+                .labelsHidden().toggleStyle(.switch).tint(.green)
+            }
+            InsetDivider()
+            PrefsRow(label: "Remaining below", chinese: "剩余低于") {
+                Picker(tr("Remaining below", "剩余低于"), selection: Binding(
+                    get: { settings.quotaAlertThresholdPercent },
+                    set: { settings.quotaAlertThresholdPercent = $0; service.settingsChanged() }
+                )) {
+                    ForEach(Array(stride(from: 5, through: 50, by: 5)), id: \.self) { value in
+                        Text("\(value)%").monospacedDigit().tag(value)
+                    }
+                }
+                .labelsHidden().pickerStyle(.menu).fixedSize()
+                .disabled(!settings.quotaAlertsEnabled)
+            }
+            InsetDivider()
+            PrefsRow(label: "5-hour / session quota", chinese: "5 小时／会话额度") {
+                Toggle(tr("5-hour / session quota", "5 小时／会话额度"), isOn: Binding(
+                    get: { settings.quotaAlertFiveHourEnabled },
+                    set: { settings.quotaAlertFiveHourEnabled = $0; service.settingsChanged() }
+                ))
+                .labelsHidden().toggleStyle(.switch).tint(.green)
+                .disabled(!settings.quotaAlertsEnabled || (!settings.quotaAlertWeeklyEnabled && !settings.quotaAlertBillingCycleEnabled))
+                .help(tr("Keep at least one quota window selected.", "至少保留一个额度窗口"))
+            }
+            InsetDivider()
+            PrefsRow(label: "Weekly quota", chinese: "周额度",
+                     desc: "Includes model-specific weekly quotas.", chineseDesc: "包含模型专属周额度") {
+                Toggle(tr("Weekly quota", "周额度"), isOn: Binding(
+                    get: { settings.quotaAlertWeeklyEnabled },
+                    set: { settings.quotaAlertWeeklyEnabled = $0; service.settingsChanged() }
+                ))
+                .labelsHidden().toggleStyle(.switch).tint(.green)
+                .disabled(!settings.quotaAlertsEnabled || (!settings.quotaAlertFiveHourEnabled && !settings.quotaAlertBillingCycleEnabled))
+                .help(tr("Keep at least one quota window selected.", "至少保留一个额度窗口"))
+            }
+            InsetDivider()
+            PrefsRow(label: "Billing cycle quota", chinese: "计费周期额度",
+                     desc: "Cursor Total / Auto / API, and Command Code, OpenCode Go and Kimi Code monthly quotas.",
+                     chineseDesc: "Cursor Total／Auto／API，以及 Command Code、OpenCode Go、Kimi Code 月额度") {
+                Toggle(tr("Billing cycle quota", "计费周期额度"), isOn: Binding(
+                    get: { settings.quotaAlertBillingCycleEnabled },
+                    set: { settings.quotaAlertBillingCycleEnabled = $0; service.settingsChanged() }
+                ))
+                .labelsHidden().toggleStyle(.switch).tint(.green)
+                .disabled(!settings.quotaAlertsEnabled || (!settings.quotaAlertFiveHourEnabled && !settings.quotaAlertWeeklyEnabled))
+                .help(tr("Keep at least one quota window selected.", "至少保留一个额度窗口"))
+            }
+            InsetDivider()
+            PrefsRow(label: "Play sound", chinese: "播放声音", detail: quotaAlertSoundDetail) {
+                Toggle(tr("Play sound", "播放声音"), isOn: Binding(
+                    get: { settings.quotaAlertSoundEnabled },
+                    set: { enabled in
+                        settings.quotaAlertSoundEnabled = enabled
+                        service.settingsChanged()
+                        if enabled { Task { await service.requestPermissionIfNeeded() } }
+                    }
+                ))
+                .labelsHidden().toggleStyle(.switch).tint(.green)
+                .disabled(!settings.quotaAlertsEnabled)
+            }
+        }
+        .task { _ = await service.refreshPermission() }
+    }
+
+    private var quotaAlertDetail: AnyView? {
+        let service = appState.quotaNotifications
+        guard service.statusText != nil || quotaNotificationSettingsOpened else { return nil }
+        return AnyView(VStack(alignment: .leading, spacing: 6) {
+            if let status = service.statusText {
+                Text(status).foregroundStyle(.orange)
+            }
+            if SettingsStore.shared.quotaAlertsEnabled {
+                if service.permissionState?.canSubmit == false || service.authorizationFailed {
+                    Button(tr("Open notification settings", "打开系统通知设置")) {
+                        // 只用通知页面入口；不把未公开的 bundle 详情深链视为稳定协议。
+                        let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
+                        if !NSWorkspace.shared.open(url) {
+                            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+                        }
+                        quotaNotificationSettingsOpened = true
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                }
+                if service.permissionState?.authorization == .notDetermined || service.authorizationFailed || service.permissionReadFailed {
+                    Button(tr("Retry permission request", "重试申请权限")) {
+                        Task { await service.requestPermissionIfNeeded() }
+                    }
+                    .buttonStyle(.bordered).controlSize(.small).disabled(service.isRequestingAuthorization)
+                }
+            }
+            if service.storagePaused {
+                Button(tr("Rebuild alert history", "重建提醒记录")) { showQuotaAlertRebuildConfirm = true }
+                    .buttonStyle(.bordered).controlSize(.small).disabled(service.isRebuilding)
+            }
+            if quotaNotificationSettingsOpened {
+                Text(tr("Select CCBar in the notification list.", "在通知列表中选择 CCBar"))
+                    .foregroundStyle(.secondary)
+            }
+        }.font(.system(size: 11)))
+    }
+
+    private var quotaAlertSoundDetail: AnyView? {
+        let settings = SettingsStore.shared
+        guard settings.quotaAlertsEnabled, settings.quotaAlertSoundEnabled,
+              appState.quotaNotifications.permissionState?.sound == false else { return nil }
+        return AnyView(Text(tr("Notification sounds are disabled in System Settings.", "系统设置未允许通知声音"))
+            .font(.system(size: 11)).foregroundStyle(.secondary))
+    }
+
+    /// 手动重算的结果提示。成功不提示（费用已在统计页可见）；被拒 / 失败必须说明
+    /// 「原历史保留」与下一步。手动重算只会因来源读取不完整或写盘失败被拒。
+    private func rebuildOutcomeHint(_ outcome: UsageRebuildOutcome?) -> String? {
+        switch outcome {
+        case .rejectedUsageChanged:
+            // 只有受限恢复的核对会产生，forceRescan 会把它转成 `.restrictedRecoveryRejected`。
+            return tr(
+                "Not applied: recalculated usage did not match existing data. Existing data kept.",
+                "未生效：重算结果与已有数据不一致，原数据未改动"
+            )
+        case .rejectedIncompleteSources:
+            // 重算扫描会刷新 Claude / Codex 的读取失败汇总；有汇总时说清来源、原因和修复方式。
+            if let issue = appState.usageService.logReadIssue {
+                let cause = issue.localizedCause
+                if let fix = issue.localizedFix {
+                    return tr("Not applied: \(cause). Existing data kept; \(fix), then try again.",
+                              "未生效：\(cause)。原数据未改动，\(fix)后再试")
+                }
+                return tr("Not applied: \(cause). Existing data kept.", "未生效：\(cause)，原数据未改动")
+            }
+            return tr(
+                "Not applied: some logs could not be read. Existing data kept.",
+                "未生效：部分日志读取失败，原数据未改动"
+            )
+        case .commitFailed:
+            return tr(
+                "Could not save the result. Existing data kept.",
+                "结果保存失败，原数据未改动"
+            )
+        case .partiallyCommitted:
+            return tr(
+                "Partly applied: costs for models with newly fetched prices were not updated.",
+                "部分生效：新获取价格的模型费用未更新"
+            )
+        case .restrictedRecoveryRejected:
+            return tr(
+                "Verification failed. Existing data kept; new usage is paused. Restore the logs or fix disk read/write errors, then retry.",
+                "校验未通过：原数据保留，已暂停统计新用量。恢复日志或解决磁盘读写问题后再试"
+            )
+        case .replaced, .recoveredFromRestrictedHistory, .none:
+            // 周期用量与重建前不同是预期结果（以现有日志为准），不再单独提示。
+            return nil
+        }
+    }
+
+    private func scanProgressText(_ progress: ScanProgress) -> String {
+        let appName: String
+        switch progress.app {
+        case .codex: appName = "Codex"
+        case .claude: appName = "Claude Code"
+        case .cursor: appName = "Cursor"
+        case .pi: appName = "Pi"
+        case .opencode: appName = "OpenCode"
+        case .dsh: appName = "DSH"
+        case .antigravity: appName = "Antigravity"
+        case .kimi: appName = "Kimi Code"
+        }
+        if progress.filesTotal > 0 {
+            return tr(
+                "Scanning \(appName): \(progress.filesCompleted)/\(progress.filesTotal) files",
+                "正在扫描 \(appName)：\(progress.filesCompleted)/\(progress.filesTotal) 个文件"
+            )
+        }
+        return tr(
+            "Scanning \(appName): \(progress.linesParsed) items",
+            "正在扫描 \(appName)：已处理 \(progress.linesParsed) 条"
+        )
+    }
+
+    // MARK: Diagnostics helpers
+
+    /// 导出前必须把"包含什么 / 不包含什么"说清楚。用户对"把日志发给开发者"的顾虑
+    /// 只能靠明确告知消解，不能靠一句"已脱敏"带过。
+    private var diagnosticsDisclosure: String {
+        tr(
+            """
+            The zip contains the app version, macOS version, your settings, each service's \
+            status and last error, and local log scan statistics.
+
+            It does not contain sign-in tokens, plain-text email addresses, conversation \
+            content, file contents, or project names. Nothing is uploaded — the file is \
+            saved locally and it is up to you whether to send it.
+            """,
+            """
+            压缩包内含：App 版本、macOS 版本、你的设置项、各服务的状态与最后一次错误、\
+            本地日志扫描统计。
+
+            不含：登录令牌、明文邮箱、对话内容、文件内容、项目名。App 不会上传任何内容，\
+            文件只保存在本机，发不发由你决定。
+            """
+        )
+    }
+
+    private func exportDiagnostics() {
+        isExportingDiagnostics = true
+        diagnosticsMessage = nil
+        diagnosticsMessageIsError = false
+        Task {
+            do {
+                let url = try await DiagnosticsBundle.export(appState: appState)
+                DiagnosticsBundle.revealInFinder(url)
+                diagnosticsMessage = tr("Revealed in Finder", "已在 Finder 中显示")
+            } catch {
+                diagnosticsMessage = tr("Export failed", "导出失败")
+                diagnosticsMessageIsError = true
+                AppLog.error(.app, "diagnostics export failed: \(Redact.error(error))")
+            }
+            isExportingDiagnostics = false
+        }
+    }
+
+    // MARK: Update check helpers
+
+    private var updateButtonTitle: String {
+        updater.hasUpdate || updater.isWorking
+            ? tr("View update", "查看更新")
+            : tr("Check", "检查")
+    }
+
+    private var launchAtLoginApprovalMessage: String {
+        tr(
+            "Approve CCBar in System Settings > General > Login Items & Extensions.",
+            "请在「系统设置 > 通用 > 登录项与扩展」中允许 CCBar。"
+        )
+    }
+
+    private func launchAtLoginErrorMessage(_ error: Error) -> String {
+        let description = (error as NSError).localizedDescription
+        if description.localizedCaseInsensitiveContains("operation not permitted") {
+            return tr(
+                "macOS rejected this change. Export a signed CCBar.app, move it to /Applications, launch it there, then try again.",
+                "macOS 拒绝了这次更改。请导出签名后的 CCBar.app，拖到 /Applications 后从那里启动，再重试。"
+            )
+        }
+        return description
+    }
+
+    /// 「重新计算用量」上一次的核对结果提示，放在描述下方，长文案换行显示。
+    private var recalculateOutcomeDetail: AnyView? {
+        guard !isRecalculatingUsage,
+              let hint = rebuildOutcomeHint(appState.usageService.lastRebuildOutcome)
+        else { return nil }
+        return AnyView(
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Image(systemName: "exclamationmark.triangle")
+                Text(hint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.orange)
+            .padding(.top, 2)
+            .help(PrivacyDisplay.help(appState.usageService.lastRebuildDiagnostic ?? ""))
+        )
+    }
+
+    /// 开机启动的状态 / 错误说明，作为「开机自动启动」的描述行。
+    private var launchAtLoginDetail: AnyView? {
+        guard let launchAtLoginMessage else { return nil }
+        return AnyView(
+            Text(launchAtLoginMessageIsError ? PrivacyDisplay.error(launchAtLoginMessage) : launchAtLoginMessage)
+                .font(.system(size: 11))
+                .foregroundStyle(launchAtLoginMessageIsError ? Color.red : Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        )
+    }
+
+    // MARK: Helpers
+
+    private var lastRefreshText: String {
+        let latest = QuotaApp.allCases.compactMap {
+            appState.refreshState(for: $0).lastSuccessAt
+        }.max()
+        guard let latest else { return "—" }
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm:ss"
+        timeFormatter.locale = Locale(identifier: "en_US_POSIX")
+        return "\(timeFormatter.string(from: latest)) · \(PopoverRootView.relativeAge(from: latest)) \(tr("ago", "前"))"
+    }
+
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        return info?["CFBundleShortVersionString"] as? String ?? "0.0"
+    }
+}
+
+// MARK: - PrefsGroup
+
+private struct PrefsGroup<Content: View>: View {
+    let title: String
+    let chinese: String
+    var desc: String? = nil
+    var chineseDesc: String? = nil
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                // 13 semibold：不小于行标签（13 regular），组标题层级在行之上。
+                Text(tr(title, chinese))
+                    .font(.system(size: 13, weight: .semibold))
+                    .kerning(-0.05)
+                if let desc, let chineseDesc {
+                    Text(tr(desc, chineseDesc))
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 8)
+
+            VStack(spacing: 0) {
+                content()
+            }
+            .ccPanel(cornerRadius: 10)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+}
+
+// MARK: - PrefsRow
+
+private struct PrefsRow<Trailing: View>: View {
+    let label: String
+    let chinese: String
+    var leading: AnyView? = nil
+    var desc: String? = nil
+    var chineseDesc: String? = nil
+    /// 描述下方的附加行（状态、错误提示等），可多行换行，不占右侧控件区。
+    var detail: AnyView? = nil
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        // 右侧控件与左侧文字块垂直居中：描述有两行或带附加行时，控件不再贴着首行基线。
+        HStack(alignment: .center, spacing: 12) {
+            if let leading { leading }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(tr(label, chinese))
+                    .font(.system(size: 13))
+                if let desc, let chineseDesc {
+                    Text(tr(desc, chineseDesc))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+                if let detail {
+                    detail
+                }
+            }
+            Spacer()
+            trailing()
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+    }
+}
+
+// MARK: - Pi 计时插件说明
+
+/// 「估算 Pi 输出速度」下方的文字链接：点击弹出插件说明全文和复制按钮，样式同 `ServiceInfoButton`。
+private struct PiTimingGuideButton: View {
+    @State private var isPresented = false
+    @State private var copied = false
+
+    var body: some View {
+        Button(tr("Timing plugin instructions", "计时插件说明")) {
+            isPresented.toggle()
+        }
+        .buttonStyle(.link)
+        .font(.system(size: 11))
+        .focusEffectDisabled()
+        .pointingHandCursor()
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(tr("Pi timing plugin", "Pi 计时插件"))
+                    .font(.system(size: 13, weight: .semibold))
+                Text(tr(
+                    "Give the instructions below to an AI to write a timing plugin for Pi. Once installed, Pi's first token and output speed use actual generation time.",
+                    "把下面的说明交给 AI，为 Pi 写一个计时插件。装好后，Pi 的首字和输出速度按实际生成时间计算。"
+                ))
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                ScrollView {
+                    Text(PiTimingPluginGuide.text)
+                        .font(.system(size: 11))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+                .frame(maxHeight: 260)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
+                Button(copied ? tr("Copied", "已复制") : tr("Copy", "复制")) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(PiTimingPluginGuide.text, forType: .string)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        copied = false
+                    }
+                }
+                .controlSize(.small)
+                .padding(.top, 2)
+            }
+            .padding(14)
+            .frame(width: 360, alignment: .leading)
+        }
+    }
+}
+
+/// 插件说明全文：交给 AI 为 Pi 编写插件，格式与 `PiJSONLScanner.requestTiming` 的解析一致。
+private enum PiTimingPluginGuide {
+    static var text: String {
+        let field = PiJSONLScanner.timingField
+        return tr(
+            """
+            Please write a Pi coding agent plugin (Pi calls it an extension) so that CCBar can compute first token latency and output speed from actual generation time.
+
+            Before you start:
+            - Check that the installed Pi lets a message_end handler return a replacement message (MessageEndEventResult in the extension types, or the message_end section of docs/extensions.md in the Pi package). If it does not, stop and tell me. Do not switch to appendEntry, extra files or any other way of writing the data.
+            - Check the custom provider plugins I have installed. If any of them sends the whole assistant message object to the model API (instead of picking fields such as content), stop and tell me.
+
+            Requirements:
+            1. Create a standalone plugin file. Do not modify plugin packages installed through npm, because updates overwrite them.
+            2. On turn_start, record the request send time. Built-in providers also fire before_provider_request; when it fires before the first delta of the request, overwrite the send time with it.
+            3. On message_start with role "assistant", clear the first-delta and last-delta times of the current request. Do not clear the send time from step 2.
+            4. On message_update with role "assistant", when assistantMessageEvent.type is text_delta, thinking_delta or toolcall_delta, record the arrival time of the first delta and of the latest delta.
+            5. On message_end with role "assistant": if at least one delta arrived and stopReason is neither "error" nor "aborted", return a replacement message that adds a \(field) field:
+               return { message: { ...event.message, \(field): { v: 1, firstTokenMs, generationMs } } };
+               - v: the number 1
+               - generationMs: milliseconds from the first delta to the last delta, rounded to an integer
+               - firstTokenMs: milliseconds from the send time to the first delta, rounded to an integer; omit the key if no send time was recorded
+               Keep the role and every other field unchanged (the spread also keeps fields added by other plugins). In all other cases return nothing.
+               Pi writes the replacement message to the session JSONL as is, so timing and usage end up on the same line.
+            6. Measure all times with performance.now(), not Date.now().
+            7. Do not filter by duration or token count; CCBar applies its own thresholds.
+
+            Put the file in ~/.pi/agent/extensions/ and restart Pi to load it.
+
+            To verify: have one conversation in Pi, open the newest .jsonl file under ~/.pi/agent/sessions/, and check that the assistant message lines contain "\(field)":{"v":1,...} with integer values.
+            """,
+            """
+            请为 Pi coding agent 写一个插件（Pi 文档里叫 extension），让 CCBar 能按实际生成时间统计首字延迟和输出速度。
+
+            开始前先确认两件事：
+            - 已安装的 Pi 支持 message_end 处理函数返回替换后的消息（插件类型里有 MessageEndEventResult，或 Pi 安装包 docs/extensions.md 的 message_end 说明）。不支持就停下来告诉我，不要改用 appendEntry、另写文件或其他方式记录数据。
+            - 检查我安装的自定义 provider 插件。如果有插件把 assistant 消息对象整个发给模型 API（而不是只取 content 等字段），停下来告诉我。
+
+            要求：
+            1. 新建一个独立的插件文件。不要修改通过 npm 安装的插件包，更新时会被覆盖。
+            2. 在 turn_start 记录请求发出时间。内置 provider 还会触发 before_provider_request；它在该请求第一个片段之前触发时，用它覆盖发出时间。
+            3. 在 message_start（role 为 assistant）时，清空当前请求的首个片段和最近片段的到达时间。不要清空第 2 步记录的发出时间。
+            4. 在 message_update（role 为 assistant）中，assistantMessageEvent.type 为 text_delta、thinking_delta 或 toolcall_delta 时，记录第一个片段和最近一个片段的到达时间。
+            5. 在 message_end（role 为 assistant）中：如果收到过片段，且 stopReason 不是 "error" 或 "aborted"，返回替换后的消息，附加 \(field) 字段：
+               return { message: { ...event.message, \(field): { v: 1, firstTokenMs, generationMs } } };
+               - v：数字 1
+               - generationMs：第一个片段到最后一个片段的毫秒数，取整
+               - firstTokenMs：发出时间到第一个片段的毫秒数，取整；没有记录到发出时间就不写这个键
+               role 和其他字段保持不变（展开写法也会保留其他插件加的字段）。其他情况不返回任何值。
+               Pi 会把替换后的消息原样写入会话 JSONL，计时和用量在同一行。
+            6. 所有时间用 performance.now() 测量，不用 Date.now()。
+            7. 不要按时长或 token 数筛选，CCBar 会自己设门槛。
+
+            文件放在 ~/.pi/agent/extensions/ 下，重启 Pi 生效。
+
+            验证方法：用 Pi 聊一轮，打开 ~/.pi/agent/sessions/ 下最新的 .jsonl 文件，确认 assistant 消息行里有 "\(field)":{"v":1,...}，且数值是整数。
+            """
+        )
+    }
+}
+
+// MARK: - InsetDivider
+
+private struct InsetDivider: View {
+    var leading: CGFloat = 16
+    var trailing: CGFloat = 16
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.06))
+            .frame(height: 0.5)
+            .padding(.leading, leading)
+            .padding(.trailing, trailing)
+    }
+}
+
+// MARK: - Layout
+
+enum SettingsLayout {
+    /// 内容栏最大宽度，同系统设置；四个分类共用，居中显示。
+    static let contentMaxWidth: CGFloat = 680
+}
+
+// MARK: - Bilingual display names for existing enums
+
+extension QuotaIntervalChoice {
+    @MainActor
+    var bilingualDisplayName: String {
+        switch self {
+        case .m1: return tr("1 minute", "1 分钟")
+        case .m2: return tr("2 minutes", "2 分钟")
+        case .m3: return tr("3 minutes", "3 分钟")
+        case .m5: return tr("5 minutes", "5 分钟")
+        case .m10: return tr("10 minutes", "10 分钟")
+        }
+    }
+}
+
+extension ProxyMode {
+    @MainActor
+    var bilingualDisplayName: String {
+        switch self {
+        case .system: return tr("Follow System", "跟随系统")
+        case .manual: return tr("Manual", "手动")
+        }
+    }
+}
+
+extension UsageIntervalChoice {
+    @MainActor
+    var bilingualDisplayName: String {
+        switch self {
+        case .m1: return tr("1 minute", "1 分钟")
+        case .m2: return tr("2 minutes", "2 分钟")
+        case .m3: return tr("3 minutes", "3 分钟")
+        case .m5: return tr("5 minutes", "5 分钟")
+        case .m10: return tr("10 minutes", "10 分钟")
+        }
+    }
+}
+
+/// 主题色与自定义色共用卡片；首次编辑从当前外观的主题色开始。
+private struct BrandColorControl: View {
+    let brand: ServiceBrand
+    let settings: SettingsStore
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var showsEditor = false
+    @State private var requestedMode: BrandColorMode = .brand
+    @State private var editorID = UUID()
+
+    private var themeHex: String {
+        colorScheme == .dark ? brand.defaultDarkHex : brand.defaultLightHex
+    }
+
+    private var currentColor: Color {
+        let hex = settings.colorMode(for: brand) == .custom
+            ? settings.customColorHex(for: brand) ?? themeHex : themeHex
+        return BrandColorResolver.color(fromHex: hex)
+            ?? BrandColorResolver.color(fromHex: themeHex) ?? .primary
+    }
+
+    private var modeSelection: Binding<BrandColorMode> {
+        Binding(get: { settings.colorMode(for: brand) }, set: { mode in
+            openEditor(mode: mode)
+        })
+    }
+
+    private func openEditor(mode: BrandColorMode) {
+        requestedMode = mode
+        editorID = UUID()
+        showsEditor = true
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Picker(tr("Color mode", "颜色模式"), selection: modeSelection) {
+                Text(tr("Theme", "主题色")).tag(BrandColorMode.brand)
+                Text(tr("Custom", "自定义")).tag(BrandColorMode.custom)
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
+
+            Button { openEditor(mode: settings.colorMode(for: brand)) } label: {
+                TransparencyCheckerboard()
+                    .overlay { currentColor }
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .frame(width: 32, height: 20)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5)
+                    }
+                    .padding(4)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .pointingHandCursor()
+            .accessibilityLabel(tr("Edit service color", "编辑服务颜色"))
+            .help(tr("Choose a color", "选择颜色"))
+            .popover(isPresented: $showsEditor) {
+                BrandColorEditor(
+                    brand: brand, settings: settings, initialColor: currentColor,
+                    requestedMode: requestedMode, isPresented: $showsEditor
+                )
+                .id(editorID)
+            }
+        }
+    }
+}
+
+/// 所有选择先留在浮层内，只有确认后才更新设置和最近颜色。
+private struct BrandColorEditor: View {
+    let brand: ServiceBrand
+    let settings: SettingsStore
+    let initialColor: Color
+    let requestedMode: BrandColorMode
+    @Binding var isPresented: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var mode: BrandColorMode = .brand
+    @State private var hue: Double = 0
+    @State private var saturation: Double = 0
+    @State private var brightness: Double = 0
+    @State private var alpha: Double = 1
+    @State private var draftHex = "#000000"
+    @State private var baselineHex = "#000000"
+    @State private var baselineMode: BrandColorMode = .brand
+    @State private var input = ""
+    @State private var componentInputs = ["0", "0", "0"]
+    @State private var alphaInput = "100"
+    @State private var format: BrandColorInputFormat = .hex
+    @State private var inputValid = true
+    @State private var alphaInputValid = true
+
+    private var selectedColor: Color {
+        BrandColorResolver.color(fromHex: draftHex) ?? .black
+    }
+
+    private var themeHex: String {
+        colorScheme == .dark ? brand.defaultDarkHex : brand.defaultLightHex
+    }
+
+    private var themeColors: [String] {
+        var seen = Set<String>()
+        return ServiceBrand.allCases.compactMap { item in
+            let value = colorScheme == .dark ? item.defaultDarkHex : item.defaultLightHex
+            return seen.insert(value).inserted ? value : nil
+        }
+    }
+
+    private var hasChanges: Bool {
+        mode != baselineMode || (mode == .custom && draftHex != baselineHex)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            colorField
+            hueBar
+            opacityBar
+            paletteRow(tr("Theme colors", "主题色"), colors: themeColors)
+            paletteRow(tr("Recent colors", "最近使用"), colors: settings.recentBrandColors)
+            HStack(alignment: .top, spacing: 8) {
+                TransparencyCheckerboard()
+                    .overlay { selectedColor }
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .frame(width: 26, height: 26)
+                    .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(Color.primary.opacity(0.15), lineWidth: 0.5) }
+                Picker(tr("Format", "格式"), selection: $format) {
+                    ForEach(BrandColorInputFormat.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .labelsHidden().pickerStyle(.menu).fixedSize()
+                colorInputs
+            }
+            if !inputValid {
+                Text(inputHelp).font(.caption).foregroundStyle(.secondary)
+            }
+            if !alphaInputValid {
+                Text(tr("Enter an opacity from 0 to 100%.", "请输入 0–100% 的透明度。"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button(tr("Use theme color", "使用主题色")) {
+                    mode = .brand
+                    sync(from: BrandColorResolver.color(fromHex: themeHex) ?? .black)
+                }
+                .buttonStyle(.borderless)
+                Spacer()
+                if hasChanges {
+                    Button(tr("Apply", "应用")) { apply() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!inputValid || !alphaInputValid)
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 332)
+        .onAppear {
+            baselineMode = settings.colorMode(for: brand)
+            baselineHex = BrandColorResolver.hexString(for: initialColor) ?? themeHex
+            mode = requestedMode
+            let initialHex = requestedMode == .brand ? themeHex :
+                (baselineMode == .custom ? baselineHex : settings.customColorHex(for: brand) ?? baselineHex)
+            sync(from: BrandColorResolver.color(fromHex: initialHex) ?? initialColor)
+        }
+        .onChange(of: format) { _, _ in refreshInput() }
+    }
+
+    @ViewBuilder
+    private var colorInputs: some View {
+        switch format {
+        case .hex:
+            VStack(spacing: 4) {
+                TextField("#RRGGBB", text: Binding(
+                    get: { input },
+                    set: { input = $0; parseInput($0) }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+                .accessibilityLabel(tr("Hex color", "十六进制颜色"))
+                Text("RRGGBB / RRGGBBAA")
+                    .font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+        case .hsb:
+            HStack(spacing: 6) {
+                componentInput(0, label: "H °", name: tr("Hue, 0 to 360 degrees", "色相，0–360 度"))
+                componentInput(1, label: "S %", name: tr("Saturation, 0 to 100%", "饱和度，0–100%"))
+                componentInput(2, label: "B %", name: tr("Brightness, 0 to 100%", "亮度，0–100%"))
+            }
+        case .rgb:
+            HStack(spacing: 6) {
+                componentInput(0, label: "R", name: tr("Red, 0 to 255", "红色，0–255"))
+                componentInput(1, label: "G", name: tr("Green, 0 to 255", "绿色，0–255"))
+                componentInput(2, label: "B", name: tr("Blue, 0 to 255", "蓝色，0–255"))
+            }
+        }
+    }
+
+    private func componentInput(_ index: Int, label: String, name: String) -> some View {
+        VStack(spacing: 4) {
+            TextField(label, text: Binding(
+                get: { componentInputs[index] },
+                set: { value in
+                    componentInputs[index] = value
+                    parseInput(componentInputs.joined(separator: ","))
+                }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 12, design: .monospaced))
+            .monospacedDigit()
+            .multilineTextAlignment(.center)
+            .accessibilityLabel(name)
+            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var inputHelp: String {
+        switch format {
+        case .hex: tr("Enter 6 or 8 hexadecimal digits.", "请输入 6 位或 8 位十六进制颜色。")
+        case .hsb: tr("H: 0–360°. S and B: 0–100%.", "H：0–360°；S、B：0–100%。")
+        case .rgb: tr("R, G and B must each be from 0 to 255.", "R、G、B 均需为 0–255。")
+        }
+    }
+
+    private var colorField: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                Rectangle().fill(Color(hue: hue, saturation: 1, brightness: 1))
+                Rectangle().fill(LinearGradient(colors: [.white, .clear], startPoint: .leading, endPoint: .trailing))
+                Rectangle().fill(LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom))
+                Circle().strokeBorder(.white, lineWidth: 2)
+                    .background(Circle().fill(Color(hue: hue, saturation: saturation, brightness: brightness)))
+                    .frame(width: 14, height: 14)
+                    .shadow(color: .black.opacity(0.45), radius: 2)
+                    .position(x: max(7, min(geo.size.width - 7, saturation * geo.size.width)),
+                              y: max(7, min(geo.size.height - 7, (1 - brightness) * geo.size.height)))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                saturation = min(1, max(0, value.location.x / max(geo.size.width, 1)))
+                brightness = 1 - min(1, max(0, value.location.y / max(geo.size.height, 1)))
+                updateDraft()
+            })
+            .accessibilityRepresentation {
+                VStack {
+                    Slider(value: componentBinding(.saturation), in: 0...1) { Text(tr("Saturation", "饱和度")) }
+                    Slider(value: componentBinding(.brightness), in: 0...1) { Text(tr("Brightness", "亮度")) }
+                }
+            }
+        }
+        .frame(height: 160)
+    }
+
+    private var hueBar: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(LinearGradient(
+                    colors: (0...12).map { Color(hue: Double($0) / 12, saturation: 1, brightness: 1) },
+                    startPoint: .leading, endPoint: .trailing))
+                Circle().fill(Color(hue: hue, saturation: 1, brightness: 1))
+                    .overlay(Circle().strokeBorder(.white, lineWidth: 2))
+                    .shadow(color: .black.opacity(0.3), radius: 1)
+                    .frame(width: 16, height: 16)
+                    .position(x: max(8, min(geo.size.width - 8, hue * geo.size.width)), y: geo.size.height / 2)
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                hue = min(1, max(0, value.location.x / max(geo.size.width, 1)))
+                updateDraft()
+            })
+            .accessibilityRepresentation {
+                Slider(value: componentBinding(.hue), in: 0...1) { Text(tr("Hue", "色相")) }
+            }
+        }
+        .frame(height: 16)
+    }
+
+    private var opacityBar: some View {
+        HStack(spacing: 8) {
+            Text(tr("Opacity", "透明度"))
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            Slider(value: componentBinding(.alpha), in: 0...1)
+                .accessibilityLabel(tr("Opacity", "透明度"))
+            TextField("100", text: Binding(
+                get: { alphaInput },
+                set: { alphaInput = $0; parseAlphaInput($0) }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11, design: .monospaced))
+            .monospacedDigit()
+            .multilineTextAlignment(.trailing)
+            .frame(width: 48)
+            .accessibilityLabel(tr("Opacity percentage", "透明度百分比"))
+            Text("%").font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+    }
+
+    private func paletteRow(_ title: String, colors: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
+            if colors.isEmpty {
+                Text(tr("No recent colors", "暂无最近颜色"))
+                    .font(.system(size: 11)).foregroundStyle(.tertiary)
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(22), spacing: 7), count: 9), alignment: .leading, spacing: 7) {
+                    ForEach(colors, id: \.self) { hex in
+                        Button {
+                            guard let color = BrandColorResolver.color(fromHex: hex) else { return }
+                            mode = .custom
+                            sync(from: color)
+                        } label: {
+                            TransparencyCheckerboard()
+                                .overlay { BrandColorResolver.color(fromHex: hex) ?? .clear }
+                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                .frame(width: 22, height: 22)
+                                .overlay { RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.18), lineWidth: 0.5) }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(title): \(hex)")
+                        .help(hex)
+                    }
+                }
+            }
+        }
+    }
+
+    private enum Component { case hue, saturation, brightness, alpha }
+
+    private func componentBinding(_ component: Component) -> Binding<Double> {
+        Binding(get: {
+            switch component {
+            case .hue: hue
+            case .saturation: saturation
+            case .brightness: brightness
+            case .alpha: alpha
+            }
+        }, set: { value in
+            switch component {
+            case .hue: hue = value
+            case .saturation: saturation = value
+            case .brightness: brightness = value
+            case .alpha: alpha = value
+            }
+            updateDraft()
+        })
+    }
+
+    private func sync(from color: Color, updateInput: Bool = true) {
+        guard let rgb = NSColor(color).usingColorSpace(.sRGB),
+              let hex = BrandColorResolver.hexString(for: color) else { return }
+        hue = Double(rgb.hueComponent)
+        saturation = Double(rgb.saturationComponent)
+        brightness = Double(rgb.brightnessComponent)
+        alpha = Double(rgb.alphaComponent)
+        draftHex = hex
+        if updateInput {
+            refreshInput()
+            refreshAlphaInput()
+        }
+    }
+
+    private func updateDraft(refreshInputs: Bool = true) {
+        let color = Color(hue: hue, saturation: saturation, brightness: brightness, opacity: alpha)
+        guard let hex = BrandColorResolver.hexString(for: color) else { return }
+        mode = .custom
+        draftHex = hex
+        if refreshInputs {
+            refreshInput()
+            refreshAlphaInput()
+        }
+    }
+
+    private func refreshInput() {
+        switch format {
+        case .hex: input = draftHex
+        case .hsb:
+            componentInputs = [hue * 360, saturation * 100, brightness * 100]
+                .map { String(Int($0.rounded())) }
+        case .rgb:
+            guard let color = NSColor(selectedColor).usingColorSpace(.sRGB) else { return }
+            componentInputs = [color.redComponent, color.greenComponent, color.blueComponent]
+                .map { String(Int(($0 * 255).rounded())) }
+        }
+        inputValid = true
+    }
+
+    private func refreshAlphaInput() {
+        alphaInput = String(Int((alpha * 100).rounded()))
+        alphaInputValid = true
+    }
+
+    private func parseAlphaInput(_ value: String) {
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let number = text.hasSuffix("%") ? String(text.dropLast()) : text
+        guard let percent = Double(number.trimmingCharacters(in: .whitespaces)),
+              percent.isFinite, (0...100).contains(percent) else {
+            alphaInputValid = false
+            return
+        }
+        alpha = percent / 100
+        alphaInputValid = true
+        updateDraft(refreshInputs: false)
+        // 保留正在编辑的分量和非法文本；仅同步有效 HEX 中的 alpha 字节。
+        if format == .hex, inputValid { refreshInput() }
+    }
+
+    private func parseInput(_ value: String) {
+        guard let parsed = BrandColorResolver.parseInput(value, format: format) else {
+            inputValid = false
+            return
+        }
+        switch parsed {
+        case .hex(let digits):
+            guard let color = BrandColorResolver.color(fromHex: digits) else { inputValid = false; return }
+            let resolved = digits.count == 6 ? color.opacity(alpha) : color
+            sync(from: resolved, updateInput: false)
+            if digits.count == 8 { refreshAlphaInput() }
+        case .rgb(let red, let green, let blue):
+            sync(from: Color(red: red / 255, green: green / 255, blue: blue / 255, opacity: alpha), updateInput: false)
+        case .hsb(let h, let s, let b):
+            hue = h / 360
+            saturation = s / 100
+            brightness = b / 100
+            draftHex = BrandColorResolver.hexString(for: Color(hue: hue, saturation: saturation, brightness: brightness, opacity: alpha)) ?? draftHex
+        }
+        mode = .custom
+        inputValid = true
+    }
+
+    private func apply() {
+        guard inputValid, alphaInputValid, hasChanges else { return }
+        if mode == .brand {
+            settings.setColorMode(.brand, for: brand)
+        } else {
+            settings.applyCustomBrandColor(draftHex, for: brand)
+            settings.recordRecentBrandColor(draftHex)
+        }
+        isPresented = false
+    }
+}
+
+/// 透明颜色的可见底板，大小由调用方决定。
+private struct TransparencyCheckerboard: View {
+    var body: some View {
+        Canvas { context, size in
+            let cell: CGFloat = 5
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
+            for row in 0..<Int(ceil(size.height / cell)) {
+                for column in 0..<Int(ceil(size.width / cell)) where (row + column).isMultiple(of: 2) {
+                    context.fill(Path(CGRect(x: CGFloat(column) * cell, y: CGFloat(row) * cell, width: cell, height: cell)),
+                                 with: .color(Color.gray.opacity(0.3)))
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}

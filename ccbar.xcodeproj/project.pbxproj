@@ -135,11 +135,9 @@
 		49C1CC01000000000001AABB /* commandcode.svg in Resources */ = {isa = PBXBuildFile; fileRef = 49C1CC01000000000001AAAA /* commandcode.svg */; };
 		49C1CC02000000000001AABB /* CommandCodeAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC02000000000001AAAA /* CommandCodeAuth.swift */; };
 		49C1CC03000000000001AABB /* CommandCodeQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC03000000000001AAAA /* CommandCodeQuotaClient.swift */; };
-		49C1CC04000000000001AABB /* CommandCodeCredentialSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC04000000000001AAAA /* CommandCodeCredentialSheet.swift */; };
 		49C1CC05000000000001AABB /* CommandCodeQuotaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC05000000000001AAAA /* CommandCodeQuotaTests.swift */; };
 		49C1CC06000000000001AABB /* OpenCodeGoAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC06000000000001AAAA /* OpenCodeGoAuth.swift */; };
 		49C1CC07000000000001AABB /* OpenCodeGoQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC07000000000001AAAA /* OpenCodeGoQuotaClient.swift */; };
-		49C1CC08000000000001AABB /* OpenCodeGoCredentialSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC08000000000001AAAA /* OpenCodeGoCredentialSheet.swift */; };
 		49C1CC09000000000001AABB /* OpenCodeGoQuotaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1CC09000000000001AAAA /* OpenCodeGoQuotaTests.swift */; };
 		49C1D100000000000001AABB /* AntigravityCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1D100000000000001AAAA /* AntigravityCredentials.swift */; };
 		49C1D101000000000001AABB /* AntigravityQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1D101000000000001AAAA /* AntigravityQuotaClient.swift */; };
@@ -186,18 +184,44 @@
 		B71E0600000000000000AABB /* KimiManagedAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0600000000000000AAAA /* KimiManagedAccountsView.swift */; };
 		B71E0700000000000000AABB /* KimiManagedAccountsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0700000000000000AAAA /* KimiManagedAccountsSection.swift */; };
 		B71E0800000000000000AABB /* MoonshotAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0800000000000000AAAA /* MoonshotAccountStore.swift */; };
+		D33F0000000000000001AABB /* DeepSeekAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D33F0000000000000001AAAA /* DeepSeekAccountStore.swift */; };
 		B71E0900000000000000AABB /* MoonshotBalanceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0900000000000000AAAA /* MoonshotBalanceClient.swift */; };
+		D33F0000000000000003AABB /* DeepSeekAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = D33F0000000000000003AAAA /* DeepSeekAuthorization.swift */; };
+		D33F0000000000000002AABB /* DeepSeekClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D33F0000000000000002AAAA /* DeepSeekClient.swift */; };
 		B71E0A00000000000000AABB /* MoonshotAccounts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0A00000000000000AAAA /* MoonshotAccounts.swift */; };
-		B71E0B00000000000000AABB /* MoonshotAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0B00000000000000AAAA /* MoonshotAccountsView.swift */; };
-		B71E0C00000000000000AABB /* MoonshotBalancesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E0C00000000000000AAAA /* MoonshotBalancesSection.swift */; };
+		D33F0000000000000004AABB /* DeepSeekAccounts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D33F0000000000000004AAAA /* DeepSeekAccounts.swift */; };
+		D33F0000000000000005AABB /* DeepSeekAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D33F0000000000000005AAAA /* DeepSeekAccountsView.swift */; };
+		D33F0000000000000006AABB /* DeepSeekBalancesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = D33F0000000000000006AAAA /* DeepSeekBalancesSection.swift */; };
 		B71E2100000000000000AABB /* KimiManagedAccountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E2100000000000000AAAA /* KimiManagedAccountTests.swift */; };
 		B71E2200000000000000AABB /* MoonshotBalanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E2200000000000000AAAA /* MoonshotBalanceTests.swift */; };
+		D33F0000000000000007AABB /* DeepSeekTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D33F0000000000000007AAAA /* DeepSeekTests.swift */; };
 		B71E3100000000000000AABB /* CachedManagedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E3100000000000000AAAA /* CachedManagedKeychain.swift */; };
 		B71E3200000000000000AABB /* CachedManagedKeychainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E3200000000000000AAAA /* CachedManagedKeychainTests.swift */; };
 		B71F0100000000000000AABB /* KimiTimingAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71F0100000000000000AAAA /* KimiTimingAuditTests.swift */; };
 		C0B10001000000000000AABB /* Currency.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B10001000000000000AAAA /* Currency.swift */; };
 		C0B10002000000000000AABB /* PricingCatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B10002000000000000AAAA /* PricingCatalogView.swift */; };
 		C0B10003000000000000AABB /* CurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B10003000000000000AAAA /* CurrencyTests.swift */; };
+		20CF74506B369E7B76295F93 /* ResourceBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5F5E48DFA28F72EC83D3AB3 /* ResourceBundle.swift */; };
+		12064E3759515118D5C0257D /* favicon-deepseek.ico in Resources */ = {isa = PBXBuildFile; fileRef = 2B4A6AB87E57E7F8E894AE07 /* favicon-deepseek.ico */; };
+		C6A39F82B10A24C8E554E33A /* favicon-grok.png in Resources */ = {isa = PBXBuildFile; fileRef = 8708930278E97B785F2B7AAC /* favicon-grok.png */; };
+		AE076A3C6DA3E6CEA50D9DF6 /* favicon-gemini.png in Resources */ = {isa = PBXBuildFile; fileRef = A6889AE6BB21B1523BF34197 /* favicon-gemini.png */; };
+		BC81D36E776619EF84627362 /* CCBarConfiguration in Frameworks */ = {isa = PBXBuildFile; productRef = 8656D1D9D9E287641B21522C /* CCBarConfiguration */; };
+		6BBD22B18BD75D4F758DB70E /* CCBarConfiguration in Frameworks */ = {isa = PBXBuildFile; productRef = B042EFACDCB8EEDD3ED9AD02 /* CCBarConfiguration */; };
+		B3706D00092E53C8819C7D63 /* ApplicationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EA48DBE3CE0169892276B66 /* ApplicationStore.swift */; };
+		AA647DCD366BE1CEE149E342 /* ApplicationDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85DC31A6477E757AE33AEF68 /* ApplicationDetailView.swift */; };
+		4CA180D6FA32A3AD7341F43C /* AppState+Applications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56AC93E11428D9309A4E4051 /* AppState+Applications.swift */; };
+		75DFBA64C2A0CA642099B709 /* QuotaManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF631B228F554EAC5A7C4EC /* QuotaManagementView.swift */; };
+		5E50B183AEA4934A959C4D84 /* AuthorizationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4337A18555FC84B62B2C53BE /* AuthorizationStore.swift */; };
+		5071BE2CD86F968D5B23E243 /* AuthorizationServicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B9C2DD72036E5ABD61B0585 /* AuthorizationServicesView.swift */; };
+		7E429543A4A040918C444D2D /* AccountDisplayControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98EB68E73512FD6A248DCB34 /* AccountDisplayControls.swift */; };
+		3E4FE67C119C800B51955B0B /* APISecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75D92B2D2842E978673E54C6 /* APISecretStore.swift */; };
+		2BD8CDB5D057623BE9EB1028 /* WorkspaceComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 225DDDC0757FDC0D737DA566 /* WorkspaceComponents.swift */; };
+		A3919CC3912B2C5F2371EB37 /* ProviderConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B54ABD4AFC6A95E560DFC5; };
+		74699E13ADB9FC95742B6151 /* AuthorizationStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A3F6130518C1ACF13DAB30; };
+		053BA57AD094DB1885007583 /* PrivateCredentialFileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08EF5448D94BD16F5B32A3D /* PrivateCredentialFileStore.swift */; };
+		ACFF8056866931EF30024D06 /* ApplicationsManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7EF142597206EDB90C462AE /* ApplicationsManagementView.swift */; };
+		3E53741F01BC57033CC1B53A /* ProviderCatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB78F09721C53D30A0746ED7 /* ProviderCatalogView.swift */; };
+		58CC38E241DEF480BF6BE8ED /* APIKeyEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4806F5475EAF2D3E923F7C71 /* APIKeyEditor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -212,10 +236,10 @@
 
 /* Begin PBXFileReference section */
 		4931AC302FC029A000EE598C /* CCBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CCBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		4931AC3E2FC02A4200EE598C /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		4931AC3E2FC02A4200EE598C /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/CCBar/AppDelegate.swift; sourceTree = "<group>"; };
 		4931AC3F2FC02A4200EE598C /* ccbar.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ccbar.xcodeproj; sourceTree = "<group>"; };
 		4931AC402FC02A4200EE598C /* CCBar.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CCBar.entitlements; sourceTree = "<group>"; };
-		4931AC412FC02A4200EE598C /* CCBarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCBarApp.swift; sourceTree = "<group>"; };
+		4931AC412FC02A4200EE598C /* CCBarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/CCBar/CCBarApp.swift; sourceTree = "<group>"; };
 		4931AC422FC02A4200EE598C /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		4931AC4E2FC02A4200EE598C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		4931AC4F2FC02A4200EE598C /* MenuBarLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarLabel.swift; sourceTree = "<group>"; };
@@ -342,11 +366,9 @@
 		49C1CC01000000000001AAAA /* commandcode.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = commandcode.svg; sourceTree = "<group>"; };
 		49C1CC02000000000001AAAA /* CommandCodeAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeAuth.swift; sourceTree = "<group>"; };
 		49C1CC03000000000001AAAA /* CommandCodeQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeQuotaClient.swift; sourceTree = "<group>"; };
-		49C1CC04000000000001AAAA /* CommandCodeCredentialSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeCredentialSheet.swift; sourceTree = "<group>"; };
 		49C1CC05000000000001AAAA /* CommandCodeQuotaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeQuotaTests.swift; sourceTree = "<group>"; };
 		49C1CC06000000000001AAAA /* OpenCodeGoAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoAuth.swift; sourceTree = "<group>"; };
 		49C1CC07000000000001AAAA /* OpenCodeGoQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoQuotaClient.swift; sourceTree = "<group>"; };
-		49C1CC08000000000001AAAA /* OpenCodeGoCredentialSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoCredentialSheet.swift; sourceTree = "<group>"; };
 		49C1CC09000000000001AAAA /* OpenCodeGoQuotaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoQuotaTests.swift; sourceTree = "<group>"; };
 		49C1D100000000000001AAAA /* AntigravityCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityCredentials.swift; sourceTree = "<group>"; };
 		49C1D101000000000001AAAA /* AntigravityQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityQuotaClient.swift; sourceTree = "<group>"; };
@@ -391,18 +413,42 @@
 		B71E0600000000000000AAAA /* KimiManagedAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedAccountsView.swift; sourceTree = "<group>"; };
 		B71E0700000000000000AAAA /* KimiManagedAccountsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedAccountsSection.swift; sourceTree = "<group>"; };
 		B71E0800000000000000AAAA /* MoonshotAccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotAccountStore.swift; sourceTree = "<group>"; };
+		D33F0000000000000001AAAA /* DeepSeekAccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekAccountStore.swift; sourceTree = "<group>"; };
 		B71E0900000000000000AAAA /* MoonshotBalanceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotBalanceClient.swift; sourceTree = "<group>"; };
+		D33F0000000000000003AAAA /* DeepSeekAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekAuthorization.swift; sourceTree = "<group>"; };
+		D33F0000000000000002AAAA /* DeepSeekClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekClient.swift; sourceTree = "<group>"; };
 		B71E0A00000000000000AAAA /* MoonshotAccounts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotAccounts.swift; sourceTree = "<group>"; };
-		B71E0B00000000000000AAAA /* MoonshotAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotAccountsView.swift; sourceTree = "<group>"; };
-		B71E0C00000000000000AAAA /* MoonshotBalancesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotBalancesSection.swift; sourceTree = "<group>"; };
+		D33F0000000000000004AAAA /* DeepSeekAccounts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekAccounts.swift; sourceTree = "<group>"; };
+		D33F0000000000000005AAAA /* DeepSeekAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekAccountsView.swift; sourceTree = "<group>"; };
+		D33F0000000000000006AAAA /* DeepSeekBalancesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekBalancesSection.swift; sourceTree = "<group>"; };
 		B71E2100000000000000AAAA /* KimiManagedAccountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiManagedAccountTests.swift; sourceTree = "<group>"; };
 		B71E2200000000000000AAAA /* MoonshotBalanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoonshotBalanceTests.swift; sourceTree = "<group>"; };
+		D33F0000000000000007AAAA /* DeepSeekTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekTests.swift; sourceTree = "<group>"; };
 		B71E3100000000000000AAAA /* CachedManagedKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedManagedKeychain.swift; sourceTree = "<group>"; };
 		B71E3200000000000000AAAA /* CachedManagedKeychainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedManagedKeychainTests.swift; sourceTree = "<group>"; };
 		B71F0100000000000000AAAA /* KimiTimingAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiTimingAuditTests.swift; sourceTree = "<group>"; };
 		C0B10001000000000000AAAA /* Currency.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Currency.swift; sourceTree = "<group>"; };
 		C0B10002000000000000AAAA /* PricingCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PricingCatalogView.swift; sourceTree = "<group>"; };
 		C0B10003000000000000AAAA /* CurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrencyTests.swift; sourceTree = "<group>"; };
+		A5F5E48DFA28F72EC83D3AB3 /* ResourceBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceBundle.swift; sourceTree = "<group>"; };
+		2B4A6AB87E57E7F8E894AE07 /* favicon-deepseek.ico */ = {isa = PBXFileReference; lastKnownFileType = image.ico; path = favicon-deepseek.ico; sourceTree = "<group>"; };
+		8708930278E97B785F2B7AAC /* favicon-grok.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = favicon-grok.png; sourceTree = "<group>"; };
+		A6889AE6BB21B1523BF34197 /* favicon-gemini.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = favicon-gemini.png; sourceTree = "<group>"; };
+		4EA48DBE3CE0169892276B66 /* ApplicationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationStore.swift; sourceTree = "<group>"; };
+		85DC31A6477E757AE33AEF68 /* ApplicationDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationDetailView.swift; sourceTree = "<group>"; };
+		56AC93E11428D9309A4E4051 /* AppState+Applications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Applications.swift"; sourceTree = "<group>"; };
+		3BF631B228F554EAC5A7C4EC /* QuotaManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaManagementView.swift; sourceTree = "<group>"; };
+		4337A18555FC84B62B2C53BE /* AuthorizationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizationStore.swift; sourceTree = "<group>"; };
+		7B9C2DD72036E5ABD61B0585 /* AuthorizationServicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizationServicesView.swift; sourceTree = "<group>"; };
+		98EB68E73512FD6A248DCB34 /* AccountDisplayControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountDisplayControls.swift; sourceTree = "<group>"; };
+		75D92B2D2842E978673E54C6 /* APISecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APISecretStore.swift; sourceTree = "<group>"; };
+		225DDDC0757FDC0D737DA566 /* WorkspaceComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceComponents.swift; sourceTree = "<group>"; };
+		37B54ABD4AFC6A95E560DFC5 /* ProviderConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../CCBarConfigurationTests/ProviderConfigurationTests.swift; sourceTree = "<group>"; };
+		C3A3F6130518C1ACF13DAB30 /* AuthorizationStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizationStoreTests.swift; sourceTree = "<group>"; };
+		E08EF5448D94BD16F5B32A3D /* PrivateCredentialFileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivateCredentialFileStore.swift; sourceTree = "<group>"; };
+		C7EF142597206EDB90C462AE /* ApplicationsManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationsManagementView.swift; sourceTree = "<group>"; };
+		DB78F09721C53D30A0746ED7 /* ProviderCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderCatalogView.swift; sourceTree = "<group>"; };
+		4806F5475EAF2D3E923F7C71 /* APIKeyEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIKeyEditor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -410,6 +456,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BC81D36E776619EF84627362 /* CCBarConfiguration in Frameworks */,
 				49C1BE03000000000001AAAA /* libzstd in Frameworks */,
 				49C2AC07000000000001AAAA /* Sparkle in Frameworks */,
 			);
@@ -419,6 +466,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6BBD22B18BD75D4F758DB70E /* CCBarConfiguration in Frameworks */,
 				49C1BE05000000000001AAAA /* libzstd in Frameworks */,
 				49C2AC09000000000001AAAA /* Sparkle in Frameworks */,
 			);
@@ -430,6 +478,8 @@
 		4931AC272FC029A000EE598C = {
 			isa = PBXGroup;
 			children = (
+				AC37289859267E58614D1F98 /* Authorization */,
+				74F8ACF6D68157617ABA7C7D /* Applications */,
 				4931AC3E2FC02A4200EE598C /* AppDelegate.swift */,
 				4931AC3F2FC02A4200EE598C /* ccbar.xcodeproj */,
 				4931AC402FC02A4200EE598C /* CCBar.entitlements */,
@@ -468,6 +518,7 @@
 				49C2AC01000000000001AAAA /* AppUpdater.swift */,
 				B71E0500000000000000AAAA /* KimiManagedAccounts.swift */,
 				B71E0A00000000000000AAAA /* MoonshotAccounts.swift */,
+				D33F0000000000000004AAAA /* DeepSeekAccounts.swift */,
 				49C1B110000000000001AAAA /* Credentials */,
 				49C1B112000000000001AAAA /* Quota */,
 				49C1B15F000000000001AAAA /* Usage */,
@@ -476,7 +527,7 @@
 				49C1B111000000000001AAAA /* Storage */,
 				49C1BD00000000000001AAAA /* Diagnostics */,
 			);
-			path = Core;
+			path = Sources/CCBar/Core;
 			sourceTree = "<group>";
 		};
 		4931AC512FC02A4200EE598C /* MenuBar */ = {
@@ -486,9 +537,9 @@
 				4931AC502FC02A4200EE598C /* PopoverRootView.swift */,
 				49C1B193000000000001AAAA /* OtherCodexAccountsSection.swift */,
 				B71E0700000000000000AAAA /* KimiManagedAccountsSection.swift */,
-				B71E0C00000000000000AAAA /* MoonshotBalancesSection.swift */,
+				D33F0000000000000006AAAA /* DeepSeekBalancesSection.swift */,
 			);
-			path = MenuBar;
+			path = Sources/CCBar/MenuBar;
 			sourceTree = "<group>";
 		};
 		4931AC532FC02A4200EE598C /* Resources */ = {
@@ -497,7 +548,7 @@
 				4931AC522FC02A4200EE598C /* Assets.xcassets */,
 				49C1B142000000000001AAAA /* Logos */,
 			);
-			path = Resources;
+			path = Sources/CCBar/Resources;
 			sourceTree = "<group>";
 		};
 		4931AC552FC02A4200EE598C /* Settings */ = {
@@ -505,14 +556,8 @@
 			children = (
 				4931AC542FC02A4200EE598C /* SettingsRootView.swift */,
 				C0B10002000000000000AAAA /* PricingCatalogView.swift */,
-				49C1CC04000000000001AAAA /* CommandCodeCredentialSheet.swift */,
-				49C1CC08000000000001AAAA /* OpenCodeGoCredentialSheet.swift */,
-				49C1B194000000000001AAAA /* ImportedCodexAccountsView.swift */,
-				49C1B195000000000001AAAA /* CodexResetCreditsDetailView.swift */,
-				B71E0600000000000000AAAA /* KimiManagedAccountsView.swift */,
-				B71E0B00000000000000AAAA /* MoonshotAccountsView.swift */,
 			);
-			path = Settings;
+			path = Sources/CCBar/Settings;
 			sourceTree = "<group>";
 		};
 		4931AC562FC02A4200EE598C /* Products */ = {
@@ -523,6 +568,8 @@
 		49C1B110000000000001AAAA /* Credentials */ = {
 			isa = PBXGroup;
 			children = (
+				E08EF5448D94BD16F5B32A3D /* PrivateCredentialFileStore.swift */,
+				75D92B2D2842E978673E54C6 /* APISecretStore.swift */,
 				49C1B101000000000001AAAA /* Models.swift */,
 				49C1B102000000000001AAAA /* JWT.swift */,
 				49C1BC11000000000001AAAA /* CursorAuth.swift */,
@@ -538,6 +585,7 @@
 				B71E0100000000000000AAAA /* KimiManagedAccountStore.swift */,
 				B71E3100000000000000AAAA /* CachedManagedKeychain.swift */,
 				B71E0800000000000000AAAA /* MoonshotAccountStore.swift */,
+				D33F0000000000000001AAAA /* DeepSeekAccountStore.swift */,
 			);
 			path = Credentials;
 			sourceTree = "<group>";
@@ -545,6 +593,7 @@
 		B12AAD000000000000000010 /* Branding */ = {
 			isa = PBXGroup;
 			children = (
+				A5F5E48DFA28F72EC83D3AB3 /* ResourceBundle.swift */,
 				B12AAD000000000000000001 /* BrandCatalog.swift */,
 				B12AAD000000000000000002 /* InstalledAppIconLocator.swift */,
 				B12AAD000000000000000004 /* BrandColorResolver.swift */,
@@ -587,6 +636,8 @@
 				B71E0200000000000000AAAA /* KimiDeviceAuthorization.swift */,
 				B71E0300000000000000AAAA /* KimiManagedTokenRefresher.swift */,
 				B71E0900000000000000AAAA /* MoonshotBalanceClient.swift */,
+				D33F0000000000000003AAAA /* DeepSeekAuthorization.swift */,
+				D33F0000000000000002AAAA /* DeepSeekClient.swift */,
 				49C1B128000000000001AAAA /* CodexResetCreditsClient.swift */,
 				49C1B123000000000001AAAA /* ClaudeQuotaClient.swift */,
 				49C1B124000000000001AAAA /* ClaudeCLIFallbackQuotaClient.swift */,
@@ -601,6 +652,9 @@
 		49C1B142000000000001AAAA /* Logos */ = {
 			isa = PBXGroup;
 			children = (
+				A6889AE6BB21B1523BF34197 /* favicon-gemini.png */,
+				8708930278E97B785F2B7AAC /* favicon-grok.png */,
+				2B4A6AB87E57E7F8E894AE07 /* favicon-deepseek.ico */,
 				49C1B140000000000001AAAA /* codex.svg */,
 				49C1B141000000000001AAAA /* claude.svg */,
 				49C1B143000000000001AAAA /* antigravity.svg */,
@@ -672,6 +726,8 @@
 		49C1B160000000000001AAAA /* Main */ = {
 			isa = PBXGroup;
 			children = (
+				225DDDC0757FDC0D737DA566 /* WorkspaceComponents.swift */,
+				98EB68E73512FD6A248DCB34 /* AccountDisplayControls.swift */,
 				49C1B161000000000001AAAA /* MainWindowRootView.swift */,
 				49C2AC03000000000001AAAA /* AppUpdateWindow.swift */,
 				49C1B162000000000001AAAA /* StatsView.swift */,
@@ -681,7 +737,7 @@
 				49C1BA12000000000001AAAA /* CycleStatsView.swift */,
 				49C1BB02000000000001AAAA /* ProjectStatsView.swift */,
 			);
-			path = Main;
+			path = Sources/CCBar/Main;
 			sourceTree = "<group>";
 		};
 		49C1B170000000000001AAAA /* Floating */ = {
@@ -691,7 +747,7 @@
 				49C1B172000000000001AAAA /* FloatingContentView.swift */,
 				49C1B173000000000001AAAA /* FloatingPanelController.swift */,
 			);
-			path = Floating;
+			path = Sources/CCBar/Floating;
 			sourceTree = "<group>";
 		};
 		49C1B180000000000001AAAA /* Onboarding */ = {
@@ -699,12 +755,14 @@
 			children = (
 				49C1B181000000000001AAAA /* OnboardingView.swift */,
 			);
-			path = Onboarding;
+			path = Sources/CCBar/Onboarding;
 			sourceTree = "<group>";
 		};
 		49C1B302000000000001AAAA /* CCBarTests */ = {
 			isa = PBXGroup;
 			children = (
+				C3A3F6130518C1ACF13DAB30 /* AuthorizationStoreTests.swift */,
+				37B54ABD4AFC6A95E560DFC5 /* ProviderConfigurationTests.swift */,
 				49C2AD06000000000001AAAA /* QuotaAlertTests.swift */,
 				FA11C0DE0000000000000010 /* ServiceIconTests.swift */,
 				B12AAD000000000000000003 /* BrandAppearanceTests.swift */,
@@ -720,6 +778,7 @@
 				B71E2100000000000000AAAA /* KimiManagedAccountTests.swift */,
 				B71E3200000000000000AAAA /* CachedManagedKeychainTests.swift */,
 				B71E2200000000000000AAAA /* MoonshotBalanceTests.swift */,
+				D33F0000000000000007AAAA /* DeepSeekTests.swift */,
 				49C1BF03000000000001AAAA /* ImportedCodexStoreTests.swift */,
 				49C1BF04000000000001AAAA /* ScannerIncrementalTests.swift */,
 				49C1BF05000000000001AAAA /* UsageEquivalenceTests.swift */,
@@ -749,7 +808,7 @@
 				49C2AA0D000000000001AAAA /* UsageHistoryTestHarness.swift */,
 				49C1B3F2000000000001AAAA /* Fixtures */,
 			);
-			path = CCBarTests;
+			path = Tests/CCBarTests;
 			sourceTree = "<group>";
 		};
 		49C1B3F2000000000001AAAA /* Fixtures */ = {
@@ -782,6 +841,33 @@
 			path = Notifications;
 			sourceTree = "<group>";
 		};
+		74F8ACF6D68157617ABA7C7D /* Applications */ = {
+			isa = PBXGroup;
+			children = (
+				4806F5475EAF2D3E923F7C71 /* APIKeyEditor.swift */,
+				DB78F09721C53D30A0746ED7 /* ProviderCatalogView.swift */,
+				C7EF142597206EDB90C462AE /* ApplicationsManagementView.swift */,
+				56AC93E11428D9309A4E4051 /* AppState+Applications.swift */,
+				85DC31A6477E757AE33AEF68 /* ApplicationDetailView.swift */,
+				4EA48DBE3CE0169892276B66 /* ApplicationStore.swift */,
+			);
+			path = Sources/CCBar/Applications;
+			sourceTree = "<group>";
+		};
+		AC37289859267E58614D1F98 /* Authorization */ = {
+			isa = PBXGroup;
+			children = (
+				49C1B195000000000001AAAA /* CodexResetCreditsDetailView.swift */,
+				D33F0000000000000005AAAA /* DeepSeekAccountsView.swift */,
+				B71E0600000000000000AAAA /* KimiManagedAccountsView.swift */,
+				49C1B194000000000001AAAA /* ImportedCodexAccountsView.swift */,
+				7B9C2DD72036E5ABD61B0585 /* AuthorizationServicesView.swift */,
+				4337A18555FC84B62B2C53BE /* AuthorizationStore.swift */,
+				3BF631B228F554EAC5A7C4EC /* QuotaManagementView.swift */,
+			);
+			path = Sources/CCBar/Authorization;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -799,6 +885,7 @@
 			);
 			name = ccbar;
 			packageProductDependencies = (
+				8656D1D9D9E287641B21522C /* CCBarConfiguration */,
 				49C1BE02000000000001AAAA /* libzstd */,
 				49C2AC06000000000001AAAA /* Sparkle */,
 			);
@@ -821,6 +908,7 @@
 			);
 			name = CCBarTests;
 			packageProductDependencies = (
+				B042EFACDCB8EEDD3ED9AD02 /* CCBarConfiguration */,
 				49C1BE04000000000001AAAA /* libzstd */,
 				49C2AC08000000000001AAAA /* Sparkle */,
 			);
@@ -857,6 +945,7 @@
 			mainGroup = 4931AC272FC029A000EE598C;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				8CFE360CEB58302276A63105 /* XCLocalSwiftPackageReference "." */,
 				49C1BE01000000000001AAAA /* XCRemoteSwiftPackageReference "zstd" */,
 				49C2AC05000000000001AAAA /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
@@ -882,6 +971,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AE076A3C6DA3E6CEA50D9DF6 /* favicon-gemini.png in Resources */,
+				C6A39F82B10A24C8E554E33A /* favicon-grok.png in Resources */,
+				12064E3759515118D5C0257D /* favicon-deepseek.ico in Resources */,
 				4931AC592FC02A4200EE598C /* Assets.xcassets in Resources */,
 				49C1B140000000000001AABB /* codex.svg in Resources */,
 				49C1B141000000000001AABB /* claude.svg in Resources */,
@@ -920,6 +1012,20 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				58CC38E241DEF480BF6BE8ED /* APIKeyEditor.swift in Sources */,
+				3E53741F01BC57033CC1B53A /* ProviderCatalogView.swift in Sources */,
+				ACFF8056866931EF30024D06 /* ApplicationsManagementView.swift in Sources */,
+				053BA57AD094DB1885007583 /* PrivateCredentialFileStore.swift in Sources */,
+				2BD8CDB5D057623BE9EB1028 /* WorkspaceComponents.swift in Sources */,
+				3E4FE67C119C800B51955B0B /* APISecretStore.swift in Sources */,
+				7E429543A4A040918C444D2D /* AccountDisplayControls.swift in Sources */,
+				5071BE2CD86F968D5B23E243 /* AuthorizationServicesView.swift in Sources */,
+				5E50B183AEA4934A959C4D84 /* AuthorizationStore.swift in Sources */,
+				75DFBA64C2A0CA642099B709 /* QuotaManagementView.swift in Sources */,
+				4CA180D6FA32A3AD7341F43C /* AppState+Applications.swift in Sources */,
+				AA647DCD366BE1CEE149E342 /* ApplicationDetailView.swift in Sources */,
+				B3706D00092E53C8819C7D63 /* ApplicationStore.swift in Sources */,
+				20CF74506B369E7B76295F93 /* ResourceBundle.swift in Sources */,
 				49C2AD01000000000001AABB /* QuotaAlertModels.swift in Sources */,
 				49C2AD02000000000001AABB /* QuotaAlertPolicy.swift in Sources */,
 				49C2AD03000000000001AABB /* QuotaNotificationService.swift in Sources */,
@@ -928,8 +1034,6 @@
 				4931AC622FC02A4200EE598C /* MenuBarLabel.swift in Sources */,
 				4931AC632FC02A4200EE598C /* CCBarApp.swift in Sources */,
 				4931AC642FC02A4200EE598C /* SettingsRootView.swift in Sources */,
-				49C1CC04000000000001AABB /* CommandCodeCredentialSheet.swift in Sources */,
-				49C1CC08000000000001AABB /* OpenCodeGoCredentialSheet.swift in Sources */,
 				4931AC652FC02A4200EE598C /* PopoverRootView.swift in Sources */,
 				4931AC662FC02A4200EE598C /* AppState.swift in Sources */,
 				4931AC672FC02A4200EE598C /* AppDelegate.swift in Sources */,
@@ -1040,10 +1144,14 @@
 				B71E0600000000000000AABB /* KimiManagedAccountsView.swift in Sources */,
 				B71E0700000000000000AABB /* KimiManagedAccountsSection.swift in Sources */,
 				B71E0800000000000000AABB /* MoonshotAccountStore.swift in Sources */,
+				D33F0000000000000001AABB /* DeepSeekAccountStore.swift in Sources */,
 				B71E0900000000000000AABB /* MoonshotBalanceClient.swift in Sources */,
+				D33F0000000000000003AABB /* DeepSeekAuthorization.swift in Sources */,
+				D33F0000000000000002AABB /* DeepSeekClient.swift in Sources */,
 				B71E0A00000000000000AABB /* MoonshotAccounts.swift in Sources */,
-				B71E0B00000000000000AABB /* MoonshotAccountsView.swift in Sources */,
-				B71E0C00000000000000AABB /* MoonshotBalancesSection.swift in Sources */,
+				D33F0000000000000004AABB /* DeepSeekAccounts.swift in Sources */,
+				D33F0000000000000005AABB /* DeepSeekAccountsView.swift in Sources */,
+				D33F0000000000000006AABB /* DeepSeekBalancesSection.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1051,6 +1159,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				74699E13ADB9FC95742B6151 /* AuthorizationStoreTests.swift in Sources */,
+				A3919CC3912B2C5F2371EB37 /* ProviderConfigurationTests.swift in Sources */,
 				49C2AD06000000000001AABB /* QuotaAlertTests.swift in Sources */,
 				FA11C0DE0000000000000110 /* ServiceIconTests.swift in Sources */,
 				B12AAD000000000000000103 /* BrandAppearanceTests.swift in Sources */,
@@ -1066,6 +1176,7 @@
 				B71E2100000000000000AABB /* KimiManagedAccountTests.swift in Sources */,
 				B71E3200000000000000AABB /* CachedManagedKeychainTests.swift in Sources */,
 				B71E2200000000000000AABB /* MoonshotBalanceTests.swift in Sources */,
+				D33F0000000000000007AABB /* DeepSeekTests.swift in Sources */,
 				49C1BF03000000000001AABB /* ImportedCodexStoreTests.swift in Sources */,
 				49C1BF04000000000001AABB /* ScannerIncrementalTests.swift in Sources */,
 				49C1BF05000000000001AABB /* UsageEquivalenceTests.swift in Sources */,
@@ -1383,6 +1494,10 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		8CFE360CEB58302276A63105 /* XCLocalSwiftPackageReference "." */ = {isa = XCLocalSwiftPackageReference; relativePath = .; };
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		49C1BE01000000000001AAAA /* XCRemoteSwiftPackageReference "zstd" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -1423,6 +1538,8 @@
 			package = 49C2AC05000000000001AAAA /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
 		};
+		8656D1D9D9E287641B21522C /* CCBarConfiguration */ = {isa = XCSwiftPackageProductDependency; productName = CCBarConfiguration; };
+		B042EFACDCB8EEDD3ED9AD02 /* CCBarConfiguration */ = {isa = XCSwiftPackageProductDependency; productName = CCBarConfiguration; };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 4931AC282FC029A000EE598C /* Project object */;
