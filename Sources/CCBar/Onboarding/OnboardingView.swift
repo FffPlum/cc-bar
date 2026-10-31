@@ -9,14 +9,19 @@ import AppKit
 
 struct OnboardingView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.dismissWindow) private var dismissWindow
-    @Environment(\.openWindow) private var openWindow
+    let closeWindow: () -> Void
+    let openStatistics: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var step: Int = 0
     @State private var isMovingForward = true
     @State private var outgoingStep: Int?
     @State private var slideProgress: CGFloat = 0
     @State private var installedClients: Set<QuotaApp>?
+
+    init(closeWindow: @escaping () -> Void, openStatistics: @escaping () -> Void) {
+        self.closeWindow = closeWindow
+        self.openStatistics = openStatistics
+    }
 
     var body: some View {
         ZStack {
@@ -113,14 +118,13 @@ struct OnboardingView: View {
 
     private func finish() {
         SettingsStore.shared.didCompleteOnboarding = true
-        dismissWindow(id: "onboarding")
+        closeWindow()
     }
 
     private func openStats() {
         SettingsStore.shared.didCompleteOnboarding = true
-        appState.mainTab = .stats
-        openWindow(id: "main")
-        dismissWindow(id: "onboarding")
+        openStatistics()
+        closeWindow()
     }
 }
 

@@ -212,10 +212,12 @@ final class AppUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate, NSWindowDel
         return true
     }
 
-    func openReleasePage() {
+    func openReleasePage(activates: Bool = true) {
         let url = item?.infoURL ?? UpdateChecker.releasePageURL
         guard url.scheme == "https" else { return }
-        NSWorkspace.shared.open(url)
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = activates
+        NSWorkspace.shared.open(url, configuration: configuration)
     }
 
     func closeWindow() {
