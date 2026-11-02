@@ -31,9 +31,18 @@ export function DashboardPage(props: {
   service?: UsageService;
   onService: (value?: UsageService) => void;
 }) {
+  const { bootstrap } = useHost();
+  const { service, onService } = props;
+  const enabledService =
+    service && bootstrap.visibleUsageServices.includes(service)
+      ? service
+      : undefined;
+  useEffect(() => {
+    if (service && !enabledService) onService(undefined);
+  }, [service, enabledService, onService]);
   return (
     <DashboardQueryScope>
-      <DashboardContent {...props} />
+      <DashboardContent service={enabledService} onService={onService} />
     </DashboardQueryScope>
   );
 }
@@ -220,6 +229,14 @@ function DashboardContent({
       >
         {(data) => {
           const values = metrics.map((metric) => data.kpiDisplay[metric]);
+          const empty =
+            !dashboardResult.isPreviousData &&
+            !dashboard.isError &&
+            !data.coverage.refreshing &&
+            !data.coverage.incomplete &&
+            data.totals.requestCount === 0 &&
+            data.totals.totalTokens === 0 &&
+            Number(data.totals.costUSD) === 0;
           return (
             <>
               {data.coverage.refreshing && (
@@ -334,6 +351,7 @@ function DashboardContent({
                         <DashboardChart
                           data={data}
                           title={labels[metrics.indexOf(metric)]!}
+                          empty={empty}
                         />
                       ))}
                   </div>
@@ -349,6 +367,7 @@ function DashboardContent({
                       setRequestSort(value);
                     }}
                     requests={requestResult.data ?? null}
+                    empty={empty}
                     loading={requests.isFetching}
                     previousData={requestResult.isPreviousData}
                     error={requests.error ? errorMessage(requests.error) : null}

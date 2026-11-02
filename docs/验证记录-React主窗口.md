@@ -169,3 +169,14 @@ Codex 对照 cc-switch 查询与日志同步源码制定方案，GPT-6.1 Terra �
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --skip-update --disable-automatic-resolution --filter 'UsageRequestIndex|HostWindowUsage'
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destination 'platform=macOS' build
 ```
+
+
+### 固定应用筛选与空数据布局
+
+日期：2026-11-02。先按用户要求提交 SQL 查询与前端缓存改动（`68c4f46`），随后单独实现本节更新。
+
+- 应用分段按钮读取 `bootstrap.visibleUsageServices`，按已启用用量应用的设置顺序显示，不随日期范围、查询数据或侧栏成员变化；关闭当前应用后回到全部。Host `facets.services` 同步为固定启用列表，缺少用量时计数为 0。
+- 确认空用量且索引就绪、覆盖完整时，KPI 为 `—`；空图保留网格、时间轴与合理基准纵轴，表格保留列头、页签数量 0，居中显示「暂无数据」。零费用但存在请求/Token 时仍显示真实值；索引准备、错误、历史覆盖缺口与旧占位数据不冒充空成功状态。
+- 前端定向 **40 项测试通过**，日志 `/tmp/ccbar-dashboard-empty-tests.log`；TypeScript 静态检查通过。覆盖启用应用稳定顺序、侧栏外应用、关闭选中应用、空表结构、错误/加载与真实零费用用量。
+- Host 定向 **19 项测试通过**，日志 `/tmp/ccbar-dashboard-empty-host-tests.log`；指定 Xcode Debug 构建 **BUILD SUCCEEDED**，日志 `/tmp/ccbar-dashboard-empty-debug.log`，包含最终前端资源编译。
+- `git diff --check` 通过。视觉效果由用户验收，未启动或替换安装的 App；本节验证通过后按用户要求创建本地提交，未推送。

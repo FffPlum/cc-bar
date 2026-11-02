@@ -665,6 +665,103 @@ final class HostWindowUsageTests: XCTestCase {
         XCTAssertEqual(next["totalCount"], .number(0))
     }
 
+    func testDashboardServicesStayInEnabledOrderAcrossEmptyFilters() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex, .claude, .kimi])
+        fixture.settings.serviceOrder = [.quota(.kimi), .quota(.claude), .quota(.codex)]
+        let day = Calendar.current.startOfDay(for: fixture.now)
+        let entry = UsageEntry(app: .codex, conversationKey: "enabled", model: "model", speed: .standard,
+            day: day, timestamp: fixture.now.addingTimeInterval(-60), inputTokens: 7, outputTokens: 0,
+            cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: 1, costBreakdown: nil)
+        fixture.state.usageService.aggregator.ingestLocal([entry])
+        let service = fixture.service()
+        try fixture.index(service, records: [UsageRequestRecord(id: "enabled", entry: entry)], revision: "enabled")
+        let expected: [HostJSON?] = [.string("kimi"), .string("claude"), .string("codex")]
+        let cases: [[String: HostJSON]] = [
+            ["range": .string("today"), "metric": .string("tokens")],
+            ["range": .string("today"), "metric": .string("tokens"), "service": .string("kimi")],
+            ["range": .string("today"), "metric": .string("tokens"), "modelID": .string("missing")],
+            ["range": .string("custom"), "metric": .string("tokens"), "customFrom": .string("2025-01-01T00:00:00Z"), "customTo": .string("2025-01-02T00:00:00Z")],
+        ]
+        for query in cases {
+            let result = try object(await service.handle("window.usage.dashboard", params: query))
+            let facets = try object(result["facets"])
+            let services = try array(facets["services"]).map { try object($0) }
+            XCTAssertEqual(services.map { $0["id"] }, expected)
+            XCTAssertEqual(services[0]["requestCount"], .number(0))
+            XCTAssertEqual(services[1]["requestCount"], .number(0))
+            if query["range"] == .string("custom") {
+                XCTAssertTrue(try array(facets["sources"]).isEmpty)
+                XCTAssertTrue(try array(facets["models"]).isEmpty)
+                XCTAssertEqual(services[2]["requestCount"], .number(0))
+            }
+        }
+        fixture.show([.codex, .kimi])
+        let hidden = try object(await service.handle("window.usage.dashboard", params: cases[0]))
+        let hiddenServices = try array(object(hidden["facets"])["services"]).map { try object($0) }
+        XCTAssertEqual(hiddenServices.map { $0["id"] }, [.string("kimi"), .string("codex")])
+    }
+
+    func testEmptyDashboardUsesDashesAndRetainsZeroSamplesWithReadableAxes() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex])
+        let service = fixture.service()
+        try fixture.index(service, records: [], revision: "empty")
+        for metric in ["cost", "requests", "tokens", "cacheHitRate"] {
+            let result = try object(await service.handle("window.usage.dashboard", params: ["range": .string("last7"), "metric": .string(metric)]))
+            let display = try object(result["kpiDisplay"])
+            XCTAssertEqual(display, ["cost": .string("—"), "requests": .string("—"), "tokens": .string("—"), "cacheHitRate": .string("—")])
+            XCTAssertEqual(try object(result["coverage"])["incomplete"], .bool(false))
+            let samples = try array(result["samples"]).map { try object($0) }
+            XCTAssertEqual(samples.count, 7, "Keep each day for the X axis even when no usage exists")
+            for sample in samples {
+                XCTAssertEqual(sample["value"], .number(0))
+                XCTAssertEqual(sample["normalizedValue"], .number(0))
+                XCTAssertTrue(try array(sample["segments"]).isEmpty)
+            }
+            let axis = try array(result["axisTicks"]).map { try object($0) }
+            let expected: [HostJSON?]
+            switch metric {
+            case "cost": expected = [.string("USD 0"), .string("USD 1"), .string("USD 2")]
+            case "cacheHitRate": expected = [.string("0.0%"), .string("50.0%"), .string("100.0%")]
+            default: expected = [.string("0"), .string("1"), .string("2")]
+            }
+            XCTAssertEqual(axis.map { $0["label"] }, expected)
+            XCTAssertTrue(try array(result["providerRows"]).isEmpty)
+            XCTAssertTrue(try array(result["modelRows"]).isEmpty)
+        }
+    }
+
+    func testZeroCostUsageAndRefreshingCoverageAreNotConfirmedEmpty() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex])
+        let service = fixture.service()
+        try fixture.index(service, records: [], revision: "warming")
+        service.dashboardStatusProvider = {
+            UsageRequestIndexStatus(revision: "warming", incompleteApps: [], isRefreshing: true, isReady: true)
+        }
+        let query: [String: HostJSON] = ["range": .string("today"), "metric": .string("cost")]
+        let warming = try object(await service.handle("window.usage.dashboard", params: query))
+        XCTAssertEqual(try object(warming["coverage"])["incomplete"], .bool(true))
+        XCTAssertNotEqual(try object(warming["kpiDisplay"])["cost"], .string("—"))
+        let day = Calendar.current.startOfDay(for: fixture.now)
+        let entry = UsageEntry(app: .codex, conversationKey: "zero-cost", model: "free", speed: .standard,
+            day: day, timestamp: fixture.now.addingTimeInterval(-60), inputTokens: 5, outputTokens: 0,
+            cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: 0, costBreakdown: nil)
+        fixture.state.usageService.aggregator.ingestLocal([entry])
+        try fixture.index(service, records: [UsageRequestRecord(id: "zero-cost", entry: entry)], revision: "zero-cost")
+        let active = try object(await service.handle("window.usage.dashboard", params: query))
+        let display = try object(active["kpiDisplay"])
+        XCTAssertEqual(display["cost"], .string("USD 0"))
+        XCTAssertEqual(display["requests"], .string("1"))
+        XCTAssertEqual(display["tokens"], .string("5"))
+        XCTAssertEqual(display["cacheHitRate"], .string("0.0%"))
+        XCTAssertFalse(try array(active["providerRows"]).isEmpty)
+    }
+
     private func object(_ value: HostJSON?) throws -> [String: HostJSON] {
         guard case .object(let result) = value else { throw XCTUnwrapError.unexpectedJSON }
         return result

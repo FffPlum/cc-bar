@@ -285,7 +285,11 @@ export function DashboardFilters({
           </div>
         </PopoverContent>
       </Popover>
-      <div className="flex h-8 items-center rounded-md border p-0.5 text-[13px]">
+      <div
+        role="group"
+        aria-label={t("Application filter", "应用筛选")}
+        className="flex h-8 items-center rounded-md border p-0.5 text-[13px]"
+      >
         <button
           type="button"
           aria-pressed={!service}
@@ -294,20 +298,20 @@ export function DashboardFilters({
         >
           {t("All", "全部")}
         </button>
-        {data.facets.services.map((item) => {
+        {bootstrap.visibleUsageServices.map((item) => {
           const app = bootstrap.sidebarApplications.find(
-            (x) => x.usageService === item.id,
+            (x) => x.usageService === item,
           );
-          const name = serviceDisplayName(item.id as UsageService);
+          const name = serviceDisplayName(item);
           return (
             <button
               type="button"
-              key={item.id}
+              key={item}
               title={name}
               aria-label={name}
-              aria-pressed={service === item.id}
-              onClick={() => onService(item.id as UsageService)}
-              className={`inline-flex h-full items-center justify-center rounded px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring motion-safe:transition-opacity motion-safe:duration-150 motion-safe:ease-[ease] [@media(hover:hover)_and_(pointer:fine)]:hover:opacity-75 ${selectionLayer} ${service === item.id ? "before:opacity-100" : ""}`}
+              aria-pressed={service === item}
+              onClick={() => onService(item)}
+              className={`inline-flex h-full items-center justify-center rounded px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring motion-safe:transition-opacity motion-safe:duration-150 motion-safe:ease-[ease] [@media(hover:hover)_and_(pointer:fine)]:hover:opacity-75 ${selectionLayer} ${service === item ? "before:opacity-100" : ""}`}
             >
               {app ? (
                 <HostIcon
@@ -320,7 +324,7 @@ export function DashboardFilters({
                 <ServiceIcon
                   name={name}
                   color={brandColor(
-                    item.id as UsageService,
+                    item,
                     settings,
                     bootstrap.appearance === "dark",
                   )}

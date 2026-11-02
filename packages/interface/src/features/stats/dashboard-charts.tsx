@@ -13,9 +13,11 @@ import { useTranslation } from "@/lib/i18n";
 export function DashboardChart({
   data,
   title,
+  empty = false,
 }: {
   data: UsageDashboard;
   title: string;
+  empty?: boolean;
 }) {
   const { bootstrap, settings } = useHost();
   const t = useTranslation();
@@ -111,7 +113,7 @@ export function DashboardChart({
           <div className="relative flex h-40 items-end border-b">
             <div className="pointer-events-none absolute inset-x-0 top-0 border-t" />
             <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t" />
-            {samples.map((s) => (
+            {(empty ? [] : samples).map((s) => (
               <Tooltip key={s.key}>
                 <TooltipTrigger
                   render={

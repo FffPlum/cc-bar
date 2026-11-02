@@ -176,8 +176,12 @@ extension HostWindowUsageService {
     private func dashboardRange(_ q: DashboardQuery) -> HostJSON {
         .object(["from": dateJSON(q.from), "to": dateJSON(q.to), "timeZone": .string(TimeZone.current.identifier), "granularity": .string(q.hourly ? "hour" : (q.to.timeIntervalSince(q.from) > 730 * 86400 ? "month" : "day")), "asOf": dateJSON(q.asOf)])
     }
+    private struct DashboardCoverage {
+        let incomplete: Bool
+        let json: HostJSON
+    }
     private func dashboardCoverage(_ q: DashboardQuery, data: DashboardData, result: SQLResult?,
-                                   from: Date, to: Date, includeCompleteDays: Bool) -> HostJSON {
+                                   from: Date, to: Date, includeCompleteDays: Bool) -> DashboardCoverage {
         let calendar = Calendar.current
         let candidates = data.canonical.filter { b in
             guard settings.visibleUsageApps.contains(b.app), q.service == nil || q.service == b.app,
@@ -207,7 +211,7 @@ extension HostWindowUsageService {
         let refreshing = data.status.isRefreshing
         let incomplete = hasResidual || unavailable || pending || refreshing
         let precision = hasResidual ? ((result?.buckets.isEmpty ?? true) ? "day" : "mixed") : "event"
-        return .object(["precision": .string(precision), "incomplete": .bool(incomplete), "refreshing": .bool(refreshing), "unlocatedTotals": totalsJSON(residual), "message": incomplete ? .string(tr("Some historical usage has no verified request timestamp.", "部分历史用量缺少可核验的请求时间。")) : .null])
+        return DashboardCoverage(incomplete: incomplete, json: .object(["precision": .string(precision), "incomplete": .bool(incomplete), "refreshing": .bool(refreshing), "unlocatedTotals": totalsJSON(residual), "message": incomplete ? .string(tr("Some historical usage has no verified request timestamp.", "部分历史用量缺少可核验的请求时间。")) : .null]))
     }
     private func dashboardValue(_ t: UsageTotals, metric: String) -> Double {
         switch metric {
@@ -253,7 +257,7 @@ extension HostWindowUsageService {
         let data = try await queryDetails(queries)
         let buckets = selectedBuckets(q, data: data, result: data.result(), from: q.from, to: q.to)
         let allFacetBuckets = selectedBuckets(allServicesQuery, data: data, result: data.result(1), from: q.from, to: q.to)
-        let apps = Array(Set(allFacetBuckets.map(\.app))).sorted { $0.rawValue < $1.rawValue }
+        let apps = settings.visibleUsageApps
         let sourceBuckets = selectedBuckets(q, data: data, result: data.result(2), from: q.from, to: q.to, applyModel: false, applySource: false)
         let sources = Array(Set(sourceBuckets.map(\.app))).sorted { $0.rawValue < $1.rawValue }
         let models = Array(Set(sourceBuckets.map(\.model))).sorted()
@@ -306,8 +310,10 @@ extension HostWindowUsageService {
             }
             return .object(["key": dateJSON(day), "start": dateJSON(day), "totals": totalsJSON(totals), "value": numberJSON(value), "label": .string(dashboardLabel(totals, metric: q.metric)), "normalizedValue": numberJSON(maxValue > 0 ? value / maxValue : 0), "segments": .array(segments)])
         }
+        // A zero series still needs a readable axis rather than three identical zeros.
+        let axisMaximum = maxValue > 0 ? maxValue : (q.metric == "cacheHitRate" ? 1 : 2)
         let axisTicks: [HostJSON] = [0.0, 0.5, 1.0].map { position in
-            let value = maxValue * position
+            let value = axisMaximum * position
             let label: String
             switch q.metric {
             case "cost": label = actions.formatCost(Decimal(value), .standard)
@@ -319,8 +325,16 @@ extension HostWindowUsageService {
         let integerFormatter = NumberFormatter()
         integerFormatter.numberStyle = .decimal
         func formatted(_ value: Int) -> String { integerFormatter.string(from: NSNumber(value: value)) ?? String(value) }
-        let kpiDisplay: HostJSON = .object(["cost": .string(actions.formatCost(total.costUSD, .standard)), "requests": .string(formatted(total.requestCount)), "tokens": .string(StatsFormatter.compactToken(total.totalTokens)), "cacheHitRate": .string(String(format: "%.1f%%", total.cacheHitRate * 100))])
-        return .object(["kpiDisplay": kpiDisplay, "revision": .string(data.revision), "resolvedRange": dashboardRange(q), "coverage": dashboardCoverage(q, data: data, result: data.result(), from: q.from, to: q.to, includeCompleteDays: q.hourly), "totals": totalsJSON(total), "facets": .object(["services": .array(apps.map { app in dashboardFacet(app.rawValue, title: app.rawValue, buckets: allFacetBuckets.filter { $0.app == app }) }), "sources": .array(sourceFacets), "models": .array(models.map { m in dashboardFacet(m, title: m, buckets: sourceBuckets.filter { $0.model == m }) })]), "providerRows": .array(providerRows), "modelRows": .array(modelRows), "samples": .array(samples), "axisTicks": .array(axisTicks), "status": statusJSON()])
+        let coverage = dashboardCoverage(q, data: data, result: data.result(), from: q.from, to: q.to, includeCompleteDays: q.hourly)
+        let confirmedEmpty = data.status.isReady && !coverage.incomplete
+            && total.requestCount == 0 && total.totalTokens == 0 && total.costUSD == 0
+        let kpiDisplay: HostJSON = .object([
+            "cost": .string(confirmedEmpty ? "—" : actions.formatCost(total.costUSD, .standard)),
+            "requests": .string(confirmedEmpty ? "—" : formatted(total.requestCount)),
+            "tokens": .string(confirmedEmpty ? "—" : StatsFormatter.compactToken(total.totalTokens)),
+            "cacheHitRate": .string(confirmedEmpty ? "—" : String(format: "%.1f%%", total.cacheHitRate * 100)),
+        ])
+        return .object(["kpiDisplay": kpiDisplay, "revision": .string(data.revision), "resolvedRange": dashboardRange(q), "coverage": coverage.json, "totals": totalsJSON(total), "facets": .object(["services": .array(apps.map { app in dashboardFacet(app.rawValue, title: app.rawValue, buckets: allFacetBuckets.filter { $0.app == app }) }), "sources": .array(sourceFacets), "models": .array(models.map { m in dashboardFacet(m, title: m, buckets: sourceBuckets.filter { $0.model == m }) })]), "providerRows": .array(providerRows), "modelRows": .array(modelRows), "samples": .array(samples), "axisTicks": .array(axisTicks), "status": statusJSON()])
     }
 
     private struct RequestCursor: Codable {
@@ -404,7 +418,7 @@ extension HostWindowUsageService {
             let state = RequestCursor(revision: revision, fingerprint: fingerprint, from: q.from, to: q.to, asOf: q.asOf, offset: nextOffset)
             cursor = .string(try JSONEncoder().encode(state).base64EncodedString())
         } else { cursor = .null }
-        return .object(["revision": .string(revision), "resolvedRange": dashboardRange(q), "totalCount": .number(Decimal(totalCount)), "rows": .array(rows), "nextCursor": cursor, "coverage": dashboardCoverage(q, data: data, result: data.result(), from: q.from, to: q.to, includeCompleteDays: true), "status": statusJSON()])
+        return .object(["revision": .string(revision), "resolvedRange": dashboardRange(q), "totalCount": .number(Decimal(totalCount)), "rows": .array(rows), "nextCursor": cursor, "coverage": dashboardCoverage(q, data: data, result: data.result(), from: q.from, to: q.to, includeCompleteDays: true).json, "status": statusJSON()])
     }
 
     func dashboardHeatmap(_ params: [String: HostJSON]) async throws -> HostJSON {
@@ -454,6 +468,6 @@ extension HostWindowUsageService {
             && (q.service == nil || q.service == .cursor)
             && (q.source == nil || q.source == dashboardSource(.cursor))
         let hasOlder = cursorHistoryUnknown || (earliest.map { $0 < start } ?? false)
-        return .object(["fromDay": .string(formatter.string(from: start)), "toDay": .string(formatter.string(from: end)), "timeZone": .string(calendar.timeZone.identifier), "days": .array(days), "totals": totalsJSON(total), "nextBeforeDay": hasOlder ? .string(formatter.string(from: start)) : .null, "coverage": dashboardCoverage(q, data: data, result: data.result(), from: pageFrom, to: pageTo, includeCompleteDays: false), "status": statusJSON()])
+        return .object(["fromDay": .string(formatter.string(from: start)), "toDay": .string(formatter.string(from: end)), "timeZone": .string(calendar.timeZone.identifier), "days": .array(days), "totals": totalsJSON(total), "nextBeforeDay": hasOlder ? .string(formatter.string(from: start)) : .null, "coverage": dashboardCoverage(q, data: data, result: data.result(), from: pageFrom, to: pageTo, includeCompleteDays: false).json, "status": statusJSON()])
     }
 }

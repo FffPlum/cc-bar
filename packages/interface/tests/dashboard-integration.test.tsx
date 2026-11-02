@@ -69,8 +69,10 @@ const api = {
   })),
 };
 let session = { ...api };
-beforeEach(() => {
+beforeEach(async () => {
   session = { ...api };
+  const fixtures = await import("./fixtures");
+  fixtures.bootstrap.visibleUsageServices = ["codex", "kimi"];
 });
 vi.mock("@/host/host-context", async () => {
   const f = await import("./fixtures");
@@ -837,4 +839,192 @@ it("revalidates the cached first page when a database change expires its paginat
   expect(api.usageRequests.mock.lastCall?.[0]).toMatchObject({
     cursor: "fresh-cursor",
   });
+});
+
+const emptyTotal = {
+  ...total,
+  inputTokens: 0,
+  outputTokens: 0,
+  inputWithCacheTokens: 0,
+  totalTokens: 0,
+  costUSD: "0",
+  costDisplay: "$0",
+  requestCount: 0,
+};
+const emptyDashboard = {
+  ...data,
+  totals: emptyTotal,
+  coverage: { ...coverage, refreshing: false, unlocatedTotals: emptyTotal },
+  kpiDisplay: { cost: "—", requests: "—", tokens: "—", cacheHitRate: "—" },
+  axisTicks: [
+    { position: 0, label: "0" },
+    { position: 0.5, label: "1" },
+    { position: 1, label: "2" },
+  ],
+  samples: ["2026-11-01", "2026-11-02", "2026-11-03"].map((day) => ({
+    key: day,
+    start: `${day}T00:00:00Z`,
+    totals: emptyTotal,
+    value: 0,
+    label: "0",
+    normalizedValue: 0,
+    segments: [],
+  })),
+};
+
+it("keeps every enabled application in configured order during loading and when query facets change", async () => {
+  const { act } = await import("@testing-library/react");
+  const fixtures = await import("./fixtures");
+  fixtures.bootstrap.visibleUsageServices = ["kimi", "codex"];
+  // Neither app is in the sidebar; usage enablement is independent of sidebar membership.
+  expect(fixtures.bootstrap.sidebarApplications).toHaveLength(0);
+  let finish!: (value: any) => void;
+  api.usageDashboard
+    .mockReset()
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    )
+    .mockResolvedValue({
+      ...data,
+      facets: { services: [], sources: [], models: [] },
+    });
+  renderDashboard();
+  const names = () =>
+    within(screen.getByRole("group", { name: "Application filter" }))
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+  expect(names()).toEqual(["All", "Kimi Code", "Codex"]);
+  expect(screen.queryByText("No data")).toBeNull();
+  await act(async () => {
+    finish({
+      ...data,
+      facets: {
+        ...data.facets,
+        services: [{ id: "codex", title: "Codex", requestCount: 2 }],
+      },
+    });
+  });
+  await screen.findByText("$1");
+  expect(names()).toEqual(["All", "Kimi Code", "Codex"]);
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: "Today" }),
+  );
+  await waitFor(() =>
+    expect(api.usageDashboard.mock.lastCall?.[0]).toMatchObject({
+      range: "today",
+    }),
+  );
+  expect(names()).toEqual(["All", "Kimi Code", "Codex"]);
+});
+
+it("returns selection to all when the selected application is disabled", async () => {
+  const React = await import("react");
+  const fixtures = await import("./fixtures");
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  function View() {
+    const [service, setService] = React.useState<
+      import("@ccbar/host-api/window").UsageService | undefined
+    >("codex");
+    return (
+      <LanguageProvider language="en">
+        <TooltipProvider>
+          <DashboardPage service={service} onService={setService} />
+        </TooltipProvider>
+      </LanguageProvider>
+    );
+  }
+  const view = render(<View />);
+  await screen.findByText("$1");
+  expect(
+    screen.getByRole("button", { name: "Codex" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  fixtures.bootstrap.visibleUsageServices = ["kimi"];
+  view.rerender(<View />);
+  const selector = screen.getByRole("group", { name: "Application filter" });
+  expect(within(selector).queryByRole("button", { name: "Codex" })).toBeNull();
+  expect(
+    within(selector)
+      .getByRole("button", { name: "All" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+  await waitFor(() =>
+    expect(api.usageDashboard.mock.lastCall?.[0].service).toBeUndefined(),
+  );
+});
+
+it("keeps KPI, chart axes and all table columns when a successful query is empty", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue(emptyDashboard as never);
+  api.usageRequests
+    .mockReset()
+    .mockResolvedValue({
+      revision: "1",
+      resolvedRange,
+      totalCount: 0,
+      rows: [],
+      nextCursor: null,
+      coverage: emptyDashboard.coverage,
+      status,
+    });
+  const view = renderDashboard();
+  await screen.findByText("No data");
+  for (const name of ["Cost", "Requests", "Tokens", "Cache hit rate"])
+    expect(screen.getByRole("button", { name: `${name} —` })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Request logs 0" })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Providers 0" })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Models 0" })).toBeTruthy();
+  expect(
+    view.container.querySelector('[data-slot="dashboard-bar"]'),
+  ).toBeNull();
+  expect(screen.getByText("11/01")).toBeTruthy();
+  expect(screen.getByText("11/03")).toBeTruthy();
+  expect(screen.getByText("1")).toBeTruthy();
+  expect(screen.getByText("2")).toBeTruthy();
+  expect(screen.getAllByRole("columnheader")).toHaveLength(7);
+  expect(screen.getByText("No data").getAttribute("colspan")).toBe("7");
+  fireEvent.click(screen.getByRole("tab", { name: "Models 0" }));
+  expect(screen.getAllByRole("columnheader")).toHaveLength(7);
+  expect(screen.getByText("No data")).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "Request logs 0" }));
+  expect(screen.getAllByRole("columnheader")).toHaveLength(6);
+  expect(screen.getByText("No data").getAttribute("colspan")).toBe("6");
+  await waitFor(() => expect(api.usageRequests).toHaveBeenCalled());
+});
+
+it("does not treat actual zero-cost usage as an empty query", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue({
+    ...data,
+    totals: { ...total, costUSD: "0", costDisplay: "$0" },
+    kpiDisplay: { ...data.kpiDisplay, cost: "$0" },
+  });
+  renderDashboard();
+  await screen.findByText("$0");
+  expect(screen.queryByText("No data")).toBeNull();
+  expect(screen.getByRole("button", { name: "Requests 2" })).toBeTruthy();
+});
+
+it("keeps application filters but does not display empty success on initial query failure", async () => {
+  api.usageDashboard
+    .mockReset()
+    .mockRejectedValue(new Error("database unavailable"));
+  renderDashboard();
+  await screen.findByText("Couldn’t load this page");
+  expect(screen.getByRole("button", { name: "Codex" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Kimi Code" })).toBeTruthy();
+  expect(screen.queryByText("No data")).toBeNull();
+});
+
+it("does not claim empty data while request details are still being prepared", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue({
+    ...emptyDashboard,
+    coverage: { ...emptyDashboard.coverage, refreshing: true },
+    kpiDisplay: { cost: "$0", requests: "0", tokens: "0", cacheHitRate: "0%" },
+  } as never);
+  renderDashboard();
+  await screen.findByText("Updating request details…");
+  expect(screen.queryByText("No data")).toBeNull();
+  expect(screen.getByRole("tab", { name: "Request logs —" })).toBeTruthy();
 });

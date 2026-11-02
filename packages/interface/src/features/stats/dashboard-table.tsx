@@ -27,6 +27,7 @@ export function DashboardTable({
   error,
   loading,
   previousData = false,
+  empty = false,
   retry,
   cursor,
   next,
@@ -42,6 +43,7 @@ export function DashboardTable({
   error: string | null;
   loading: boolean;
   previousData?: boolean;
+  empty?: boolean;
   retry?: () => void;
   cursor?: string;
   next: (cursor: string) => void;
@@ -92,7 +94,7 @@ export function DashboardTable({
   const rows = [
     ...(tab === "models" ? data.modelRows : data.providerRows),
   ].sort((a, b) => compare(aggValue(a), aggValue(b)));
-  const logs = requests?.rows ?? [];
+  const logs = empty ? [] : (requests?.rows ?? []);
   const requestHeading = (label: string, sort: "time" | "cost" | "tokens") => (
     <button
       type="button"
@@ -147,9 +149,11 @@ export function DashboardTable({
                 : t("Models", "模型")}{" "}
             <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
               {item === "requests"
-                ? requests?.coverage.incomplete
-                  ? "—"
-                  : (requests?.totalCount ?? "—")
+                ? empty
+                  ? 0
+                  : requests?.coverage.incomplete
+                    ? "—"
+                    : (requests?.totalCount ?? "—")
                 : item === "providers"
                   ? data.providerRows.length
                   : data.modelRows.length}
@@ -159,7 +163,7 @@ export function DashboardTable({
       </div>
       {tab === "requests" ? (
         <div aria-busy={loading}>
-          {loading && !requests && (
+          {loading && !requests && !empty && (
             <p role="status" className="p-3 text-muted-foreground">
               {t("Loading request records…", "正在加载请求记录…")}
             </p>
@@ -179,7 +183,7 @@ export function DashboardTable({
               )}
             </p>
           )}
-          {previousData && (
+          {previousData && !empty && (
             <p role="status" className="px-4 py-2 text-muted-foreground">
               {error
                 ? t(
@@ -192,7 +196,7 @@ export function DashboardTable({
                   )}
             </p>
           )}
-          {requests?.coverage.incomplete && (
+          {requests?.coverage.incomplete && !empty && (
             <p className="px-4 py-2 text-muted-foreground">
               {t(
                 "Request records are incomplete or unavailable.",
@@ -218,6 +222,22 @@ export function DashboardTable({
               </tr>
             </thead>
             <tbody>
+              {(empty ||
+                (requests &&
+                  !logs.length &&
+                  !requests.coverage.incomplete &&
+                  !loading &&
+                  !error &&
+                  !previousData)) && (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="h-40 px-3 text-center text-muted-foreground"
+                  >
+                    {t("No data", "暂无数据")}
+                  </td>
+                </tr>
+              )}
               {logs.map((row) => (
                 <tr key={row.id} className="border-t">
                   <td className="px-3 py-2">
@@ -256,12 +276,7 @@ export function DashboardTable({
               ))}
             </tbody>
           </table>
-          {requests && !logs.length && !requests.coverage.incomplete && (
-            <p className="p-4 text-muted-foreground">
-              {t("No requests in this period.", "该时段没有请求记录。")}
-            </p>
-          )}
-          {(cursor || requests?.nextCursor) && (
+          {!empty && (cursor || requests?.nextCursor) && (
             <div className="flex items-center gap-2 p-3">
               <Button
                 size="sm"
@@ -304,6 +319,16 @@ export function DashboardTable({
             </tr>
           </thead>
           <tbody>
+            {empty && !rows.length && (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="h-40 px-3 text-center text-muted-foreground"
+                >
+                  {t("No data", "暂无数据")}
+                </td>
+              </tr>
+            )}
             {rows.map((row) => (
               <tr key={row.id} className="border-t">
                 <td className="truncate px-3 py-3" title={row.title}>
