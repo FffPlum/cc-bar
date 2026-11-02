@@ -106,8 +106,7 @@ export function DashboardTable({
       : (data?.providerRows ?? [])),
   ].sort((a, b) => compare(aggValue(a), aggValue(b)));
   const logs = empty ? [] : (requests?.rows ?? []);
-  const requestWaiting =
-    tab === "requests" && loading && (!requests || previousData);
+  const requestWaiting = tab === "requests" && loading && !requests;
   const showSkeleton = dashboardLoading || requestWaiting;
   const oldResults = dashboardPreviousData || previousData;
   const hasPagination = Boolean(!empty && (cursor || requests?.nextCursor));

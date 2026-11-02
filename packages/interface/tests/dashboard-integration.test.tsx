@@ -1094,7 +1094,7 @@ it("uses the dashboard shell for first-load skeletons while controls remain usab
   ).toBeNull();
 });
 
-it("overlays fresh-filter skeletons without unmounting panels and skips them for a cached filter", async () => {
+it("keeps fresh-filter results readable without unmounting panels and skips loading indicators for a cached filter", async () => {
   const { act } = await import("@testing-library/react");
   let finish!: (value: any) => void;
   api.usageDashboard.mockReset().mockImplementation((query: any) =>
@@ -1110,6 +1110,7 @@ it("overlays fresh-filter skeletons without unmounting panels and skips them for
     '[data-slot="dashboard-summary"]',
   );
   const table = screen.getByRole("table");
+  const kpi = screen.getByText("$1");
   fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
   fireEvent.click(
     within(screen.getByRole("dialog")).getByRole("button", {
@@ -1118,15 +1119,21 @@ it("overlays fresh-filter skeletons without unmounting panels and skips them for
   );
   expect(
     view.container.querySelector('[data-slot="chart-loading-overlay"]'),
-  ).not.toBeNull();
+  ).toBeNull();
   expect(
     view.container.querySelector('[data-slot="table-skeleton"]'),
-  ).not.toBeNull();
+  ).toBeNull();
   expect(view.container.querySelector('[data-slot="dashboard-summary"]')).toBe(
     summary,
   );
   expect(screen.getByRole("table")).toBe(table);
-  expect(screen.getByText("$1").className).toContain("invisible");
+  expect(screen.getByText("$1")).toBe(kpi);
+  expect(kpi.className).not.toContain("invisible");
+  expect(kpi.getAttribute("aria-hidden")).not.toBe("true");
+  expect(
+    view.container.querySelector('[data-slot="dashboard-chart-region"]')
+      ?.getAttribute("aria-busy"),
+  ).toBe("true");
   expect(
     screen.getByRole("tab", { name: "Models 0" }).closest("[inert]"),
   ).toBeNull();
@@ -1183,7 +1190,10 @@ it("keeps the request table and paging area while first-page and next-page queri
   expect(pager?.className).not.toContain("invisible");
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
   expect(screen.getByText("loaded-row")).toBeTruthy();
-  expect(body.querySelector('[data-slot="table-skeleton"]')).not.toBeNull();
+  expect(body.querySelector('[data-slot="table-skeleton"]')).toBeNull();
+  expect(
+    screen.getByText("loaded-row").closest("tbody")?.getAttribute("aria-hidden"),
+  ).not.toBe("true");
   expect(
     (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
       .disabled,
@@ -1255,4 +1265,63 @@ it("uses a full heatmap skeleton on first load and retains expanded blocks for a
     finish(block);
   });
   expect(screen.getByText(/2025-01-06/)).toBe(title);
+});
+
+it("keeps the rendered heatmap while a new application filter is pending", async () => {
+  const React = await import("react");
+  const { act } = await import("@testing-library/react");
+  let finish!: (value: any) => void;
+  const block = {
+    fromDay: "2025-01-06",
+    toDay: "2026-01-12",
+    timeZone: "UTC",
+    days: [],
+    totals: total,
+    nextBeforeDay: null,
+    coverage,
+    status,
+  };
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  api.usageHeatmap.mockReset().mockImplementation((query: any) =>
+    query.service === "codex"
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : Promise.resolve(block),
+  );
+  function View() {
+    const [service, setService] =
+      React.useState<import("@ccbar/host-api/window").UsageService>();
+    return <DashboardPage service={service} onService={setService} />;
+  }
+  const view = render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <View />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "All",
+      exact: true,
+    }),
+  );
+  const title = await screen.findByText(/2025-01-06/);
+  fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+  await waitFor(() =>
+    expect(api.usageHeatmap.mock.lastCall?.[0]).toMatchObject({
+      service: "codex",
+    }),
+  );
+  expect(screen.getByText(/2025-01-06/)).toBe(title);
+  expect(
+    view.container.querySelector('[data-slot="heatmap-skeleton"]'),
+  ).toBeNull();
+  await act(async () => {
+    finish({ ...block, fromDay: "2024-01-01" });
+  });
+  await screen.findByText(/2024-01-01/);
 });

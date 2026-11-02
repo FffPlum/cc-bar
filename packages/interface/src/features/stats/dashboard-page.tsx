@@ -220,11 +220,8 @@ function DashboardContent({
           : null;
   const renderContent = (data: UsageDashboard | undefined) => {
     const values = metrics.map((metric) => data?.kpiDisplay[metric]);
-    const waiting =
-      !data || (dashboardResult.isPreviousData && dashboard.isFetching);
-    const background = Boolean(
-      data && dashboard.isFetching && !dashboardResult.isPreviousData,
-    );
+    const waiting = !data;
+    const background = Boolean(data && dashboard.isFetching);
     const empty = Boolean(
       data &&
       !dashboardResult.isPreviousData &&
@@ -338,7 +335,7 @@ function DashboardContent({
               <div
                 data-slot="dashboard-chart-region"
                 className="relative"
-                aria-busy={waiting}
+                aria-busy={dashboard.isFetching}
               >
                 {!data ? (
                   <ChartSkeleton heatmap={range === "all"} />
@@ -346,7 +343,6 @@ function DashboardContent({
                   <div inert={dashboardResult.isPreviousData}>
                     {range === "all" ? (
                       <HeatmapResource
-                        key={key}
                         query={query}
                         announceLoading={!loadingMessage}
                         revision={data.revision}
@@ -362,15 +358,6 @@ function DashboardContent({
                         empty={empty}
                       />
                     )}
-                  </div>
-                )}
-                {data && waiting && (
-                  <div
-                    aria-hidden="true"
-                    data-slot="chart-loading-overlay"
-                    className="pointer-events-none absolute inset-0 z-10 bg-background"
-                  >
-                    <ChartSkeleton heatmap={range === "all"} />
                   </div>
                 )}
               </div>

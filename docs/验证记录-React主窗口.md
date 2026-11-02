@@ -191,3 +191,12 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ccb
 - 全前端 **13 个文件、81 项测试通过**，日志 `/tmp/ccbar-dashboard-skeleton-interface-tests.log`；TypeScript 静态检查通过。覆盖首载、筛选、分页、热力图、缓存复用、后台刷新、失败恢复、组件状态保留和加载提示的可访问性。
 - 指定 Xcode Debug 构建 **BUILD SUCCEEDED**，日志 `/tmp/ccbar-dashboard-skeleton-debug.log`；包含 SDK / 前端类型检查和 Vite 资源构建。`git diff --check` 通过。本轮仅修改前端与文档，没有重复运行 Swift 行为测试。
 - 未启动或替换安装的 App，实际窗口布局和动画观感由用户验收；未测量真实窗口的布局偏移。本节验证通过后按用户要求创建本地提交，未推送。
+
+### 统计加载连续显示
+
+日期：2026-11-02。针对用户反馈的数据加载闪屏，复查查询缓存与实际渲染分支后实施本节修正。
+
+- 确认 `keepPreviousData` 已保留查询结果，闪屏来自展示层在新筛选或翻页等待时隐藏 KPI，并用不透明骨架覆盖图表和表格。现在只有没有任何可展示结果的首次查询使用骨架；已有结果在筛选、排序、翻页和后台刷新期间保持可读，以细加载条和 `aria-busy` 表示更新。
+- 移除热力图按完整筛选键设置的强制重挂载，使 `keepPreviousData` 和已展开块在应用等筛选变化时连续显示。旧结果的分页操作、隐私与展示上下文隔离、失败保留及重试行为不变。
+- Dashboard 定向 **2 个文件、41 项测试通过**；完整前端 **13 个文件、82 项测试通过**。新增/调整用例验证筛选 KPI 与面板 DOM 连续、请求翻页无遮盖骨架、热力图筛选保留原节点，以及首载骨架和缓存命中行为。
+- TypeScript 静态检查与 `npm run build`（含 Vite 生产资源构建）通过，`git diff --check` 通过。本轮仅修改 React 展示层、对应测试和文档，未运行 Swift 测试或完整 Xcode 构建，未启动 App 做真实窗口视觉验收。
