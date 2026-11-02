@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import {
   CalendarDays,
   ChevronLeft,
@@ -25,6 +25,8 @@ import { brandColor, serviceDisplayName } from "@/lib/display";
 
 const selectionLayer =
   "relative isolate before:absolute before:inset-0 before:-z-10 before:rounded before:bg-muted before:opacity-0 motion-safe:before:transition-opacity motion-safe:before:duration-150 motion-safe:before:ease-[ease]";
+const filterControl =
+  "h-8 rounded-md border border-border bg-background bg-clip-padding text-[13px] dark:border-input dark:bg-input/30";
 type Range = DashboardQuery["range"];
 type Custom = { customFrom: string; customTo: string; followNow: boolean };
 export function DashboardFilters({
@@ -70,6 +72,43 @@ export function DashboardFilters({
   const [active, setActive] = useState<"from" | "to">("from");
   const [month, setMonth] = useState(now.slice(0, 7));
   const [error, setError] = useState(false);
+  const applicationGroup = useRef<HTMLDivElement>(null);
+  const applicationOptions = useRef(new Map<string, HTMLButtonElement>());
+  const selectedApplication = service ?? "all";
+  const [indicator, setIndicator] = useState<{
+    left: number;
+    width: number;
+  }>();
+  useLayoutEffect(() => {
+    const group = applicationGroup.current;
+    const selected = applicationOptions.current.get(selectedApplication);
+    if (!group || !selected) {
+      setIndicator(undefined);
+      return;
+    }
+    const update = () => {
+      const next = { left: selected.offsetLeft, width: selected.offsetWidth };
+      if (next.width === 0) {
+        setIndicator(undefined);
+        return;
+      }
+      setIndicator((current) =>
+        current?.left === next.left && current.width === next.width
+          ? current
+          : next,
+      );
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(group);
+    for (const option of applicationOptions.current.values())
+      observer.observe(option);
+    return () => observer.disconnect();
+  }, [
+    selectedApplication,
+    bootstrap.visibleUsageServices,
+    bootstrap.resolvedLanguage,
+  ]);
   const [year, monthIndex] = month.split("-").map(Number);
   const first = new Date(Date.UTC(year!, monthIndex! - 1, 1));
   const cells = Array.from(
@@ -121,13 +160,13 @@ export function DashboardFilters({
             <Button
               variant="outline"
               size="sm"
-              className="h-8 rounded-md text-[13px]"
+              className={`${filterControl} justify-start`}
             />
           }
         >
           <CalendarDays className="size-4" />{" "}
           {presets.find((x) => x[0] === range)?.[1] ?? t("Custom", "自定义")}{" "}
-          <ChevronDown className="size-4" />
+          <ChevronDown className="ml-auto size-4" />
         </PopoverTrigger>
         <PopoverContent
           align="start"
@@ -286,15 +325,31 @@ export function DashboardFilters({
         </PopoverContent>
       </Popover>
       <div
+        ref={applicationGroup}
         role="group"
         aria-label={t("Application filter", "应用筛选")}
-        className="flex h-8 items-center rounded-md border p-0.5 text-[13px]"
+        className={`relative isolate flex items-center ${filterControl} p-0.5`}
       >
+        {indicator && (
+          <span
+            aria-hidden="true"
+            data-slot="application-selection-indicator"
+            className="pointer-events-none absolute inset-y-0.5 left-0 z-0 rounded-[5px] bg-muted motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-[cubic-bezier(0.77,0,0.175,1)] motion-reduce:transition-none"
+            style={{
+              width: indicator.width,
+              transform: `translateX(${indicator.left}px)`,
+            }}
+          />
+        )}
         <button
+          ref={(node) => {
+            if (node) applicationOptions.current.set("all", node);
+            else applicationOptions.current.delete("all");
+          }}
           type="button"
           aria-pressed={!service}
           onClick={() => onService(undefined)}
-          className={`inline-flex h-full items-center justify-center rounded px-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring motion-safe:transition-opacity motion-safe:duration-150 motion-safe:ease-[ease] [@media(hover:hover)_and_(pointer:fine)]:hover:opacity-75 ${selectionLayer} ${!service ? "before:opacity-100 font-medium" : ""}`}
+          className="relative z-10 inline-flex h-full shrink-0 items-center justify-center rounded px-2 font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring motion-safe:transition-opacity motion-safe:duration-150 motion-safe:ease-[ease] [@media(hover:hover)_and_(pointer:fine)]:hover:opacity-75"
         >
           {t("All", "全部")}
         </button>
@@ -305,13 +360,17 @@ export function DashboardFilters({
           const name = serviceDisplayName(item);
           return (
             <button
+              ref={(node) => {
+                if (node) applicationOptions.current.set(item, node);
+                else applicationOptions.current.delete(item);
+              }}
               type="button"
               key={item}
               title={name}
               aria-label={name}
               aria-pressed={service === item}
               onClick={() => onService(item)}
-              className={`inline-flex h-full items-center justify-center rounded px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring motion-safe:transition-opacity motion-safe:duration-150 motion-safe:ease-[ease] [@media(hover:hover)_and_(pointer:fine)]:hover:opacity-75 ${selectionLayer} ${service === item ? "before:opacity-100" : ""}`}
+              className="relative z-10 inline-flex h-full shrink-0 items-center justify-center rounded px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring motion-safe:transition-opacity motion-safe:duration-150 motion-safe:ease-[ease] [@media(hover:hover)_and_(pointer:fine)]:hover:opacity-75"
             >
               {app ? (
                 <HostIcon
@@ -347,13 +406,16 @@ export function DashboardFilters({
             <Button
               variant="outline"
               size="sm"
-              className="h-8 rounded-md text-[13px]"
+              className={`${filterControl} justify-start`}
             />
           }
         >
-          <ListFilter className="size-4" />{" "}
-          {selectedSource?.title ?? t("Provider / model", "供应商 / 模型")}
-          {modelID ? ` · ${modelID}` : ""} <ChevronDown className="size-4" />
+          <ListFilter className="size-4" />
+          <span className="text-left">
+            {selectedSource?.title ?? t("Provider / model", "供应商 / 模型")}
+            {modelID ? ` · ${modelID}` : ""}
+          </span>
+          <ChevronDown className="ml-auto size-4" />
         </PopoverTrigger>
         <PopoverContent
           align="start"

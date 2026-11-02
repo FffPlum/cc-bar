@@ -116,6 +116,98 @@ it("applies custom dates and offers presets", () => {
     followNow: false,
   });
 });
+it("adapts filter control widths to content while sharing height and surface", () => {
+  wrap(
+    <DashboardFilters
+      data={data}
+      range="last7"
+      onRange={() => {}}
+      onService={() => {}}
+      onSource={() => {}}
+      onModel={() => {}}
+    />,
+  );
+  const date = screen.getByRole("button", { name: /Last 7 days/ });
+  const applications = screen.getByRole("group", {
+    name: "Application filter",
+  });
+  const provider = screen.getByRole("button", { name: /Provider \/ model/ });
+  for (const control of [date, applications, provider]) {
+    for (const className of [
+      "h-8",
+      "rounded-md",
+      "border-border",
+      "bg-background",
+      "dark:border-input",
+      "dark:bg-input/30",
+    ]) {
+      expect(control.className).toContain(className);
+    }
+    expect(control.className).not.toContain("w-60");
+  }
+  expect(provider.querySelector(".truncate")).toBeNull();
+  expect(applications.className).toContain("p-0.5");
+  expect(
+    within(applications).getByRole("button", { name: "All" }).className,
+  ).toContain("h-full");
+});
+it("slides the application selection indicator and honors reduced motion", async () => {
+  const fixtures = await import("./fixtures");
+  const visibleServices = fixtures.bootstrap.visibleUsageServices;
+  fixtures.bootstrap.visibleUsageServices = ["codex"];
+  const offsetLeft = vi
+    .spyOn(HTMLElement.prototype, "offsetLeft", "get")
+    .mockImplementation(function (this: HTMLElement) {
+      if (this.textContent === "All") return 2;
+      if (this.getAttribute("aria-label") === "Codex") return 40;
+      return 0;
+    });
+  const offsetWidth = vi
+    .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+    .mockImplementation(function (this: HTMLElement) {
+      if (this.textContent === "All") return 36;
+      if (this.getAttribute("aria-label") === "Codex") return 24;
+      return 0;
+    });
+  try {
+    const element = (service?: "codex") => (
+      <LanguageProvider language="en">
+        <TooltipProvider>
+          <DashboardFilters
+            data={data}
+            range="last7"
+            service={service}
+            onRange={() => {}}
+            onService={() => {}}
+            onSource={() => {}}
+            onModel={() => {}}
+          />
+        </TooltipProvider>
+      </LanguageProvider>
+    );
+    const view = render(element());
+    const indicator = () =>
+      view.container.querySelector<HTMLElement>(
+        '[data-slot="application-selection-indicator"]',
+      )!;
+    const initialIndicator = indicator();
+    expect(initialIndicator.style.width).toBe("36px");
+    expect(initialIndicator.style.transform).toBe("translateX(2px)");
+    view.rerender(element("codex"));
+    expect(indicator()).toBe(initialIndicator);
+    expect(indicator().style.width).toBe("24px");
+    expect(indicator().style.transform).toBe("translateX(40px)");
+    expect(indicator().className).toContain("inset-y-0.5");
+    expect(indicator().className).toContain("rounded-[5px]");
+    expect(indicator().className).toContain("motion-safe:transition-transform");
+    expect(indicator().className).toContain("motion-safe:duration-150");
+    expect(indicator().className).toContain("motion-reduce:transition-none");
+  } finally {
+    offsetLeft.mockRestore();
+    offsetWidth.mockRestore();
+    fixtures.bootstrap.visibleUsageServices = visibleServices;
+  }
+});
 it("selects provider and model", () => {
   const source = vi.fn(),
     model = vi.fn();
