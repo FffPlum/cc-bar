@@ -3,6 +3,25 @@ import SwiftUI
 import WebKit
 
 @MainActor
+enum ReactMainWindowConfiguration {
+    static let defaultContentSize = NSSize(width: 1000, height: 650)
+    static let minimumContentSize = NSSize(width: 900, height: 600)
+    private static let frameAutosaveName = "CCBarReactMainWindow"
+
+    static func configure(_ window: NSWindow) {
+        window.contentMinSize = minimumContentSize
+        window.setFrameAutosaveName(frameAutosaveName)
+        if !window.setFrameUsingName(frameAutosaveName) {
+            window.center()
+        }
+    }
+
+    static func saveFrame(of window: NSWindow) {
+        window.saveFrame(usingName: frameAutosaveName)
+    }
+}
+
+@MainActor
 final class ReactWindowController: NSObject {
     /// Set CCBAR_REACT_MAIN_WINDOW=0 only to compare with the native development fallback.
     static var isEnabled: Bool {

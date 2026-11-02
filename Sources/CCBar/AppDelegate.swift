@@ -44,22 +44,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showMainWindow() {
         if mainWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
+            let usesReact = ReactWindowController.isEnabled
+            let initialContentSize = usesReact
+                ? ReactMainWindowConfiguration.defaultContentSize
+                : NSSize(width: 1440, height: 900)
+            let window = NSWindow(contentRect: NSRect(origin: .zero, size: initialContentSize),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                   backing: .buffered, defer: false)
             window.title = "CCBar"
             window.isReleasedWhenClosed = false
-            window.contentMinSize = NSSize(width: 1040, height: 520)
+            window.contentMinSize = usesReact
+                ? ReactMainWindowConfiguration.minimumContentSize
+                : NSSize(width: 1040, height: 520)
             window.delegate = self
-            if ReactWindowController.isEnabled {
+            if usesReact {
                 let controller = ReactWindowController(service: MacOSHostService(state: appState, settings: .shared))
                 reactWindowController = controller
                 window.contentView = controller.contentView
+                ReactMainWindowConfiguration.configure(window)
                 controller.load()
             } else {
                 window.contentView = NSHostingView(rootView: MainWindowRootView().environment(appState))
+                window.center()
             }
-            window.center()
             mainWindow = window
         }
         NSApp.setActivationPolicy(.regular)
@@ -88,8 +95,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboardingWindow?.makeKeyAndOrderFront(nil)
     }
 
-    /// 退出前把缓冲里剩下的日志写完——崩溃前最后那几行往往正是要查的东西。
+    /// 退出前保存 React 主窗口状态，并把缓冲里剩下的日志写完——崩溃前最后那几行往往正是要查的东西。
     func applicationWillTerminate(_ notification: Notification) {
+        if let mainWindow, reactWindowController != nil {
+            ReactMainWindowConfiguration.saveFrame(of: mainWindow)
+        }
         AppLog.info(.app, "terminating")
         AppLog.shared.flushNow()
     }
@@ -155,6 +165,9 @@ extension AppDelegate: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
         if window === mainWindow {
+            if reactWindowController != nil {
+                ReactMainWindowConfiguration.saveFrame(of: window)
+            }
             reactWindowController?.dispose()
             reactWindowController = nil
             window.contentView = nil

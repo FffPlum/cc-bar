@@ -117,9 +117,9 @@ export function ProjectsPage({
     setSelection,
   );
   return (
-    <div className="grid h-full min-h-0 grid-cols-[400px_minmax(480px,1fr)] max-[1100px]:grid-cols-[360px_minmax(480px,1fr)]">
+    <div className="grid h-full min-h-0 min-w-0 grid-cols-[400px_minmax(480px,1fr)] max-[1100px]:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
       <section
-        className="flex min-h-0 flex-col border-r"
+        className="flex min-h-0 min-w-0 flex-col border-r"
         onKeyDown={keyboard}
         tabIndex={0}
         aria-label={t("Projects", "项目")}

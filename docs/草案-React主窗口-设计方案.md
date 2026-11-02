@@ -23,7 +23,7 @@
 
 ## 3. macOS 托管与打包
 
-- 保留 AppDelegate 的窗口所有权、1440×900 初始尺寸、1040×520 最小尺寸、关闭释放、菜单 tracking 后异步激活、regular/accessory 策略。
+- 保留 AppDelegate 的窗口所有权、关闭释放、菜单 tracking 后异步激活、regular/accessory 策略。React 主窗口默认内容区调整为 1000×650、最小 900×600（逻辑像素），首次居中、可调整大小，并通过 `NSWindow` frame autosave 在关窗重开和应用重启后恢复上次位置与尺寸；前端根尺寸与宿主一致，窄窗口双栏按 2:3 弹性收缩并由页面内部滚动，避免内容被根容器裁剪。原生开发回退仍保留 1440×900 初始尺寸和 1040×520 最小尺寸。
 - WKWebView 容器持有 service/transport，明确安装与拆除；主页面只加载打包的可信资源。采用 `ccbar-ui://app/index.html` 专用 scheme，主框架桥接须精确匹配可信 origin，资源读取限制到 bundle 根目录，防目录穿越/符号链接逃逸。
 - 导航仅允许自身资源；http(s) 外链经宿主打开，不把远程页面加载到有权限的 WebView。禁用任意弹窗，设置 CSP、不使用远程脚本/CDN，不放宽文件读取/KVC 私有开关。
 - 资源走 Vite 静态构建，保留相对路径；Xcode、SPM、scripts/build.sh/CI 都需可复现地取得同一份资源。Xcode 构建不得悄悄联网安装依赖，首次依赖安装和资源构建命令须文档化。正式打包脚本负责显式构建/校验资源，避免只在本机临时目录可用。

@@ -131,8 +131,8 @@
   }
   body {
     @apply bg-background text-foreground;
-    min-width: 1040px;
-    min-height: 520px;
+    min-width: 900px;
+    min-height: 600px;
     margin: 0;
     overflow: hidden;
     font-size: 13px;
@@ -164,7 +164,7 @@
   .cc-window {
     height: 100vh;
     height: 100dvh;
-    min-height: 520px;
+    min-height: 600px;
     background: #ececee;
     color: #1d1d1f;
   }
