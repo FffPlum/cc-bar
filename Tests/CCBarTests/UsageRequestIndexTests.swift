@@ -203,7 +203,7 @@ final class UsageRequestIndexTests: XCTestCase {
             costRead: nil, costCreation: nil, timing: nil)
         try store.save(.init(version: 1, sourceKeys: [.claude: String(repeating: "a", count: 64)],
             incompleteApps: [], rows: [row]))
-        let url = env.historyDirectory.appendingPathComponent("request-index-v1.json")
+        let url = env.historyDirectory.appendingPathComponent("request-index.sqlite3")
         let data = try Data(contentsOf: url)
         XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("private-session"))
         let attrs = try FileManager.default.attributesOfItem(atPath: url.path)

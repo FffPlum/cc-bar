@@ -134,3 +134,16 @@ Codex 对照 cc-switch 查询与日志同步源码制定方案，GPT-6.1 Terra �
 - 前端 `dashboard-stacked-chart`、`dashboard`、`dashboard-integration` 三组 **28 项通过**；新增测试覆盖分段比例、零值/单应用、图例顺序、浅深主题/自定义色、键盘提示与缓存贡献标签。最终仅调整提示数值区域宽度后，柱图 4 项单独复跑与 TypeScript 检查通过。
 - 指定 Xcode **Debug build 通过**（`** BUILD SUCCEEDED **`），同步完成 SDK、TypeScript 和静态资源构建；仅有既有 AppIntents 元数据跳过提示。`git diff --check` 通过。
 - 日志：`/tmp/ccbar-dashboard-stacks-swift-tests.log`、`/tmp/ccbar-dashboard-stacks-sdk-tests.log`、`/tmp/ccbar-dashboard-stacks-debug.log`。未启动应用做视觉验收；本次改动尚未提交或推送。
+
+### SQLite 用量明细缓存
+
+用户要求在 `feature/react-main-window` 引入 SQLite，随后明确忽略旧 JSON 明细，首次启动重建数据库。6.1 Terra 报告执行额度不足后，用户授权主代理接手；主代理完成存储和接线，独立子代理编写 SQLite 用例并静态复核。
+
+`UsageRequestIndexStore` 改用系统 SQLite3，在 `request-index.sqlite3` 中逐行保存明细，以事务同步来源指纹和记录；金额保持精确 Decimal，未变来源不重写请求行。旧 `request-index-v1.json` 从不读取或迁移，原历史汇总与扫描进度快照不变。缺库/确认损坏由后台索引链重建，锁占用、权限/I/O 或未来版本返回不可用并延迟重试，避免误发布空缓存。实现边界与故障策略见 [SQLite 缓存方案](草案-SQLite用量明细缓存.md)。
+
+- 首轮索引测试 18 项通过；补充加载结果分类后，最终 `UsageRequestIndex|HostWindowUsage` 定向回归 **32 项通过**，其中 SQLite 9 项、已有请求索引 9 项、宿主统计 14 项。
+- 真实 SQLite 测试覆盖文件格式/0600 权限、精确金额/NULL/计时、旧 JSON 忽略与保留、未来版本、外部排他锁、损坏隔离重建、空指纹来源、来源移除；通过数据库触发器验证未变来源不重写，以及事务中途失败回滚行和元数据。所有数据库与日志均为临时测试数据。
+- 指定 Xcode **Debug build 通过**，同时完成 Host API、TypeScript 和 Vite 资源编译。日志包含 `** BUILD SUCCEEDED **`，仅有既有 AppIntents 元数据跳过提示。`git diff --check` 通过。
+- 没有改变前端或窗口 DTO，因此没有重复运行前端/SDK 行为测试；没有启动 App 操作真实用量目录、迁移旧数据、打包或发布。新库将在用户下次启动本分支构建的 App 时由后台建立。验证通过后，按用户要求创建本地提交。
+
+日志：`/tmp/ccbar-sqlite-cache-tests.log`、`/tmp/ccbar-sqlite-cache-final-tests.log`、`/tmp/ccbar-sqlite-cache-debug.log`。

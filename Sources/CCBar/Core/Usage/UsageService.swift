@@ -456,7 +456,20 @@ final class UsageService {
             if !self.requestIndexDiskLoaded {
                 self.requestIndexDiskLoaded = true
                 let store = UsageRequestIndexStore(directory: self.historyStore.directory)
-                let payload = await Task.detached(priority: .utility) { store.load() }.value
+                let loaded = await Task.detached(priority: .utility) { store.loadResult() }.value
+                let payload: UsageRequestIndexStore.Payload?
+                switch loaded {
+                case .ready(let value): payload = value
+                case .needsRebuild: payload = nil
+                case .unavailable:
+                    // A locked or newer database is not an empty cache. Retry reading
+                    // it later instead of replaying missing logs and publishing zeros.
+                    self.requestIndexDiskLoaded = false
+                    self.requestIndexRetryAfter = Date().addingTimeInterval(30)
+                    self.requestIndexWarmTask = nil
+                    self.requestIndexRevision &+= 1
+                    return
+                }
                 if let payload, self.requestIndexCache == nil {
                     guard let keys = await self.requestIndexFingerprints() else {
                         self.requestIndexDiskLoaded = false
