@@ -1,5 +1,45 @@
 import Foundation
+import CryptoKit
 import Observation
+
+/// Derived request details from currently readable source logs. Daily rollups remain authoritative.
+nonisolated struct UsageRequestRecord: Sendable {
+    let id: String
+    let entry: UsageEntry
+}
+
+nonisolated struct UsageRequestIndexSnapshot: Sendable {
+    let records: [UsageRequestRecord]
+    let revision: String
+    /// Sources whose read failed or for which individual committed records are unavailable.
+    let incompleteApps: Set<UsageApp>
+    /// Read failures that can be retried without a canonical revision change.
+    var retryableApps: Set<UsageApp> = []
+    var isRefreshing = false
+}
+
+nonisolated enum UsageRequestIndex {
+    /// Identical records remain distinct; the ordinal is stable for an unchanged multiset.
+    static func records(from entries: [UsageEntry]) -> [UsageRequestRecord] {
+        let keyed = entries.filter { $0.requestCount >= 0 }.map { entry in
+            let parts = [entry.app.rawValue, entry.conversationKey, entry.model, entry.speed.rawValue,
+                String(entry.timestamp.timeIntervalSince1970.bitPattern),
+                String(entry.inputTokens), String(entry.outputTokens), String(entry.cacheReadTokens),
+                String(entry.cacheCreationTokens), String(entry.requestCount),
+                entry.costUSD.map { NSDecimalNumber(decimal: $0).stringValue } ?? "nil",
+                entry.timing.map { "\($0.firstTokenMs.map(String.init) ?? "nil"):\($0.generationMs):\($0.isEstimated)" } ?? "nil"]
+            let canonical = parts.map { "\($0.utf8.count):\($0)" }.joined()
+            let digest = SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
+            return (digest, entry)
+        }.sorted { $0.0 < $1.0 }
+        var counts: [String: Int] = [:]
+        return keyed.map { digest, entry in
+            let ordinal = counts[digest, default: 0]
+            counts[digest] = ordinal + 1
+            return UsageRequestRecord(id: "\(digest)-\(ordinal)", entry: entry)
+        }
+    }
+}
 
 /// 本地扫描器使用的日志根目录与标题索引。
 ///
@@ -242,6 +282,30 @@ final class UsageService {
     /// 远端价格普通变化的自动重建间隔、自动失败后的重试间隔、自动补价的同模型间隔。
     nonisolated private static let automaticRebuildInterval: TimeInterval = 24 * 3600
 
+    private struct RequestIndexInputToken: Equatable, Sendable {
+        let revision: UInt64
+        let scanRevision: UInt64
+        let timeZone: String
+        let legacy: Bool
+    }
+    private var requestIndexScanRevision: UInt64 = 0
+    private var requestIndexFingerprintsCache: (token: RequestIndexInputToken, keys: [UsageApp: String])?
+    private var requestIndexFingerprintTask: (token: RequestIndexInputToken, task: Task<[UsageApp: String], Never>)?
+    #if DEBUG
+    private(set) var requestIndexFingerprintCalculations = 0
+    #endif
+    private var requestIndexCache: (key: String, snapshot: UsageRequestIndexSnapshot)?
+    private var requestIndexSourceKeys: [UsageApp: String] = [:]
+    private(set) var requestIndexRevision: UInt64 = 0
+    private var requestIndexWarmTask: Task<Void, Never>?
+    private var requestIndexHistoryReady = false
+    private var requestIndexWriteTask: Task<Void, Never>?
+    private var requestIndexDiskLoaded = false
+    private var requestIndexConversationHashes: [String: String] = [:]
+    private var requestIndexRetryAfter: Date?
+    private let requestIndexLoadingRevision = "loading"
+    private var requestIndexTask: (key: String, task: Task<UsageRequestIndexSnapshot, Never>)?
+
     private let historyStore: UsageSnapshotStore
     private let roots: UsageScanRoots
     private let legacyLocations: LegacyUsageHistoryLocations
@@ -262,6 +326,7 @@ final class UsageService {
     #if DEBUG
     /// 在真实扫描完成、提交之前控制交错；只用于隔离测试。
     var candidateReadyForTesting: (() async -> Void)?
+    var scanStartedForIndexTesting: (() async -> Void)?
     var cycleReadyForTesting: (() async -> Void)?
     #endif
 
@@ -307,6 +372,290 @@ final class UsageService {
         self.backfillURL = backfillURL
         self.cursorCacheDirectory = cursorCacheDirectory
     }
+
+    private var requestIndexInputToken: RequestIndexInputToken {
+        RequestIndexInputToken(revision: aggregator.revision, scanRevision: requestIndexScanRevision,
+            timeZone: TimeZone.current.identifier, legacy: usesLegacyCodexModels)
+    }
+
+    private nonisolated static func makeRequestIndexFingerprints(state: ScanState?, buckets: [UsageBucket],
+        timeZone: String, legacy: Bool) -> [UsageApp: String] {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        func encoded<T: Encodable>(_ value: T) -> String {
+            (try? encoder.encode(value)).map { $0.base64EncodedString() } ?? "unavailable"
+        }
+        var keys: [UsageApp: String] = [:]
+        for app in UsageApp.localApps {
+            let rows = timeZone + buckets.filter { $0.app == app }.map(encoded).sorted().joined(separator: ",")
+            let scan: String
+            switch app {
+            case .claude: scan = encoded(state?.claude)
+            case .codex: scan = encoded(state?.codex) + String(legacy)
+            case .pi: scan = encoded(state?.pi)
+            case .opencode: scan = encoded(state?.opencode)
+            case .antigravity: scan = encoded(state?.antigravity)
+            case .kimi: scan = encoded(state?.kimi)
+            case .dsh: scan = encoded(state?.dsh)
+            case .cursor: scan = ""
+            }
+            keys[app] = SHA256.hash(data: Data((rows + scan).utf8))
+                .map { String(format: "%02x", $0) }.joined()
+        }
+        return keys
+    }
+
+
+    private func requestIndexFingerprints() async -> [UsageApp: String]? {
+        let token = requestIndexInputToken
+        if let cached = requestIndexFingerprintsCache, cached.token == token { return cached.keys }
+        let task: Task<[UsageApp: String], Never>
+        if let current = requestIndexFingerprintTask, current.token == token {
+            task = current.task
+        } else {
+            let state = cachedScanState
+            let buckets = aggregator.snapshotLocal()
+            #if DEBUG
+            requestIndexFingerprintCalculations += 1
+            #endif
+            task = Task.detached(priority: .utility) {
+                Self.makeRequestIndexFingerprints(state: state, buckets: buckets, timeZone: token.timeZone,
+                    legacy: token.legacy)
+            }
+            requestIndexFingerprintTask = (token, task)
+        }
+        let keys = await task.value
+        if requestIndexFingerprintTask?.token == token { requestIndexFingerprintTask = nil }
+        guard token == requestIndexInputToken else { return nil }
+        requestIndexFingerprintsCache = (token, keys)
+        return keys
+    }
+
+    /// Returns immediately; the authoritative daily rollups remain available while warming.
+    func requestIndexSnapshotForDisplay() -> UsageRequestIndexSnapshot {
+        guard requestIndexHistoryReady else {
+            return UsageRequestIndexSnapshot(records: [], revision: requestIndexLoadingRevision,
+                incompleteApps: Set(UsageApp.allCases), isRefreshing: true)
+        }
+        let keys = requestIndexFingerprintsCache.flatMap { $0.token == requestIndexInputToken ? $0.keys : nil } ?? [:]
+        let valid = Set(UsageApp.localApps.filter { keys[$0] == requestIndexSourceKeys[$0] && keys[$0] != nil })
+        let cached = requestIndexCache?.snapshot
+        let needsRefresh = !requestIndexDiskLoaded || valid.count < UsageApp.localApps.count || !(cached?.retryableApps.isEmpty ?? true)
+        if needsRefresh { scheduleRequestIndexWarm() }
+        return UsageRequestIndexSnapshot(
+            records: cached?.records ?? [],
+            revision: cached?.revision ?? requestIndexLoadingRevision,
+            incompleteApps: (cached?.incompleteApps ?? Set(UsageApp.allCases)).union(Set(UsageApp.localApps).subtracting(valid)),
+            retryableApps: cached?.retryableApps ?? [], isRefreshing: requestIndexWarmTask != nil)
+    }
+
+    private func scheduleRequestIndexWarm() {
+        guard requestIndexHistoryReady, requestIndexWarmTask == nil, requestIndexRetryAfter.map({ $0 <= Date() }) ?? true else { return }
+        requestIndexWarmTask = Task { [weak self] in
+            guard let self else { return }
+            if !self.requestIndexDiskLoaded {
+                self.requestIndexDiskLoaded = true
+                let store = UsageRequestIndexStore(directory: self.historyStore.directory)
+                let payload = await Task.detached(priority: .utility) { store.load() }.value
+                if let payload, self.requestIndexCache == nil {
+                    guard let keys = await self.requestIndexFingerprints() else {
+                        self.requestIndexDiskLoaded = false
+                        self.requestIndexWarmTask = nil
+                        self.scheduleRequestIndexWarm()
+                        return
+                    }
+                    let capturedToken = self.requestIndexInputToken
+                    let valid = Set(UsageApp.localApps.filter { payload.sourceKeys[$0] == keys[$0] && keys[$0] != nil })
+                    let conversations = self.conversationAggregator.snapshot().infos
+                    let (records, hashes) = await Task.detached(priority: .utility) {
+                        let mapping = Dictionary(conversations.map { (UsageRequestIndexStore.hash($0.key), $0.key) }, uniquingKeysWith: { first, _ in first })
+                        let hashes = Dictionary(payload.rows.map { ($0.id, $0.conversationHash) }, uniquingKeysWith: { first, _ in first })
+                        let records = payload.rows.map { row in
+                            let breakdown: CostBreakdown?
+                            if let a = row.costInput, let b = row.costOutput, let c = row.costRead, let d = row.costCreation {
+                                breakdown = CostBreakdown(input: a, output: b, cacheRead: c, cacheCreation: d)
+                            } else { breakdown = nil }
+                            let entry = UsageEntry(app: row.app, conversationKey: mapping[row.conversationHash] ?? "",
+                                model: row.model, speed: row.speed, day: row.day, timestamp: row.timestamp,
+                                inputTokens: row.input, outputTokens: row.output, cacheReadTokens: row.cacheRead,
+                                cacheCreationTokens: row.cacheCreation, requestCount: row.requests,
+                                costUSD: row.cost, costBreakdown: breakdown, timing: row.timing)
+                            return UsageRequestRecord(id: row.id, entry: entry)
+                        }
+                        return (records, hashes)
+                    }.value
+                    guard self.requestIndexCache == nil, capturedToken == self.requestIndexInputToken else {
+                        self.requestIndexDiskLoaded = false
+                        self.requestIndexWarmTask = nil
+                        self.scheduleRequestIndexWarm()
+                        return
+                    }
+                    self.requestIndexConversationHashes = hashes
+                    let partial = UsageRequestIndexSnapshot(records: records, revision: UUID().uuidString,
+                        incompleteApps: payload.incompleteApps.union(Set(UsageApp.localApps).subtracting(valid)))
+                    self.requestIndexSourceKeys = payload.sourceKeys
+                    let key = UsageApp.localApps.map { keys[$0] ?? "" }.joined(separator: ":")
+                    self.requestIndexCache = (valid.count == UsageApp.localApps.count ? key : "partial", partial)
+                    self.requestIndexRevision &+= 1
+                }
+            }
+            while !Task.isCancelled {
+                while self.isScanning || self.isCycleRebuilding {
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    guard !Task.isCancelled else { self.requestIndexWarmTask = nil; return }
+                }
+                let result = await self.requestIndexSnapshot()
+                guard self.requestIndexCache?.snapshot.revision == result.revision else { continue }
+                if !result.retryableApps.isEmpty { self.requestIndexRetryAfter = Date().addingTimeInterval(30) }
+                self.requestIndexWarmTask = nil
+                self.requestIndexRevision &+= 1
+                return
+            }
+            self.requestIndexWarmTask = nil
+        }
+    }
+
+    private func persistRequestIndex(_ result: UsageRequestIndexSnapshot, keys: [UsageApp: String]) {
+        let hashes = requestIndexConversationHashes
+        let store = UsageRequestIndexStore(directory: historyStore.directory)
+        let previous = requestIndexWriteTask
+        requestIndexWriteTask = Task { [weak self] in
+            let payload = await Task.detached(priority: .utility) {
+                let rows = result.records.map { record in
+                    let entry = record.entry
+                    return UsageRequestIndexStore.Row(id: record.id, conversationHash: entry.conversationKey.isEmpty ? (hashes[record.id] ?? UsageRequestIndexStore.hash("")) : UsageRequestIndexStore.hash(entry.conversationKey),
+                        app: entry.app, model: entry.model, speed: entry.speed, day: entry.day, timestamp: entry.timestamp,
+                        input: entry.inputTokens, output: entry.outputTokens, cacheRead: entry.cacheReadTokens,
+                        cacheCreation: entry.cacheCreationTokens, requests: entry.requestCount, cost: entry.costUSD,
+                        costInput: entry.costBreakdown?.input, costOutput: entry.costBreakdown?.output,
+                        costRead: entry.costBreakdown?.cacheRead, costCreation: entry.costBreakdown?.cacheCreation, timing: entry.timing)
+                }
+                let payload = UsageRequestIndexStore.Payload(version: 1, sourceKeys: keys,
+                    incompleteApps: result.incompleteApps, rows: rows)
+                return payload
+            }.value
+            await previous?.value
+            guard let self, !Task.isCancelled, self.requestIndexSourceKeys == keys,
+                  self.requestIndexCache?.snapshot.revision == result.revision else { return }
+            await Task.detached(priority: .utility) { try? store.save(payload) }.value
+        }
+    }
+
+    /// Reconstructs available details without changing canonical history. Coverage must
+    /// still be reconciled against daily rollups; absent historical files cannot be inferred.
+    func requestIndexSnapshot() async -> UsageRequestIndexSnapshot {
+        guard requestIndexHistoryReady else {
+            return UsageRequestIndexSnapshot(records: [], revision: requestIndexLoadingRevision,
+                incompleteApps: Set(UsageApp.allCases), isRefreshing: true)
+        }
+        for _ in 0..<3 {
+            guard let sourceKeys = await requestIndexFingerprints() else { continue }
+            let inputToken = requestIndexInputToken
+            let key = UsageApp.localApps.map { sourceKeys[$0] ?? "" }.joined(separator: ":")
+            if let cache = requestIndexCache, cache.key == key, cache.snapshot.retryableApps.isEmpty { return cache.snapshot }
+            let task: Task<UsageRequestIndexSnapshot, Never>
+            if let current = requestIndexTask, current.key == key {
+                task = current.task
+            } else {
+                if let current = requestIndexTask {
+                    _ = await current.task.value
+                    if requestIndexTask?.key == current.key { requestIndexTask = nil }
+                    continue
+                }
+                let roots = self.roots
+                let acceptedState = cachedScanState
+                let kimi = acceptedState?.kimi
+                let kimiComplete = kimi != nil
+                let legacyCodex = usesLegacyCodexModels
+                let prior = requestIndexCache?.snapshot
+                let oldKeys = requestIndexSourceKeys
+                let changed = Set(UsageApp.localApps.filter { sourceKeys[$0] != oldKeys[$0] }).union(prior?.retryableApps ?? [])
+                task = Task.detached(priority: .utility) {
+                    let cancelled = UsageRequestIndexSnapshot(records: [], revision: UUID().uuidString,
+                        incompleteApps: Set(UsageApp.allCases))
+                    var records = prior?.records.filter { !changed.contains($0.entry.app) } ?? []
+                    var incomplete = prior?.incompleteApps ?? [.dsh, .cursor]
+                    var retryable: Set<UsageApp> = []
+                    func replace(_ app: UsageApp, _ entries: [UsageEntry], failed: Bool, retry: Bool = true) {
+                        if failed {
+                            records.append(contentsOf: prior?.records.filter { $0.entry.app == app } ?? [])
+                            incomplete.insert(app)
+                            if retry { retryable.insert(app) }
+                        } else {
+                            records.append(contentsOf: UsageRequestIndex.records(from: entries))
+                            incomplete.remove(app)
+                        }
+                    }
+                    if Task.isCancelled { return cancelled }
+                    if changed.contains(.claude) {
+                        let result = ClaudeJSONLScanner.scan(previous: [:], seenMessageIds: [], root: roots.claudeRoot,
+                            conversationIndex: ConversationTitleIndex.ClaudeIndex(titles: [:], projects: [:]),
+                            acceptedBoundary: acceptedState?.claude ?? [:])
+                        replace(.claude, result.entries, failed: result.failedFileCount > 0 || result.hasDeferredMessages)
+                    }
+                    if Task.isCancelled { return cancelled }
+                    if changed.contains(.codex) {
+                        var result = await CodexJSONLScanner.scan(previous: [:], seenTokenIds: [], roots: roots.codexRoots, indexedTitles: [:],
+                            historicalBoundary: acceptedState?.codex ?? [:], priceHistorical: true)
+                        if legacyCodex { result = Self.legacyCodexResult(result) }
+                        replace(.codex, result.entries, failed: result.failedFileCount > 0)
+                    }
+                    if Task.isCancelled { return cancelled }
+                    if changed.contains(.pi) {
+                        let result = PiJSONLScanner.scan(previous: [:], seenEntryIds: [], root: roots.piRoot,
+                            acceptedBoundary: acceptedState?.pi ?? [:])
+                        replace(.pi, result.entries, failed: result.failedFileCount > 0)
+                    }
+                    if Task.isCancelled { return cancelled }
+                    if changed.contains(.opencode) {
+                        let result = OpencodeScanner.scan(previous: nil, databaseURL: roots.opencodeDatabaseURL)
+                        replace(.opencode, result.entries, failed: !result.isComplete,
+                            retry: FileManager.default.fileExists(atPath: roots.opencodeDatabaseURL.path))
+                    }
+                    if Task.isCancelled { return cancelled }
+                    if changed.contains(.antigravity) {
+                        let result = AntigravityScanner.scan(previous: nil, roots: roots.antigravityRoots)
+                        replace(.antigravity, result.entries, failed: !result.isComplete)
+                    }
+                    if Task.isCancelled { return cancelled }
+                    if changed.contains(.kimi) {
+                        replace(.kimi, kimi.map { KimiSessionScanner.committedEntries(from: $0) } ?? [],
+                            failed: kimi == nil || !kimiComplete, retry: false)
+                    }
+                    return UsageRequestIndexSnapshot(records: records, revision: UUID().uuidString,
+                        incompleteApps: incomplete, retryableApps: retryable)
+                }
+                requestIndexTask = (key, task)
+            }
+            let result = await task.value
+            if requestIndexTask?.key == key { requestIndexTask = nil }
+            if inputToken == requestIndexInputToken {
+                if !isScanning {
+                    requestIndexCache = (key, result)
+                    requestIndexSourceKeys = sourceKeys.filter { !result.retryableApps.contains($0.key) }
+                        .merging(requestIndexSourceKeys.filter { result.retryableApps.contains($0.key) }) { new, _ in new }
+                    persistRequestIndex(result, keys: requestIndexSourceKeys)
+                }
+                return result
+            }
+        }
+        return UsageRequestIndexSnapshot(records: [], revision: UUID().uuidString,
+            incompleteApps: Set(UsageApp.allCases))
+    }
+
+    isolated deinit {
+        requestIndexTask?.task.cancel()
+        requestIndexFingerprintTask?.task.cancel()
+        requestIndexWarmTask?.cancel()
+        requestIndexWriteTask?.cancel()
+    }
+
+    #if DEBUG
+    func waitForRequestIndexForTesting() async {
+        await requestIndexWarmTask?.value
+        await requestIndexWriteTask?.value
+    }
+    #endif
 
     /// 统计页读取的完整 Cursor 自然日覆盖范围。只有身份匹配的独立远端缓存会进入此集合。
     var cursorUsageCoveredDayRanges: [CursorUsageDayRange] {
@@ -367,7 +716,9 @@ final class UsageService {
 
     /// 上一轮成功提交的 ScanState 常驻内存，避免每轮扫描都从磁盘重读重解码。
     /// 冷启动首轮才从快照恢复；快照没有可信进度时为 nil，此时不允许续扫。
-    private var cachedScanState: ScanState?
+    private var cachedScanState: ScanState? {
+        didSet { requestIndexScanRevision &+= 1 }
+    }
 
     var hasActiveOperationsForTermination: Bool {
         isScanning || isCycleRebuilding || isRefreshingPricingCatalog
@@ -507,6 +858,8 @@ final class UsageService {
         publishTotals()
         // 远端价格目录后台刷新：非阻塞，isDue 内部判断是否真的需要发请求，刷新结果由下次扫描自然拾取。
         PricingCatalogStore.shared.refreshIfNeeded()
+        requestIndexHistoryReady = true
+        scheduleRequestIndexWarm()
     }
 
     /// 只有从未建立新存储且没有新快照证据时，才允许旧格式迁移。
@@ -946,6 +1299,9 @@ final class UsageService {
         }
         isScanning = true
         defer { isScanning = false }
+        #if DEBUG
+        await scanStartedForIndexTesting?()
+        #endif
 
         if storeWriteDisabled { return }
         repeat {
@@ -2628,6 +2984,7 @@ final class UsageService {
             lastError = nil
         }
         publishTotals()
+        scheduleRequestIndexWarm()
 
         let elapsed = String(format: "%.2fs", Date().timeIntervalSince(started))
         AppLog.info(.usage, """

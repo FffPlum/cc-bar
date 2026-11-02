@@ -194,6 +194,7 @@ final class ConversationAggregator {
         var grouped: [String: [ConversationUsageBucket]] = [:]
         for bucket in buckets.values where bucket.day >= request.from && bucket.day < request.to {
             if let app = request.app, bucket.app != app { continue }
+            if let apps = request.apps, !apps.contains(bucket.app) { continue }
             grouped[subtasks.rootKey(bucket.conversationKey), default: []].append(bucket)
         }
 

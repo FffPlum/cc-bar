@@ -149,7 +149,13 @@ cc-bar 展示两类数据：**订阅额度**直连各服务官方接口获取剩
 
 ## 🔧 从源码构建
 
-需要完整版 Xcode（仅 Command Line Tools 无法构建 SwiftUI 资产）。
+需要完整版 Xcode（仅 Command Line Tools 无法构建 SwiftUI 资产）和 Node.js 22 或兼容版本。首次构建及前端 lockfile 变化后，先运行：
+
+```bash
+./scripts/build-web-interface.sh --install
+```
+
+该命令安装锁定依赖并构建 React 主窗口资源。后续 Xcode 构建自动更新资源，不会联网安装 npm 依赖。
 
 ### 本地日常调试
 在 Xcode 中打开 `ccbar.xcodeproj`，Scheme 选择 `ccbar`，目标设备选「My Mac」，按下 <kbd>⌘</kbd> + <kbd>R</kbd> 运行。

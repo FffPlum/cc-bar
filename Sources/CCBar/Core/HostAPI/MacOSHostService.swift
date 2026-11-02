@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Observation
+import CCBarConfiguration
 
 /// The OS operations are injectable, so tests never open panels or change login items.
 @MainActor
@@ -38,7 +39,30 @@ final class MacOSHostService {
     private var listeners: [UUID: (HostEvent) -> Void] = [:]
     private var observationGeneration = 0
     private var revision: UInt64 = 0
+    private var windowActive = false
+    private var notificationTokens: [NSObjectProtocol] = []
+    private var appearanceObservation: NSKeyValueObservation?
+    private lazy var presenter = HostWindowPresenter(state: state, settings: settings)
+    private lazy var applications = HostWindowApplicationsService(state: state, settings: settings)
+    private lazy var accounts: HostWindowAccountsService = {
+        let service = HostWindowAccountsService(state: state, settings: settings)
+        service.didChange = { [weak self] in self?.emit(["quota", "applications", "authorizations"]) }
+        return service
+    }()
+    private lazy var usage: HostWindowUsageService = {
+        let service = HostWindowUsageService(state: state, settings: settings)
+        service.didChange = { [weak self] in self?.emit(["usage"]) }
+        return service
+    }()
+    private lazy var windowSettings = HostWindowSettingsService(state: state, settings: settings, usageStatus: { [weak self] in
+        self?.usage.statusJSON() ?? .object([:])
+    })
     private let baseCapabilities: Set<String> = ["host.describe", "usage.overview", "quota.snapshot", "quota.refresh", "settings.get", "settings.update"]
+    private var capabilities: Set<String> {
+        baseCapabilities.union(platform.capabilities).union(["window.bootstrap", "window.navigate"])
+            .union(HostWindowApplicationsService.methods).union(HostWindowAccountsService.methods)
+            .union(HostWindowUsageService.methods).union(HostWindowSettingsService.methods)
+    }
 
     init(state: AppState, settings: SettingsStore, platform: HostPlatformActions? = nil,
          refreshQuota: (() async -> Void)? = nil) {
@@ -60,6 +84,35 @@ final class MacOSHostService {
         if listeners.isEmpty { observationGeneration += 1 }
     }
 
+    func invalidate() {
+        if windowActive { accounts.invalidate(); usage.invalidate() }
+        listeners.removeAll()
+        observationGeneration += 1
+        for token in notificationTokens { NotificationCenter.default.removeObserver(token) }
+        notificationTokens.removeAll()
+        appearanceObservation = nil
+    }
+
+    private func activateWindow() {
+        guard !windowActive else { return }
+        windowActive = true
+        notificationTokens.append(NotificationCenter.default.addObserver(forName: PricingCatalogStore.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.emit(["pricing", "usage", "settings"]) }
+        })
+        appearanceObservation = NSApp?.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in self?.emit(["settings"]) }
+        }
+        observationGeneration += 1
+        observe(generation: observationGeneration)
+    }
+
+    private func emit(_ domains: [String]) {
+        guard !listeners.isEmpty else { return }
+        revision &+= 1
+        let event = HostEvent(revision: String(revision), domains: domains)
+        for listener in Array(listeners.values) { listener(event) }
+    }
+
     private func observe(generation: Int) {
         guard generation == observationGeneration, !listeners.isEmpty else { return }
         // Observation tracks writes from native UI and background scans as well as host calls.
@@ -72,12 +125,30 @@ final class MacOSHostService {
             _ = settings.serviceOrder
             _ = settings.cursorAccountDetected
             _ = settings.commandCodeAccountDetected
+            if windowActive {
+                _ = state.mainTab
+                _ = state.usageService.requestIndexRevision
+                _ = state.usageService.conversationAggregator.revision
+                _ = state.usageService.cycleAggregator.snapshot()
+                _ = state.quotaCycles
+                _ = state.quotaHistory
+                _ = state.applications.snapshots
+                _ = state.applications.detected
+                _ = state.applications.logins
+                _ = state.applications.errors
+                _ = state.applications.addedApplications
+                _ = state.authorizations.accounts
+                _ = state.authorizations.providers
+                _ = state.authorizations.error
+                _ = state.applicationImportError
+                _ = usage.statusJSON()
+                accounts.trackChanges()
+                windowSettings.trackChanges()
+            }
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, self.observationGeneration == generation, !self.listeners.isEmpty else { return }
-                self.revision &+= 1
-                let event = HostEvent(revision: String(self.revision), domains: ["usage", "quota", "settings"])
-                for listener in Array(self.listeners.values) { listener(event) }
+                self.emit(self.windowActive ? ["usage", "quota", "settings", "navigation", "applications", "authorizations", "notifications", "updates"] : ["usage", "quota", "settings"])
                 self.observe(generation: generation)
             }
         }
@@ -92,12 +163,43 @@ final class MacOSHostService {
     }
 
     private func execute(_ method: String, _ params: [String: HostJSON]) async throws -> HostJSON {
-        let capabilities = baseCapabilities.union(platform.capabilities)
+        let capabilities = self.capabilities
         guard capabilities.contains(method) else {
             if method.hasPrefix("platform.") { throw HostError(code: "unavailable", message: "Capability is unavailable") }
             throw HostError(code: "unknown_method", message: "Unknown method")
         }
+        if !baseCapabilities.contains(method), !platform.capabilities.contains(method) {
+            activateWindow()
+            if HostWindowApplicationsService.methods.contains(method) { return try applications.handle(method, params: params) }
+            if HostWindowAccountsService.methods.contains(method) { return try await accounts.handle(method, params: params) }
+            if HostWindowUsageService.methods.contains(method) { return try await usage.handle(method, params: params) }
+            if HostWindowSettingsService.methods.contains(method) { return try await windowSettings.handle(method, params: params) }
+        }
         switch method {
+        case "window.bootstrap":
+            try keys(params, allowed: [])
+            return bootstrapJSON()
+        case "window.navigate":
+            try keys(params, allowed: ["route"])
+            let route = try HostWindowValidation.object(params, "route")
+            let page = try HostWindowValidation.string(route, "page")
+            switch page {
+            case "application":
+                try keys(route, allowed: ["page", "application"])
+                guard let id = try HostWindowValidation.string(route, "application"),
+                      let app = AgentApplication(rawValue: id), state.applications.sidebarApplications.contains(app) else { throw invalid() }
+                state.mainTab = .application(app)
+            case "applications", "quotaManagement", "stats", "settings":
+                try keys(route, allowed: ["page"])
+                switch page {
+                case "applications": state.mainTab = .applications
+                case "quotaManagement": state.mainTab = .quotaManagement
+                case "stats": state.mainTab = .stats
+                default: state.mainTab = .settings
+                }
+            default: throw invalid()
+            }
+            return bootstrapJSON()
         case "host.describe":
             try keys(params, allowed: [])
             return .object(["platform": .string("macos"), "timeZone": .string(TimeZone.current.identifier), "capabilities": .array(capabilities.sorted().map(HostJSON.string))])
@@ -131,6 +233,12 @@ final class MacOSHostService {
             return .object(["enabled": .bool(result.0), "requiresApproval": .bool(result.1)])
         default: throw HostError(code: "unknown_method", message: "Unknown method")
         }
+    }
+
+    private func bootstrapJSON() -> HostJSON {
+        guard case .object(var value) = presenter.bootstrapJSON() else { return .object([:]) }
+        value["capabilities"] = .array(capabilities.sorted().map(HostJSON.string))
+        return .object(value)
     }
 
     private func keys(_ params: [String: HostJSON], allowed: Set<String>) throws {

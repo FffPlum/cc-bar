@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
     private var menuController: MenuBarController?
     private var mainWindow: NSWindow?
+    private var reactWindowController: ReactWindowController?
     private var onboardingWindow: NSWindow?
     private var openStatisticsWindow: (() -> Void)?
     private var shouldOpenStatisticsWhenReady = false
@@ -48,11 +49,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   backing: .buffered, defer: false)
             window.title = "CCBar"
             window.isReleasedWhenClosed = false
+            window.contentMinSize = NSSize(width: 1040, height: 520)
             window.delegate = self
-            window.contentView = NSHostingView(rootView: MainWindowRootView().environment(appState))
+            if ReactWindowController.isEnabled {
+                let controller = ReactWindowController(service: MacOSHostService(state: appState, settings: .shared))
+                reactWindowController = controller
+                window.contentView = controller.contentView
+                controller.load()
+            } else {
+                window.contentView = NSHostingView(rootView: MainWindowRootView().environment(appState))
+            }
             window.center()
             mainWindow = window
         }
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         mainWindow?.makeKeyAndOrderFront(nil)
     }
@@ -145,8 +155,11 @@ extension AppDelegate: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
         if window === mainWindow {
+            reactWindowController?.dispose()
+            reactWindowController = nil
             window.contentView = nil
             mainWindow = nil
+            NSApp.setActivationPolicy(.accessory)
         } else if window === onboardingWindow {
             window.contentView = nil
             onboardingWindow = nil

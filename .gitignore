@@ -16,6 +16,7 @@ build/
 build-dev/
 dist/
 DerivedData/
+Sources/CCBar/Resources/WebInterface/
 *.xcuserstate
 *.xcuserdatad/
 xcuserdata/

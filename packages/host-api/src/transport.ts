@@ -1,4 +1,5 @@
-export type Domain = "usage" | "quota" | "settings";
+export type Domain = "usage" | "quota" | "settings" | "navigation" | "applications" | "authorizations" | "pricing" | "notifications" | "updates" | "appearance";
+const domains: readonly Domain[] = ["usage", "quota", "settings", "navigation", "applications", "authorizations", "pricing", "notifications", "updates", "appearance"];
 export interface StateChanged {
   version: 1;
   event: "state.changed";
@@ -57,7 +58,7 @@ export function parseEvent(x: unknown): StateChanged | undefined {
     x.event !== "state.changed" ||
     typeof x.revision !== "string" ||
     !Array.isArray(x.domains) ||
-    !x.domains.every((d) => d === "usage" || d === "quota" || d === "settings")
+    !x.domains.every((d): d is Domain => typeof d === "string" && domains.includes(d as Domain))
   )
     return undefined;
   return x as unknown as StateChanged;

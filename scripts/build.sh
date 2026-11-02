@@ -77,10 +77,13 @@ except ValueError:
 if len(key) != 32:
     sys.exit("SPARKLE_PUBLIC_ED_KEY 必须是 32 字节 Ed25519 公钥")'
 
-echo "==> [1/4] 清理旧构建"
+echo "==> [1/5] 构建并校验 React 静态资源"
+./scripts/build-web-interface.sh
+
+echo "==> [2/5] 清理旧构建"
 rm -rf "$BUILD_DIR"
 
-echo "==> [2/4] 编译(Release,由脚本统一签名)"
+echo "==> [3/5] 编译(Release,由脚本统一签名)"
 xcodebuild \
   -project ccbar.xcodeproj \
   -scheme ccbar \
@@ -88,9 +91,14 @@ xcodebuild \
   -derivedDataPath "$BUILD_DIR" \
   CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
   SPARKLE_PUBLIC_ED_KEY="$SPARKLE_PUBLIC_ED_KEY" \
+  CCBAR_WEB_INTERFACE_BUILT=1 \
   "${XCODE_BUILD_ARGS[@]}"
 
 [[ -d "$APP" ]] || { echo "❌ 构建产物未找到: $APP" >&2; exit 1; }
+[[ -s "$APP/Contents/Resources/WebInterface/index.html" ]] || {
+  echo "❌ React 静态资源未嵌入 App" >&2
+  exit 1
+}
 APP_ARCHS="$(lipo -archs "$APP/Contents/MacOS/CCBar")"
 echo "==> 主程序架构: $APP_ARCHS"
 if [[ -n "$BUILD_ARCH" && "$APP_ARCHS" != "$BUILD_ARCH" ]]; then
@@ -98,7 +106,7 @@ if [[ -n "$BUILD_ARCH" && "$APP_ARCHS" != "$BUILD_ARCH" ]]; then
   exit 1
 fi
 
-echo "==> [3/4] 签名并校验"
+echo "==> [4/5] 签名并校验"
 xattr -cr "$APP"
 
 # 不用 --deep 签名；嵌套组件需要各自的 entitlements，必须由内向外封装。
@@ -127,7 +135,7 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 echo "   ✅ 签名校验通过"
 codesign -dv --verbose=2 "$APP" 2>&1 | grep -E "Identifier|Signature" || true
 
-echo "==> [4/4] 打包 DMG 和 zip"
+echo "==> [5/5] 打包 DMG 和 zip"
 mkdir -p "$OUT_DIR"
 ZIP="$OUT_DIR/CCBar.app.zip"
 DMG="$OUT_DIR/CCBar.dmg"

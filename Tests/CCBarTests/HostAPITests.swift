@@ -53,6 +53,19 @@ final class HostAPITests: XCTestCase {
         XCTAssertEqual(version.error?.code, "unsupported_version")
     }
 
+    func testBootstrapVisibleUsageServicesFollowSettingsOrder() async throws {
+        let suite = "HostAPITests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsStore(defaults: defaults)
+        for app in UsageApp.allCases { settings.setUsageServiceVisible(app == .codex || app == .claude, for: app) }
+        let service = MacOSHostService(state: AppState(), settings: settings)
+        let response = await service.handle(HostRequest(version: 1, id: "bootstrap", method: "window.bootstrap", params: [:]))
+        guard case .object(let result) = response.result else { return XCTFail("Missing bootstrap") }
+        XCTAssertEqual(result["visibleUsageServices"], .array(settings.visibleUsageApps.map { .string($0.rawValue) }))
+        XCTAssertEqual(Set(settings.visibleUsageApps), Set([.codex, .claude]))
+    }
+
     func testSubscriptionObservesExternalChangeAndStops() async throws {
         let suite = "HostAPITests.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -97,7 +110,7 @@ final class HostAPITests: XCTestCase {
         XCTAssertEqual(description["platform"], .string("macos"))
         XCTAssertEqual(description["timeZone"], .string(TimeZone.current.identifier))
         XCTAssertEqual(Set(capabilities.compactMap { if case .string(let value) = $0 { return value }; return nil }),
-                       Set(["host.describe", "usage.overview", "quota.snapshot", "quota.refresh", "settings.get", "settings.update", "platform.pickDirectory", "platform.revealPath", "platform.setLaunchAtLogin"]))
+                       Set(["host.describe", "usage.overview", "quota.snapshot", "quota.refresh", "settings.get", "settings.update", "platform.pickDirectory", "platform.revealPath", "platform.setLaunchAtLogin", "window.bootstrap", "window.navigate"]).union(HostWindowApplicationsService.methods).union(HostWindowAccountsService.methods).union(HostWindowUsageService.methods).union(HostWindowSettingsService.methods))
         let pick = await service.handle(request("platform.pickDirectory"))
         XCTAssertEqual(pick.result, .object(["path": .string("/chosen")]))
         XCTAssertEqual(selected, 1)

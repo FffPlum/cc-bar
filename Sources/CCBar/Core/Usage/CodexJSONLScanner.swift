@@ -96,6 +96,7 @@ enum CodexJSONLScanner {
         indexedTitles: [String: String],
         minimumMtime: Date? = nil,
         historicalBoundary: [String: ScanFileState]? = nil,
+        priceHistorical: Bool = false,
         onProgress: ScanProgressCallback? = nil
     ) async -> Result {
         var filesByID: [String: JSONLFileDescriptor] = [:]
@@ -167,7 +168,7 @@ enum CodexJSONLScanner {
                         batchResults.append((
                             index,
                             scanSingleFile(file: file, previous: previous, indexedTitles: indexedTitles,
-                                           boundary: historicalBoundary?[stateKey])
+                                           boundary: historicalBoundary?[stateKey], priceHistorical: priceHistorical)
                         ))
                     } else {
                         group.addTask {
@@ -175,7 +176,7 @@ enum CodexJSONLScanner {
                                 file: file,
                                 previous: previous,
                                 indexedTitles: indexedTitles,
-                                boundary: historicalBoundary?[stateKey]
+                                boundary: historicalBoundary?[stateKey], priceHistorical: priceHistorical
                             ))
                         }
                     }
@@ -298,7 +299,8 @@ enum CodexJSONLScanner {
         file: JSONLFileDescriptor,
         previous: [String: ScanFileState],
         indexedTitles: [String: String],
-        boundary: ScanFileState? = nil
+        boundary: ScanFileState? = nil,
+        priceHistorical: Bool = false
     ) -> CodexFileScanResult {
         let url = file.url
         let path = file.path
@@ -489,7 +491,7 @@ enum CodexJSONLScanner {
                 let entryTiming = timing.pendingOutputTokens == output ? timing.pending : nil
                 timing.pending = nil
                 timing.pendingOutputTokens = nil
-                let cost = boundary == nil ? Pricing.costBreakdown(
+                let cost = (boundary == nil || priceHistorical) ? Pricing.costBreakdown(
                     app: .codex,
                     model: model,
                     speed: currentSpeed,

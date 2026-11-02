@@ -69,9 +69,21 @@ export interface LaunchAtLoginResult {
   enabled: boolean;
   requiresApproval: boolean;
 }
+function createRequestPrefix(): string {
+  const crypto = globalThis.crypto;
+  if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
+  if (typeof crypto?.getRandomValues === "function") {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0"));
+    return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 export class HostAPI {
   private nextId = 0;
-  private readonly prefix = globalThis.crypto.randomUUID();
+  private readonly prefix = createRequestPrefix();
   private disposed = false;
   private readonly pending = new Set<(error: HostError) => void>();
   private readonly listeners = new Set<(event: StateChanged) => void>();
@@ -85,7 +97,7 @@ export class HostAPI {
       if (event) for (const listener of [...this.listeners]) listener(event);
     });
   }
-  request<T>(method: string, params: object = {}): Promise<T> {
+  request<T>(method: string, params: object = {}, timeoutMs = this.timeoutMs): Promise<T> {
     if (this.disposed)
       return Promise.reject(new HostError("disposed", "Host API is disposed"));
     const id = `${this.prefix}:${++this.nextId}`;
@@ -101,7 +113,7 @@ export class HostAPI {
       const cancel = (error: HostError) => finish(() => reject(error));
       const timer = setTimeout(
         () => cancel(new HostError("timeout", "Host request timed out")),
-        this.timeoutMs,
+        timeoutMs,
       );
       this.pending.add(cancel);
       Promise.resolve()

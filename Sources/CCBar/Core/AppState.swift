@@ -22,8 +22,14 @@ nonisolated struct AppTerminationError: Error, LocalizedError {
 @Observable
 @MainActor
 final class AppState {
-    let authorizations = AuthorizationStore()
-    let applications = ApplicationStore()
+    let authorizations: AuthorizationStore
+    let applications: ApplicationStore
+
+    init(authorizations: AuthorizationStore? = nil, applications: ApplicationStore? = nil, usageService: UsageService? = nil) {
+        self.authorizations = authorizations ?? AuthorizationStore()
+        self.applications = applications ?? ApplicationStore()
+        self.usageService = usageService ?? UsageService()
+    }
     var applicationImportError: String?
     var codexAccount: CodexAccount? {
         didSet {
@@ -347,7 +353,7 @@ final class AppState {
     /// Kimi 单独记录失败,不参与原三家的全失败判定。
     var kimiServiceStatusUnreachable = false
 
-    let usageService = UsageService()
+    let usageService: UsageService
     private let scheduler = Scheduler()
     private var codexAlertEntryVersion: UInt64 = 0
     private var primaryAlertEntryVersions: [QuotaApp: UInt64] = [:]

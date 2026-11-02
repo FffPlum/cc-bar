@@ -1,0 +1,319 @@
+import { useState } from "react";
+import type {
+  DashboardRequests,
+  DashboardRow,
+  UsageDashboard,
+} from "@ccbar/host-api/window";
+import { useHost } from "@/host/host-context";
+import { useTranslation } from "@/lib/i18n";
+import { serviceDisplayName } from "@/lib/display";
+import { Button } from "@/components/ui/button";
+
+type Tab = "requests" | "providers" | "models";
+type Field =
+  | "title"
+  | "time"
+  | "requests"
+  | "cost"
+  | "tokens"
+  | "success"
+  | "speed"
+  | "first";
+export function DashboardTable({
+  data,
+  tab,
+  onTabChange,
+  requests,
+  error,
+  loading,
+  cursor,
+  next,
+  previous,
+  reset,
+  requestSort,
+  onRequestSort,
+}: {
+  data: UsageDashboard;
+  tab: Tab;
+  onTabChange: (tab: Tab) => void;
+  requests: DashboardRequests | null;
+  error: string | null;
+  loading: boolean;
+  cursor?: string;
+  next: (cursor: string) => void;
+  previous: () => void;
+  reset: () => void;
+  requestSort: { sort: "time" | "cost" | "tokens"; direction: "asc" | "desc" };
+  onRequestSort: (value: {
+    sort: "time" | "cost" | "tokens";
+    direction: "asc" | "desc";
+  }) => void;
+}) {
+  const { bootstrap } = useHost();
+  const t = useTranslation();
+  const [field, setField] = useState<Field>("requests");
+  const [ascending, setAscending] = useState(false);
+  const setSort = (value: Field) => {
+    if (field === value) setAscending(!ascending);
+    else {
+      setField(value);
+      setAscending(value === "title" || value === "time");
+    }
+  };
+  const compare = (a: string | number | null, b: string | number | null) => {
+    if (a === null) return b === null ? 0 : 1;
+    if (b === null) return -1;
+    const n =
+      typeof a === "string" && typeof b === "string"
+        ? a.localeCompare(b)
+        : Number(a) - Number(b);
+    return ascending ? n : -n;
+  };
+  const aggValue = (row: DashboardRow): string | number | null =>
+    field === "title"
+      ? row.title
+      : field === "requests"
+        ? row.totals.requestCount
+        : field === "cost"
+          ? Number(row.totals.costUSD)
+          : field === "tokens"
+            ? row.totals.totalTokens
+            : field === "success"
+              ? row.successRate
+              : field === "speed"
+                ? row.totals.outputTokensPerSecond
+                : field === "first"
+                  ? row.totals.averageFirstTokenSeconds
+                  : null;
+  const rows = [
+    ...(tab === "models" ? data.modelRows : data.providerRows),
+  ].sort((a, b) => compare(aggValue(a), aggValue(b)));
+  const logs = requests?.rows ?? [];
+  const requestHeading = (label: string, sort: "time" | "cost" | "tokens") => (
+    <button
+      type="button"
+      onClick={() =>
+        onRequestSort({
+          sort,
+          direction:
+            requestSort.sort === sort && requestSort.direction === "desc"
+              ? "asc"
+              : "desc",
+        })
+      }
+    >
+      {label}
+      {requestSort.sort === sort
+        ? requestSort.direction === "asc"
+          ? " ↑"
+          : " ↓"
+        : ""}
+    </button>
+  );
+  const heading = (label: string, key: Field) => (
+    <button type="button" onClick={() => setSort(key)}>
+      {label}
+      {field === key ? (ascending ? " ↑" : " ↓") : ""}
+    </button>
+  );
+  return (
+    <section className="overflow-hidden rounded-lg border">
+      <div
+        className="flex gap-5 border-b px-4"
+        role="tablist"
+        aria-label={t("Usage details", "用量明细")}
+      >
+        {(["requests", "providers", "models"] as const).map((item) => (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === item}
+            key={item}
+            onClick={() => {
+              onTabChange(item);
+              setField(item === "requests" ? "time" : "requests");
+              setAscending(false);
+            }}
+            className={`py-3 ${tab === item ? "border-b-2 border-foreground font-semibold" : "text-muted-foreground"}`}
+          >
+            {item === "requests"
+              ? t("Request logs", "请求日志")
+              : item === "providers"
+                ? t("Providers", "供应商")
+                : t("Models", "模型")}{" "}
+            <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+              {item === "requests"
+                ? requests?.coverage.incomplete
+                  ? "—"
+                  : (requests?.totalCount ?? "—")
+                : item === "providers"
+                  ? data.providerRows.length
+                  : data.modelRows.length}
+            </span>
+          </button>
+        ))}
+      </div>
+      {tab === "requests" ? (
+        <div>
+          {loading && !requests && (
+            <p role="status" className="p-3 text-muted-foreground">
+              {t("Loading request records…", "正在加载请求记录…")}
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="p-3">
+              {error}{" "}
+              {cursor && (
+                <Button size="sm" variant="outline" onClick={reset}>
+                  {t("Return to first page", "返回首页")}
+                </Button>
+              )}
+            </p>
+          )}
+          {requests?.coverage.incomplete && (
+            <p className="px-4 py-2 text-muted-foreground">
+              {t(
+                "Request records are incomplete or unavailable.",
+                "请求记录不完整或暂不可用。",
+              )}
+            </p>
+          )}
+          <table className="w-full table-fixed text-left">
+            <thead className="bg-muted text-muted-foreground">
+              <tr>
+                {[
+                  requestHeading(t("Time", "时间"), "time"),
+                  t("Application", "应用"),
+                  t("Provider", "供应商"),
+                  t("Model", "模型"),
+                  requestHeading(t("Cost", "成本"), "cost"),
+                  requestHeading("Tokens", "tokens"),
+                ].map((label, i) => (
+                  <th key={i} className="px-3 py-2 font-medium">
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((row) => (
+                <tr key={row.id} className="border-t">
+                  <td className="px-3 py-2">
+                    {new Date(row.timestamp).toLocaleString(
+                      bootstrap.resolvedLanguage,
+                      { timeZone: bootstrap.timeZone },
+                    )}
+                  </td>
+                  <td className="px-3">{serviceDisplayName(row.service)}</td>
+                  <td
+                    className="truncate px-3"
+                    title={
+                      data.facets.sources.find(
+                        (source) => source.id === row.sourceID,
+                      )?.title ??
+                      (row.service === "cursor"
+                        ? t("Remote metering", "远端计量")
+                        : t("Session logs", "会话日志"))
+                    }
+                  >
+                    {data.facets.sources.find(
+                      (source) => source.id === row.sourceID,
+                    )?.title ??
+                      (row.service === "cursor"
+                        ? t("Remote metering", "远端计量")
+                        : t("Session logs", "会话日志"))}
+                  </td>
+                  <td className="truncate px-3" title={row.modelID}>
+                    {row.modelID}
+                  </td>
+                  <td className="px-3">{row.totals.costDisplay}</td>
+                  <td className="px-3">
+                    {row.totals.totalTokens.toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {requests && !logs.length && !requests.coverage.incomplete && (
+            <p className="p-4 text-muted-foreground">
+              {t("No requests in this period.", "该时段没有请求记录。")}
+            </p>
+          )}
+          {(cursor || requests?.nextCursor) && (
+            <div className="flex items-center gap-2 p-3">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!cursor}
+                onClick={previous}
+              >
+                {t("Previous", "上一页")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!requests?.nextCursor}
+                onClick={() =>
+                  requests?.nextCursor && next(requests.nextCursor)
+                }
+              >
+                {t("Next", "下一页")}
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <table className="w-full table-fixed text-left">
+          <thead className="bg-muted text-muted-foreground">
+            <tr>
+              {[
+                heading(t("Name", "名称"), "title"),
+                heading(t("Requests", "请求数"), "requests"),
+                heading(t("Cost", "成本"), "cost"),
+                heading("Tokens", "tokens"),
+                heading(t("Success", "成功率"), "success"),
+                heading(t("Speed", "速度"), "speed"),
+                heading(t("First token", "首字"), "first"),
+              ].map((label, i) => (
+                <th key={i} className="px-3 py-2 font-medium">
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id} className="border-t">
+                <td className="truncate px-3 py-3" title={row.title}>
+                  {row.title}
+                </td>
+                <td className="px-3">
+                  {row.totals.requestCount.toLocaleString()}
+                </td>
+                <td className="px-3">{row.totals.costDisplay}</td>
+                <td className="px-3">
+                  {row.totals.totalTokens.toLocaleString()}
+                </td>
+                <td className="px-3">
+                  {row.successRate == null
+                    ? "—"
+                    : `${(row.successRate * 100).toFixed(1)}%`}
+                </td>
+                <td className="px-3">
+                  {row.totals.outputTokensPerSecond == null
+                    ? "—"
+                    : `${row.totals.usesEstimatedSpeed ? "≈" : ""}${row.totals.outputTokensPerSecond.toFixed(1)} tok/s`}
+                </td>
+                <td className="px-3">
+                  {row.totals.averageFirstTokenSeconds == null
+                    ? "—"
+                    : `${row.totals.averageFirstTokenSeconds.toFixed(1)}s`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}

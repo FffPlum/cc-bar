@@ -51,6 +51,7 @@ enum ClaudeJSONLScanner {
         root: URL,
         conversationIndex: ConversationTitleIndex.ClaudeIndex,
         minimumMtime: Date? = nil,
+        acceptedBoundary: [String: ScanFileState]? = nil,
         onProgress: ScanProgressCallback? = nil
     ) -> Result {
         let enumeration = JSONLDirectoryEnumerator.enumerate(at: root, minimumMtime: minimumMtime)
@@ -89,6 +90,13 @@ enum ClaudeJSONLScanner {
             }
             let url = file.url
             let path = file.path
+            if let acceptedBoundary {
+                guard let boundary = acceptedBoundary[path], boundary.offset > 0 else { continue }
+                if !file.isZstd && file.size < boundary.offset {
+                    failedFileCount += 1
+                    continue
+                }
+            }
             let projectContainer = projectContainerName(root: root, file: url)
             let fileSessionKey = "claude:\(url.deletingPathExtension().lastPathComponent)"
             let mtime = file.modificationTime
@@ -157,7 +165,7 @@ enum ClaudeJSONLScanner {
             // 文件开头复制过来的、已计入别的对话的最后一条消息（只认带本文件 sessionId 的行）。
             var lastCopiedDigest: UInt64?
             // 按批流式解析：单文件不再把整份内容和全部行同时读进内存。
-            let outcome = JSONLLineReader.streamLines(url: url, fromOffset: state.offset) { batch in
+            let outcome = JSONLLineReader.streamLines(url: url, fromOffset: state.offset, throughOffset: acceptedBoundary?[path]?.offset) { batch in
                 for line in batch {
                     let lineStart = lineEnd
                     lineEnd += UInt64(line.utf8.count) + 1
@@ -221,6 +229,10 @@ enum ClaudeJSONLScanner {
             var newOffset: UInt64
             switch outcome {
             case let .success(offset):
+                if let boundary = acceptedBoundary?[path], offset != boundary.offset {
+                    failedFileCount += 1
+                    continue
+                }
                 newOffset = offset
             case .missing:
                 // 枚举后被归档或清理是正常并发变化；本轮保留旧 watermark 且不弹告警，
@@ -235,7 +247,7 @@ enum ClaudeJSONLScanner {
             }
             // 文件已有一段时间没再写入，末尾的消息不会再追加：一轮对话的最终回答后面常常
             // 没有别的行，不在这里结束它就永远拿不到计时（入账后 message.id 已进 seen）。
-            if Date().timeIntervalSince1970 - mtime >= TimingTracker.idleCloseSeconds
+            if acceptedBoundary != nil || Date().timeIntervalSince1970 - mtime >= TimingTracker.idleCloseSeconds
                 || timingTracker.openMessageLooksComplete {
                 timingTracker.close()
             } else if let openID = timingTracker.openMessage, candidates[openID] != nil,

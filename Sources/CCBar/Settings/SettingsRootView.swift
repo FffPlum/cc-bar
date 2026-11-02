@@ -1346,7 +1346,7 @@ private struct PiTimingGuideButton: View {
 }
 
 /// 插件说明全文：交给 AI 为 Pi 编写插件，格式与 `PiJSONLScanner.requestTiming` 的解析一致。
-private enum PiTimingPluginGuide {
+enum PiTimingPluginGuide {
     static var text: String {
         let field = PiJSONLScanner.timingField
         return tr(

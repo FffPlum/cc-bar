@@ -25,6 +25,7 @@ enum PiJSONLScanner {
         var newSeenIds: [String]
         var filesScanned: Int
         var linesParsed: Int
+        var failedFileCount: Int = 0
         /// 本轮计入的去重键摘要，按对话 key 分组（见 `UsageMessageLedger`）。
         var ledger: [String: [UInt64]] = [:]
     }
@@ -54,9 +55,12 @@ enum PiJSONLScanner {
         knownIDs: Set<UInt64> = [],
         root: URL,
         minimumMtime: Date? = nil,
+        acceptedBoundary: [String: ScanFileState]? = nil,
         onProgress: ScanProgressCallback? = nil
     ) -> Result {
-        let files = JSONLDirectoryEnumerator.files(at: root, minimumMtime: minimumMtime)
+        let enumeration = JSONLDirectoryEnumerator.enumerate(at: root, minimumMtime: minimumMtime)
+        let files = enumeration.files
+        var failedFileCount = enumeration.accessFailed ? 1 : 0
 
         var newState: [String: ScanFileState] = previous
         var entries: [UsageEntry] = []
@@ -78,6 +82,13 @@ enum PiJSONLScanner {
             }
             let url = file.url
             let path = file.path
+            if let acceptedBoundary {
+                guard let boundary = acceptedBoundary[path], boundary.offset > 0 else { continue }
+                if !file.isZstd && file.size < boundary.offset {
+                    failedFileCount += 1
+                    continue
+                }
+            }
             let mtime = file.modificationTime
             let size = file.size
 
@@ -107,7 +118,7 @@ enum PiJSONLScanner {
             var fileSeenKeys: [String] = []
             var fileLedger: [(conversationKey: String, id: UInt64)] = []
             // 按批流式解析：单文件不再把整份内容和全部行同时读进内存。
-            let outcome = JSONLLineReader.streamLines(url: url, fromOffset: state.offset) { batch in
+            let outcome = JSONLLineReader.streamLines(url: url, fromOffset: state.offset, throughOffset: acceptedBoundary?[path]?.offset) { batch in
                 for line in batch {
                     linesParsed += 1
                     guard let data = line.data(using: .utf8),
@@ -188,8 +199,14 @@ enum PiJSONLScanner {
             }
             // 打开 / 读取失败时丢弃本文件本轮结果、保留原 watermark，下轮重来（不计失败数）。
             guard case let .success(newOffset) = outcome else {
+                failedFileCount += 1
                 seen.remove(contentsOf: fileSeenKeys)
                 newState[path] = state
+                continue
+            }
+            if let boundary = acceptedBoundary?[path], newOffset != boundary.offset {
+                failedFileCount += 1
+                seen.remove(contentsOf: fileSeenKeys)
                 continue
             }
             entries.append(contentsOf: fileEntries)
@@ -225,6 +242,7 @@ enum PiJSONLScanner {
             newSeenIds: cappedSeen,
             filesScanned: files.count,
             linesParsed: linesParsed,
+            failedFileCount: failedFileCount,
             ledger: ledger
         )
     }

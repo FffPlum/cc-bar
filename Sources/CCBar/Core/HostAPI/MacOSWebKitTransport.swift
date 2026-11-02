@@ -53,6 +53,13 @@ final class MacOSWebKitTransport: NSObject {
     static func isTrusted(mainFrame: Bool, url: URL?, trustedURL: URL) -> Bool {
         guard mainFrame, let url, let scheme = url.scheme?.lowercased(), scheme == trustedURL.scheme?.lowercased() else { return false }
         if scheme == "file" { return url.standardizedFileURL == trustedURL.standardizedFileURL }
+        if scheme == "ccbar-ui" {
+            return url.host?.lowercased() == trustedURL.host?.lowercased()
+                && url.host != nil
+                && url.port == trustedURL.port
+                && url.user == nil
+                && url.password == nil
+        }
         guard scheme == "https", let host = url.host?.lowercased(), host == trustedURL.host?.lowercased() else { return false }
         return (url.port ?? 443) == (trustedURL.port ?? 443)
     }
@@ -71,6 +78,9 @@ final class MacOSWebKitTransport: NSObject {
         Task { @MainActor [weak self] in
             guard let self, self.generation == requestGeneration, self.webView === message.webView else { replyHandler(nil, "Host unavailable"); return }
             let response = await self.service.handle(request)
+            guard self.generation == requestGeneration, self.webView === message.webView else {
+                replyHandler(nil, "Host unavailable"); return
+            }
             guard let data = try? JSONEncoder().encode(response), let object = try? JSONSerialization.jsonObject(with: data) else {
                 replyHandler(nil, "Unable to encode response"); return
             }
