@@ -8,6 +8,11 @@ import { useHost } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
 import { serviceDisplayName } from "@/lib/display";
 import { Button } from "@/components/ui/button";
+import {
+  BackgroundLoadingBar,
+  LoadingBlock,
+  TableSkeleton,
+} from "./dashboard-loading";
 
 type Tab = "requests" | "providers" | "models";
 type Field =
@@ -21,6 +26,8 @@ type Field =
   | "first";
 export function DashboardTable({
   data,
+  dashboardLoading = false,
+  dashboardPreviousData = false,
   tab,
   onTabChange,
   requests,
@@ -36,7 +43,9 @@ export function DashboardTable({
   requestSort,
   onRequestSort,
 }: {
-  data: UsageDashboard;
+  data: UsageDashboard | undefined;
+  dashboardLoading?: boolean;
+  dashboardPreviousData?: boolean;
   tab: Tab;
   onTabChange: (tab: Tab) => void;
   requests: DashboardRequests | null;
@@ -92,9 +101,16 @@ export function DashboardTable({
                   ? row.totals.averageFirstTokenSeconds
                   : null;
   const rows = [
-    ...(tab === "models" ? data.modelRows : data.providerRows),
+    ...(tab === "models"
+      ? (data?.modelRows ?? [])
+      : (data?.providerRows ?? [])),
   ].sort((a, b) => compare(aggValue(a), aggValue(b)));
   const logs = empty ? [] : (requests?.rows ?? []);
+  const requestWaiting =
+    tab === "requests" && loading && (!requests || previousData);
+  const showSkeleton = dashboardLoading || requestWaiting;
+  const oldResults = dashboardPreviousData || previousData;
+  const hasPagination = Boolean(!empty && (cursor || requests?.nextCursor));
   const requestHeading = (label: string, sort: "time" | "cost" | "tokens") => (
     <button
       type="button"
@@ -123,7 +139,14 @@ export function DashboardTable({
     </button>
   );
   return (
-    <section className="overflow-hidden rounded-lg border">
+    <section
+      data-slot="dashboard-table"
+      aria-busy={showSkeleton || (tab === "requests" && loading)}
+      className="relative overflow-hidden rounded-lg border"
+    >
+      {tab === "requests" && loading && !showSkeleton && (
+        <BackgroundLoadingBar />
+      )}
       <div
         className="flex gap-5 border-b px-4"
         role="tablist"
@@ -148,26 +171,27 @@ export function DashboardTable({
                 ? t("Providers", "供应商")
                 : t("Models", "模型")}{" "}
             <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
-              {item === "requests"
-                ? empty
-                  ? 0
-                  : requests?.coverage.incomplete
-                    ? "—"
-                    : (requests?.totalCount ?? "—")
-                : item === "providers"
-                  ? data.providerRows.length
-                  : data.modelRows.length}
+              {!data ? (
+                <LoadingBlock className="inline-block h-3 w-3" />
+              ) : item === "requests" ? (
+                empty ? (
+                  0
+                ) : requests?.coverage.incomplete ? (
+                  "—"
+                ) : (
+                  (requests?.totalCount ?? "—")
+                )
+              ) : item === "providers" ? (
+                (data?.providerRows.length ?? 0)
+              ) : (
+                (data?.modelRows.length ?? 0)
+              )}
             </span>
           </button>
         ))}
       </div>
       {tab === "requests" ? (
         <div aria-busy={loading}>
-          {loading && !requests && !empty && (
-            <p role="status" className="p-3 text-muted-foreground">
-              {t("Loading request records…", "正在加载请求记录…")}
-            </p>
-          )}
           {error && (
             <p role="alert" className="p-3">
               {error}{" "}
@@ -183,17 +207,12 @@ export function DashboardTable({
               )}
             </p>
           )}
-          {previousData && !empty && (
+          {previousData && error && !empty && (
             <p role="status" className="px-4 py-2 text-muted-foreground">
-              {error
-                ? t(
-                    "Request records could not be updated; showing previous results.",
-                    "请求记录未能更新，显示的是上次结果。",
-                  )
-                : t(
-                    "Updating request records; showing previous results temporarily.",
-                    "正在更新请求记录，暂显示上次结果。",
-                  )}
+              {t(
+                "Request records could not be updated; showing previous results.",
+                "请求记录未能更新，显示的是上次结果。",
+              )}
             </p>
           )}
           {requests?.coverage.incomplete && !empty && (
@@ -204,16 +223,121 @@ export function DashboardTable({
               )}
             </p>
           )}
+          <div className="relative min-h-[196px]">
+            {showSkeleton && <TableSkeleton columns={6} />}
+            <table className="w-full table-fixed text-left">
+              <thead className="bg-muted text-muted-foreground">
+                <tr>
+                  {[
+                    requestHeading(t("Time", "时间"), "time"),
+                    t("Application", "应用"),
+                    t("Provider", "供应商"),
+                    t("Model", "模型"),
+                    requestHeading(t("Cost", "成本"), "cost"),
+                    requestHeading("Tokens", "tokens"),
+                  ].map((label, i) => (
+                    <th key={i} className="px-3 py-2 font-medium">
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody
+                aria-hidden={showSkeleton}
+                inert={showSkeleton || dashboardPreviousData}
+              >
+                {(empty ||
+                  (requests &&
+                    !logs.length &&
+                    !requests.coverage.incomplete &&
+                    !loading &&
+                    !error &&
+                    !previousData)) && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="h-40 px-3 text-center text-muted-foreground"
+                    >
+                      {t("No data", "暂无数据")}
+                    </td>
+                  </tr>
+                )}
+                {logs.map((row) => (
+                  <tr key={row.id} className="border-t">
+                    <td className="px-3 py-2">
+                      {new Date(row.timestamp).toLocaleString(
+                        bootstrap.resolvedLanguage,
+                        { timeZone: bootstrap.timeZone },
+                      )}
+                    </td>
+                    <td className="px-3">{serviceDisplayName(row.service)}</td>
+                    <td
+                      className="truncate px-3"
+                      title={
+                        data?.facets.sources.find(
+                          (source) => source.id === row.sourceID,
+                        )?.title ??
+                        (row.service === "cursor"
+                          ? t("Remote metering", "远端计量")
+                          : t("Session logs", "会话日志"))
+                      }
+                    >
+                      {data?.facets.sources.find(
+                        (source) => source.id === row.sourceID,
+                      )?.title ??
+                        (row.service === "cursor"
+                          ? t("Remote metering", "远端计量")
+                          : t("Session logs", "会话日志"))}
+                    </td>
+                    <td className="truncate px-3" title={row.modelID}>
+                      {row.modelID}
+                    </td>
+                    <td className="px-3">{row.totals.costDisplay}</td>
+                    <td className="px-3">
+                      {row.totals.totalTokens.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div
+            aria-hidden={!hasPagination}
+            inert={!hasPagination}
+            className={`flex min-h-14 items-center gap-2 p-3 ${hasPagination ? "" : "invisible"}`}
+          >
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!cursor || oldResults || showSkeleton}
+              onClick={previous}
+            >
+              {t("Previous", "上一页")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!requests?.nextCursor || oldResults || showSkeleton}
+              onClick={() => requests?.nextCursor && next(requests.nextCursor)}
+            >
+              {t("Next", "下一页")}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="relative min-h-[196px]">
+          {showSkeleton && <TableSkeleton columns={7} />}
           <table className="w-full table-fixed text-left">
             <thead className="bg-muted text-muted-foreground">
               <tr>
                 {[
-                  requestHeading(t("Time", "时间"), "time"),
-                  t("Application", "应用"),
-                  t("Provider", "供应商"),
-                  t("Model", "模型"),
-                  requestHeading(t("Cost", "成本"), "cost"),
-                  requestHeading("Tokens", "tokens"),
+                  heading(t("Name", "名称"), "title"),
+                  heading(t("Requests", "请求数"), "requests"),
+                  heading(t("Cost", "成本"), "cost"),
+                  heading("Tokens", "tokens"),
+                  heading(t("Success", "成功率"), "success"),
+                  heading(t("Speed", "速度"), "speed"),
+                  heading(t("First token", "首字"), "first"),
                 ].map((label, i) => (
                   <th key={i} className="px-3 py-2 font-medium">
                     {label}
@@ -221,145 +345,52 @@ export function DashboardTable({
                 ))}
               </tr>
             </thead>
-            <tbody>
-              {(empty ||
-                (requests &&
-                  !logs.length &&
-                  !requests.coverage.incomplete &&
-                  !loading &&
-                  !error &&
-                  !previousData)) && (
+            <tbody
+              aria-hidden={showSkeleton}
+              inert={showSkeleton || dashboardPreviousData}
+            >
+              {empty && !rows.length && (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="h-40 px-3 text-center text-muted-foreground"
                   >
                     {t("No data", "暂无数据")}
                   </td>
                 </tr>
               )}
-              {logs.map((row) => (
+              {rows.map((row) => (
                 <tr key={row.id} className="border-t">
-                  <td className="px-3 py-2">
-                    {new Date(row.timestamp).toLocaleString(
-                      bootstrap.resolvedLanguage,
-                      { timeZone: bootstrap.timeZone },
-                    )}
+                  <td className="truncate px-3 py-3" title={row.title}>
+                    {row.title}
                   </td>
-                  <td className="px-3">{serviceDisplayName(row.service)}</td>
-                  <td
-                    className="truncate px-3"
-                    title={
-                      data.facets.sources.find(
-                        (source) => source.id === row.sourceID,
-                      )?.title ??
-                      (row.service === "cursor"
-                        ? t("Remote metering", "远端计量")
-                        : t("Session logs", "会话日志"))
-                    }
-                  >
-                    {data.facets.sources.find(
-                      (source) => source.id === row.sourceID,
-                    )?.title ??
-                      (row.service === "cursor"
-                        ? t("Remote metering", "远端计量")
-                        : t("Session logs", "会话日志"))}
-                  </td>
-                  <td className="truncate px-3" title={row.modelID}>
-                    {row.modelID}
+                  <td className="px-3">
+                    {row.totals.requestCount.toLocaleString()}
                   </td>
                   <td className="px-3">{row.totals.costDisplay}</td>
                   <td className="px-3">
                     {row.totals.totalTokens.toLocaleString()}
                   </td>
+                  <td className="px-3">
+                    {row.successRate == null
+                      ? "—"
+                      : `${(row.successRate * 100).toFixed(1)}%`}
+                  </td>
+                  <td className="px-3">
+                    {row.totals.outputTokensPerSecond == null
+                      ? "—"
+                      : `${row.totals.usesEstimatedSpeed ? "≈" : ""}${row.totals.outputTokensPerSecond.toFixed(1)} tok/s`}
+                  </td>
+                  <td className="px-3">
+                    {row.totals.averageFirstTokenSeconds == null
+                      ? "—"
+                      : `${row.totals.averageFirstTokenSeconds.toFixed(1)}s`}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {!empty && (cursor || requests?.nextCursor) && (
-            <div className="flex items-center gap-2 p-3">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!cursor || previousData}
-                onClick={previous}
-              >
-                {t("Previous", "上一页")}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!requests?.nextCursor || previousData}
-                onClick={() =>
-                  requests?.nextCursor && next(requests.nextCursor)
-                }
-              >
-                {t("Next", "下一页")}
-              </Button>
-            </div>
-          )}
         </div>
-      ) : (
-        <table className="w-full table-fixed text-left">
-          <thead className="bg-muted text-muted-foreground">
-            <tr>
-              {[
-                heading(t("Name", "名称"), "title"),
-                heading(t("Requests", "请求数"), "requests"),
-                heading(t("Cost", "成本"), "cost"),
-                heading("Tokens", "tokens"),
-                heading(t("Success", "成功率"), "success"),
-                heading(t("Speed", "速度"), "speed"),
-                heading(t("First token", "首字"), "first"),
-              ].map((label, i) => (
-                <th key={i} className="px-3 py-2 font-medium">
-                  {label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {empty && !rows.length && (
-              <tr>
-                <td
-                  colSpan={7}
-                  className="h-40 px-3 text-center text-muted-foreground"
-                >
-                  {t("No data", "暂无数据")}
-                </td>
-              </tr>
-            )}
-            {rows.map((row) => (
-              <tr key={row.id} className="border-t">
-                <td className="truncate px-3 py-3" title={row.title}>
-                  {row.title}
-                </td>
-                <td className="px-3">
-                  {row.totals.requestCount.toLocaleString()}
-                </td>
-                <td className="px-3">{row.totals.costDisplay}</td>
-                <td className="px-3">
-                  {row.totals.totalTokens.toLocaleString()}
-                </td>
-                <td className="px-3">
-                  {row.successRate == null
-                    ? "—"
-                    : `${(row.successRate * 100).toFixed(1)}%`}
-                </td>
-                <td className="px-3">
-                  {row.totals.outputTokensPerSecond == null
-                    ? "—"
-                    : `${row.totals.usesEstimatedSpeed ? "≈" : ""}${row.totals.outputTokensPerSecond.toFixed(1)} tok/s`}
-                </td>
-                <td className="px-3">
-                  {row.totals.averageFirstTokenSeconds == null
-                    ? "—"
-                    : `${row.totals.averageFirstTokenSeconds.toFixed(1)}s`}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       )}
     </section>
   );

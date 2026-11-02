@@ -180,3 +180,14 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ccb
 - 前端定向 **40 项测试通过**，日志 `/tmp/ccbar-dashboard-empty-tests.log`；TypeScript 静态检查通过。覆盖启用应用稳定顺序、侧栏外应用、关闭选中应用、空表结构、错误/加载与真实零费用用量。
 - Host 定向 **19 项测试通过**，日志 `/tmp/ccbar-dashboard-empty-host-tests.log`；指定 Xcode Debug 构建 **BUILD SUCCEEDED**，日志 `/tmp/ccbar-dashboard-empty-debug.log`，包含最终前端资源编译。
 - `git diff --check` 通过。视觉效果由用户验收，未启动或替换安装的 App；本节验证通过后按用户要求创建本地提交，未推送。
+
+### 统计查询骨架与布局稳定
+
+日期：2026-11-02。按用户要求先提交上一轮固定应用筛选与空数据布局（`31ad7c1`），再实现本节更新。
+
+- 首次查询保留筛选栏、指标卡、图表与表格的结构，在数据位置渲染骨架；切换到未缓存筛选或请求页时，用局部骨架覆盖保留的内容，避免查询等待时卸载整块区域。已有缓存直接展示，同条件后台刷新仅显示细加载条。
+- 指标、页签、筛选和图表开关保持可操作；过期表格内容与分页操作在等待期间不可交互。查询失败恢复已有内容并保留错误、重试及覆盖缺口提示，不向查询缓存写入骨架数据。
+- 图表占位、热力图网格及表格分页区域保留相应尺寸；减少动态效果时停用骨架脉冲。读屏加载提示位于忙碌的数据区外，避免提示被延迟播报。
+- 全前端 **13 个文件、81 项测试通过**，日志 `/tmp/ccbar-dashboard-skeleton-interface-tests.log`；TypeScript 静态检查通过。覆盖首载、筛选、分页、热力图、缓存复用、后台刷新、失败恢复、组件状态保留和加载提示的可访问性。
+- 指定 Xcode Debug 构建 **BUILD SUCCEEDED**，日志 `/tmp/ccbar-dashboard-skeleton-debug.log`；包含 SDK / 前端类型检查和 Vite 资源构建。`git diff --check` 通过。本轮仅修改前端与文档，没有重复运行 Swift 行为测试。
+- 未启动或替换安装的 App，实际窗口布局和动画观感由用户验收；未测量真实窗口的布局偏移。本节验证通过后按用户要求创建本地提交，未推送。

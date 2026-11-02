@@ -20,6 +20,11 @@ import { useTranslation } from "@/lib/i18n";
 import { DashboardFilters, civilInput } from "./dashboard-filters";
 import { DashboardChart, HeatmapBlocks } from "./dashboard-charts";
 import { DashboardTable } from "./dashboard-table";
+import {
+  BackgroundLoadingBar,
+  ChartSkeleton,
+  LoadingBlock,
+} from "./dashboard-loading";
 
 const metrics: DashboardMetric[] = [
   "cost",
@@ -197,8 +202,211 @@ function DashboardContent({
         granularity: "day" as const,
       },
     };
+  const loadingMessage = dashboard.isFetching
+    ? dashboardResult.isPreviousData
+      ? t("Changing filters; loading results…", "正在切换筛选并加载结果…")
+      : t("Loading usage statistics…", "正在加载用量统计…")
+    : dashboard.isError && dashboardResult.isPreviousData
+      ? t(
+          "Filters could not be applied; showing previous results.",
+          "筛选未能完成，显示的是上次结果。",
+        )
+      : activeTab === "requests" && requests.isFetching
+        ? requestResult.data
+          ? t("Updating request records…", "正在更新请求记录…")
+          : t("Loading request records…", "正在加载请求记录…")
+        : dashboardResult.data?.coverage.refreshing
+          ? t("Updating request details…", "正在更新请求明细…")
+          : null;
+  const renderContent = (data: UsageDashboard | undefined) => {
+    const values = metrics.map((metric) => data?.kpiDisplay[metric]);
+    const waiting =
+      !data || (dashboardResult.isPreviousData && dashboard.isFetching);
+    const background = Boolean(
+      data && dashboard.isFetching && !dashboardResult.isPreviousData,
+    );
+    const empty = Boolean(
+      data &&
+      !dashboardResult.isPreviousData &&
+      !dashboard.isError &&
+      !data.coverage.refreshing &&
+      !data.coverage.incomplete &&
+      data.totals.requestCount === 0 &&
+      data.totals.totalTokens === 0 &&
+      Number(data.totals.costUSD) === 0,
+    );
+    return (
+      <>
+        <div className="space-y-4">
+          {data?.coverage.incomplete && !data.coverage.refreshing && (
+            <div
+              role="status"
+              className="rounded border p-3 text-muted-foreground"
+            >
+              {t(
+                "Some request timestamps or source data are unavailable; totals and trends may be incomplete.",
+                "部分请求时间或来源数据不可用，汇总和趋势可能不完整。",
+              )}
+              {(data.coverage.unlocatedTotals.requestCount > 0 ||
+                data.coverage.unlocatedTotals.totalTokens > 0) && (
+                <span>
+                  {" "}
+                  {t(
+                    "Usage without precise timestamps",
+                    "无法精确定位时间的用量",
+                  )}
+                  :{" "}
+                  {data.coverage.unlocatedTotals.requestCount.toLocaleString()}{" "}
+                  {t("requests", "次请求")} ·{" "}
+                  {data.coverage.unlocatedTotals.totalTokens.toLocaleString()}{" "}
+                  tokens · {data.coverage.unlocatedTotals.costDisplay}
+                </span>
+              )}
+            </div>
+          )}
+          {data &&
+            range === "all" &&
+            (!service || service === "cursor") &&
+            (!sourceID ||
+              data.facets.sources.some(
+                (source) =>
+                  source.id === sourceID && source.service === "cursor",
+              )) &&
+            (service === "cursor" ||
+              data.facets.services.some((item) => item.id === "cursor")) && (
+              <p className="text-muted-foreground">
+                {t(
+                  "Cursor totals include only remote history loaded so far. Older records can be loaded.",
+                  "Cursor 汇总仅包含已加载的远端历史，可加载更早记录。",
+                )}
+              </p>
+            )}
+          <section
+            data-slot="dashboard-summary"
+            className="relative overflow-hidden rounded-lg border"
+          >
+            {loadingMessage && (
+              <p
+                role="status"
+                className={
+                  dashboard.isError && dashboardResult.isPreviousData
+                    ? "px-4 py-2 text-muted-foreground"
+                    : "sr-only"
+                }
+              >
+                {loadingMessage}
+              </p>
+            )}
+            {background && <BackgroundLoadingBar />}
+            <div className="grid grid-cols-4" aria-busy={dashboard.isFetching}>
+              {metrics.map((item, i) => (
+                <button
+                  key={item}
+                  type="button"
+                  aria-pressed={metric === item}
+                  onClick={() => setMetric(item)}
+                  className={`p-4 text-left border-b-2 ${metric === item ? "border-foreground" : "border-transparent text-muted-foreground"}`}
+                >
+                  <div>{labels[i]}</div>
+                  <div className="cc-number relative mt-2 min-h-9 text-[24px] font-semibold">
+                    <span
+                      className={waiting ? "invisible" : undefined}
+                      aria-hidden={waiting}
+                    >
+                      {values[i] ?? "\u00a0"}
+                    </span>
+                    {waiting && (
+                      <LoadingBlock className="absolute inset-y-1 left-0 w-24 max-w-full" />
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-center border-t">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setCollapsed(!collapsed)}
+                aria-expanded={!collapsed}
+              >
+                {collapsed
+                  ? t("Show chart", "展开图表")
+                  : t("Hide chart", "收起图表")}
+              </Button>
+            </div>
+            {!collapsed && (
+              <div
+                data-slot="dashboard-chart-region"
+                className="relative"
+                aria-busy={waiting}
+              >
+                {!data ? (
+                  <ChartSkeleton heatmap={range === "all"} />
+                ) : (
+                  <div inert={dashboardResult.isPreviousData}>
+                    {range === "all" ? (
+                      <HeatmapResource
+                        key={key}
+                        query={query}
+                        announceLoading={!loadingMessage}
+                        revision={data.revision}
+                        today={civilInput(
+                          new Date(data.resolvedRange.asOf),
+                          data.resolvedRange.timeZone,
+                        ).slice(0, 10)}
+                      />
+                    ) : (
+                      <DashboardChart
+                        data={data}
+                        title={labels[metrics.indexOf(metric)]!}
+                        empty={empty}
+                      />
+                    )}
+                  </div>
+                )}
+                {data && waiting && (
+                  <div
+                    aria-hidden="true"
+                    data-slot="chart-loading-overlay"
+                    className="pointer-events-none absolute inset-0 z-10 bg-background"
+                  >
+                    <ChartSkeleton heatmap={range === "all"} />
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+          <div>
+            <DashboardTable
+              data={data}
+              dashboardLoading={waiting}
+              dashboardPreviousData={dashboardResult.isPreviousData}
+              tab={activeTab}
+              onTabChange={setActiveTab}
+              requestSort={requestSort}
+              onRequestSort={(value) => {
+                setCursors([]);
+                setRequestSort(value);
+              }}
+              requests={requestResult.data ?? null}
+              empty={empty}
+              loading={requests.isFetching}
+              previousData={requestResult.isPreviousData}
+              error={requests.error ? errorMessage(requests.error) : null}
+              retry={() => void requests.refetch()}
+              cursor={cursor}
+              next={(value) => setCursors((old) => [...old, value])}
+              previous={() => setCursors((old) => old.slice(0, -1))}
+              reset={() => setCursors([])}
+            />
+          </div>
+        </div>
+        <span className="sr-only">{bootstrap.timeZone}</span>
+      </>
+    );
+  };
   return (
-    <div className="h-full overflow-auto p-5 text-[13px] space-y-4">
+    <div className="h-full overflow-auto [scrollbar-gutter:stable] p-5 text-[13px] space-y-4">
       <DashboardFilters
         data={filterData}
         range={range}
@@ -225,164 +433,10 @@ function DashboardContent({
         data={dashboardResult.data ?? null}
         error={dashboard.error ? errorMessage(dashboard.error) : null}
         loading={dashboard.isLoading}
+        loadingFallback={renderContent(undefined)}
         onRetry={() => void dashboard.refetch()}
       >
-        {(data) => {
-          const values = metrics.map((metric) => data.kpiDisplay[metric]);
-          const empty =
-            !dashboardResult.isPreviousData &&
-            !dashboard.isError &&
-            !data.coverage.refreshing &&
-            !data.coverage.incomplete &&
-            data.totals.requestCount === 0 &&
-            data.totals.totalTokens === 0 &&
-            Number(data.totals.costUSD) === 0;
-          return (
-            <>
-              {data.coverage.refreshing && (
-                <p role="status" className="text-muted-foreground">
-                  {t("Updating request details…", "正在更新请求明细…")}
-                </p>
-              )}
-              {dashboardResult.isPreviousData && (
-                <p role="status" className="text-muted-foreground">
-                  {dashboard.isError
-                    ? t(
-                        "Filters could not be applied; showing previous results.",
-                        "筛选未能完成，显示的是上次结果。",
-                      )
-                    : t(
-                        "Changing filters; showing previous results temporarily.",
-                        "正在切换筛选，暂显示上次结果。",
-                      )}
-                </p>
-              )}
-              <div
-                aria-busy={dashboard.isFetching}
-                className="space-y-4 motion-safe:transition-opacity motion-safe:duration-150 motion-safe:ease-[cubic-bezier(0.23,1,0.32,1)]"
-                style={{ opacity: dashboardResult.isPreviousData ? 0.6 : 1 }}
-              >
-                {data.coverage.incomplete && !data.coverage.refreshing && (
-                  <div
-                    role="status"
-                    className="rounded border p-3 text-muted-foreground"
-                  >
-                    {t(
-                      "Some request timestamps or source data are unavailable; totals and trends may be incomplete.",
-                      "部分请求时间或来源数据不可用，汇总和趋势可能不完整。",
-                    )}
-                    {(data.coverage.unlocatedTotals.requestCount > 0 ||
-                      data.coverage.unlocatedTotals.totalTokens > 0) && (
-                      <span>
-                        {" "}
-                        {t(
-                          "Usage without precise timestamps",
-                          "无法精确定位时间的用量",
-                        )}
-                        :{" "}
-                        {data.coverage.unlocatedTotals.requestCount.toLocaleString()}{" "}
-                        {t("requests", "次请求")} ·{" "}
-                        {data.coverage.unlocatedTotals.totalTokens.toLocaleString()}{" "}
-                        tokens · {data.coverage.unlocatedTotals.costDisplay}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {range === "all" &&
-                  (!service || service === "cursor") &&
-                  (!sourceID ||
-                    data.facets.sources.some(
-                      (source) =>
-                        source.id === sourceID && source.service === "cursor",
-                    )) &&
-                  (service === "cursor" ||
-                    data.facets.services.some(
-                      (item) => item.id === "cursor",
-                    )) && (
-                    <p className="text-muted-foreground">
-                      {t(
-                        "Cursor totals include only remote history loaded so far. Older records can be loaded.",
-                        "Cursor 汇总仅包含已加载的远端历史，可加载更早记录。",
-                      )}
-                    </p>
-                  )}
-                <section className="overflow-hidden rounded-lg border">
-                  <div className="grid grid-cols-4">
-                    {metrics.map((item, i) => (
-                      <button
-                        key={item}
-                        type="button"
-                        aria-pressed={metric === item}
-                        onClick={() => setMetric(item)}
-                        className={`p-4 text-left border-b-2 ${metric === item ? "border-foreground" : "border-transparent text-muted-foreground"}`}
-                      >
-                        <div>{labels[i]}</div>
-                        <div className="cc-number mt-2 text-[24px] font-semibold">
-                          {values[i]}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex justify-center border-t">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setCollapsed(!collapsed)}
-                      aria-expanded={!collapsed}
-                    >
-                      {collapsed
-                        ? t("Show chart", "展开图表")
-                        : t("Hide chart", "收起图表")}
-                    </Button>
-                  </div>
-                  <div inert={dashboardResult.isPreviousData}>
-                    {!collapsed &&
-                      (range === "all" ? (
-                        <HeatmapResource
-                          key={key}
-                          query={query}
-                          revision={data.revision}
-                          today={civilInput(
-                            new Date(data.resolvedRange.asOf),
-                            data.resolvedRange.timeZone,
-                          ).slice(0, 10)}
-                        />
-                      ) : (
-                        <DashboardChart
-                          data={data}
-                          title={labels[metrics.indexOf(metric)]!}
-                          empty={empty}
-                        />
-                      ))}
-                  </div>
-                </section>
-                <div inert={dashboardResult.isPreviousData}>
-                  <DashboardTable
-                    data={data}
-                    tab={activeTab}
-                    onTabChange={setActiveTab}
-                    requestSort={requestSort}
-                    onRequestSort={(value) => {
-                      setCursors([]);
-                      setRequestSort(value);
-                    }}
-                    requests={requestResult.data ?? null}
-                    empty={empty}
-                    loading={requests.isFetching}
-                    previousData={requestResult.isPreviousData}
-                    error={requests.error ? errorMessage(requests.error) : null}
-                    retry={() => void requests.refetch()}
-                    cursor={cursor}
-                    next={(value) => setCursors((old) => [...old, value])}
-                    previous={() => setCursors((old) => old.slice(0, -1))}
-                    reset={() => setCursors([])}
-                  />
-                </div>
-              </div>
-              <span className="sr-only">{bootstrap.timeZone}</span>
-            </>
-          );
-        }}
+        {(data) => renderContent(data)}
       </ResourceFeedback>
     </div>
   );
@@ -392,10 +446,12 @@ export function HeatmapResource({
   query,
   today,
   revision,
+  announceLoading = true,
 }: {
   query: DashboardQuery;
   today: string;
   revision: string;
+  announceLoading?: boolean;
 }) {
   const { api } = useHost();
   const t = useTranslation();
@@ -428,7 +484,15 @@ export function HeatmapResource({
   }, [heatmap.data, heatmap.isPlaceholderData]);
   const visibleBlocks = heatmap.data ?? blocks;
   return (
-    <>
+    <div className="relative">
+      {announceLoading && heatmap.isFetching && (
+        <p role="status" className="sr-only">
+          {t("Loading heatmap…", "正在加载用量热力图…")}
+        </p>
+      )}
+      {heatmap.isFetching && visibleBlocks.length > 0 && (
+        <BackgroundLoadingBar />
+      )}
       {heatmap.error && (
         <p role="alert" className="p-3">
           {errorMessage(heatmap.error)}{" "}
@@ -442,19 +506,19 @@ export function HeatmapResource({
           </Button>
         </p>
       )}
-      {visibleBlocks.length > 0 && (
-        <HeatmapBlocks
-          blocks={visibleBlocks}
-          onOlder={() => setPageCount((old) => old + 1)}
-          loading={heatmap.isFetching}
-          today={today}
-        />
-      )}{" "}
-      {heatmap.isLoading && (
-        <p role="status" className="p-3">
-          {t("Loading…", "正在加载…")}
-        </p>
-      )}
-    </>
+      <div aria-busy={heatmap.isFetching}>
+        {visibleBlocks.length > 0 && (
+          <HeatmapBlocks
+            blocks={visibleBlocks}
+            onOlder={() => setPageCount((old) => old + 1)}
+            loading={heatmap.isFetching}
+            today={today}
+          />
+        )}
+        {heatmap.isLoading && visibleBlocks.length === 0 && (
+          <ChartSkeleton heatmap />
+        )}
+      </div>
+    </div>
   );
 }

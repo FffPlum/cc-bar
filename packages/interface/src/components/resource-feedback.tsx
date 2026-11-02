@@ -10,6 +10,7 @@ export function ResourceFeedback<T>({
   onRetry,
   children,
   empty,
+  loadingFallback,
 }: {
   data: T | null;
   error: string | null;
@@ -17,9 +18,17 @@ export function ResourceFeedback<T>({
   onRetry: () => void;
   children: (data: T) => ReactNode;
   empty?: ReactNode;
+  loadingFallback?: ReactNode;
 }) {
   const t = useTranslation();
-  if (!data && loading) return <LoadingState />;
+  // Match the error/data child slots below so the loading shell keeps its DOM identity.
+  if (!data && loading)
+    return (
+      <>
+        {null}
+        {loadingFallback ?? <LoadingState />}
+      </>
+    );
   if (!data && error)
     return (
       <EmptyState

@@ -30,7 +30,7 @@ export function DashboardChart({
         <h2 className="font-semibold">
           {title} · {t("Hourly", "按小时")}
         </h2>
-        <p className="py-12 text-center text-muted-foreground">
+        <p className="mt-4 flex h-[180px] items-center justify-center text-center text-muted-foreground">
           {t(
             "Hourly data is unavailable for some usage.",
             "部分用量缺少小时级数据，无法绘制小时趋势。",
@@ -330,7 +330,7 @@ export function HeatmapBlocks({
           </div>
         </div>
       ))}
-      <div className="flex items-center justify-between">
+      <div className="flex min-h-8 items-center justify-between">
         <div>
           {last?.nextBeforeDay && (
             <Button

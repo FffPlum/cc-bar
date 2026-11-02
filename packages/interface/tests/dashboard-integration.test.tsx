@@ -774,10 +774,12 @@ it("retains prior dashboard results after filter failure without caching them un
   );
   await screen.findByText(/Filters could not be applied/);
   expect(screen.getByText("$1")).toBeTruthy();
-  expect(screen.getByRole("table").closest("[inert]")).not.toBeNull();
+  expect(
+    screen.getByRole("table").querySelector("tbody[inert]"),
+  ).not.toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await screen.findByText("$30");
-  expect(screen.getByRole("table").closest("[inert]")).toBeNull();
+  expect(screen.getByRole("table").querySelector("tbody[inert]")).toBeNull();
   expect(api.usageDashboard.mock.lastCall?.[0]).toMatchObject({
     range: "last30",
   });
@@ -806,6 +808,11 @@ it.each(["usage", "pricing"])(
     await waitFor(() => expect(fail).toBeTypeOf("function"));
     expect(screen.getByText("$1")).toBeTruthy();
     expect(screen.getByRole("table")).toBe(table);
+    expect(
+      document.querySelector('[data-slot="chart-loading-overlay"]'),
+    ).toBeNull();
+    expect(document.querySelector('[data-slot="table-skeleton"]')).toBeNull();
+    expect(screen.getByText("$1").className).not.toContain("invisible");
     await act(async () => {
       fail(new Error("temporarily unavailable"));
     });
@@ -958,17 +965,15 @@ it("returns selection to all when the selected application is disabled", async (
 
 it("keeps KPI, chart axes and all table columns when a successful query is empty", async () => {
   api.usageDashboard.mockReset().mockResolvedValue(emptyDashboard as never);
-  api.usageRequests
-    .mockReset()
-    .mockResolvedValue({
-      revision: "1",
-      resolvedRange,
-      totalCount: 0,
-      rows: [],
-      nextCursor: null,
-      coverage: emptyDashboard.coverage,
-      status,
-    });
+  api.usageRequests.mockReset().mockResolvedValue({
+    revision: "1",
+    resolvedRange,
+    totalCount: 0,
+    rows: [],
+    nextCursor: null,
+    coverage: emptyDashboard.coverage,
+    status,
+  });
   const view = renderDashboard();
   await screen.findByText("No data");
   for (const name of ["Cost", "Requests", "Tokens", "Cache hit rate"])
@@ -1027,4 +1032,227 @@ it("does not claim empty data while request details are still being prepared", a
   await screen.findByText("Updating request details…");
   expect(screen.queryByText("No data")).toBeNull();
   expect(screen.getByRole("tab", { name: "Request logs —" })).toBeTruthy();
+});
+
+it("uses the dashboard shell for first-load skeletons while controls remain usable", async () => {
+  const { act } = await import("@testing-library/react");
+  let finish!: (value: any) => void;
+  api.usageDashboard.mockReset().mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = renderDashboard();
+  const summary = view.container.querySelector(
+    '[data-slot="dashboard-summary"]',
+  );
+  const table = screen.getByRole("table");
+  expect(summary).not.toBeNull();
+  expect(
+    view.container.querySelector('[data-slot="chart-skeleton"]'),
+  ).not.toBeNull();
+  expect(
+    view.container.querySelector('[data-slot="table-skeleton"]'),
+  ).not.toBeNull();
+  expect(screen.getAllByRole("status")).toHaveLength(1);
+  expect(screen.getByRole("status").className).toContain("sr-only");
+  expect(screen.getByRole("status").closest('[aria-busy="true"]')).toBeNull();
+  expect(screen.queryByText("No data")).toBeNull();
+  for (const skeleton of view.container.querySelectorAll(
+    '[data-slot="skeleton"]',
+  )) {
+    expect(skeleton.className).toContain("motion-reduce:animate-none");
+    expect(skeleton.getAttribute("aria-hidden")).toBe("true");
+  }
+  expect(
+    (
+      within(summary as HTMLElement).getByRole("button", {
+        name: "Cost",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(false);
+  fireEvent.click(screen.getByRole("tab", { name: "Models" }));
+  fireEvent.click(screen.getByRole("button", { name: "Hide chart" }));
+  expect(
+    view.container.querySelector('[data-slot="dashboard-chart-region"]'),
+  ).toBeNull();
+  await act(async () => {
+    finish(data);
+  });
+  await screen.findByText("$1");
+  expect(view.container.querySelector('[data-slot="dashboard-summary"]')).toBe(
+    summary,
+  );
+  expect(screen.getByRole("table")).toBe(table);
+  expect(
+    screen.getByRole("tab", { name: "Models 0" }).getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(screen.getByRole("button", { name: "Show chart" })).toBeTruthy();
+  expect(
+    view.container.querySelector('[data-slot="table-skeleton"]'),
+  ).toBeNull();
+});
+
+it("overlays fresh-filter skeletons without unmounting panels and skips them for a cached filter", async () => {
+  const { act } = await import("@testing-library/react");
+  let finish!: (value: any) => void;
+  api.usageDashboard.mockReset().mockImplementation((query: any) =>
+    query.range === "last30"
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : Promise.resolve(data),
+  );
+  const view = renderDashboard();
+  await screen.findByText("$1");
+  const summary = view.container.querySelector(
+    '[data-slot="dashboard-summary"]',
+  );
+  const table = screen.getByRole("table");
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 30 days",
+    }),
+  );
+  expect(
+    view.container.querySelector('[data-slot="chart-loading-overlay"]'),
+  ).not.toBeNull();
+  expect(
+    view.container.querySelector('[data-slot="table-skeleton"]'),
+  ).not.toBeNull();
+  expect(view.container.querySelector('[data-slot="dashboard-summary"]')).toBe(
+    summary,
+  );
+  expect(screen.getByRole("table")).toBe(table);
+  expect(screen.getByText("$1").className).toContain("invisible");
+  expect(
+    screen.getByRole("tab", { name: "Models 0" }).closest("[inert]"),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("tab", { name: "Models 0" }));
+  await act(async () => {
+    finish({ ...data, kpiDisplay: { ...data.kpiDisplay, cost: "$30" } });
+  });
+  await screen.findByText("$30");
+  expect(
+    view.container.querySelector('[data-slot="table-skeleton"]'),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Last 30 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 7 days",
+    }),
+  );
+  expect(screen.getByText("$1").className).not.toContain("invisible");
+  expect(view.container.querySelector('[data-slot="skeleton"]')).toBeNull();
+  expect(
+    screen.getByRole("tab", { name: "Models 0" }).getAttribute("aria-selected"),
+  ).toBe("true");
+});
+
+it("keeps the request table and paging area while first-page and next-page queries are pending", async () => {
+  const { act } = await import("@testing-library/react");
+  let finish!: (value: any) => void;
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  api.usageRequests.mockReset().mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = renderDashboard();
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  const table = screen.getByRole("table");
+  const body = table.parentElement!;
+  expect(body.className).toContain("min-h-[196px]");
+  expect(body.querySelector('[data-slot="table-skeleton"]')).not.toBeNull();
+  expect(screen.getAllByRole("columnheader")).toHaveLength(6);
+  expect(screen.getByRole("status").className).toContain("sr-only");
+  expect(screen.getByRole("status").closest('[aria-busy="true"]')).toBeNull();
+  const pager = view.container.querySelector(
+    '[data-slot="dashboard-table"] .min-h-14',
+  );
+  expect(pager?.className).toContain("invisible");
+  await act(async () => {
+    finish(requestPage("loaded-row", "next"));
+  });
+  await screen.findByText("loaded-row");
+  expect(screen.getByRole("table")).toBe(table);
+  expect(pager?.className).not.toContain("invisible");
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("loaded-row")).toBeTruthy();
+  expect(body.querySelector('[data-slot="table-skeleton"]')).not.toBeNull();
+  expect(
+    (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  await act(async () => {
+    finish(requestPage("next-row"));
+  });
+  await screen.findByText("next-row");
+  expect(screen.getByRole("table")).toBe(table);
+  expect(body.querySelector('[data-slot="table-skeleton"]')).toBeNull();
+});
+
+it("uses a full heatmap skeleton on first load and retains expanded blocks for a background reload", async () => {
+  const { act } = await import("@testing-library/react");
+  const { HeatmapResource } = await import("@/features/stats/dashboard-page");
+  let finish!: (value: any) => void;
+  const block = {
+    fromDay: "2025-01-06",
+    toDay: "2026-01-12",
+    timeZone: "UTC",
+    days: [],
+    totals: total,
+    nextBeforeDay: null,
+    coverage,
+    status,
+  };
+  api.usageHeatmap.mockReset().mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const element = (revision: string) => (
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardQueryScope>
+          <HeatmapResource
+            query={{ range: "all", metric: "tokens" }}
+            today="2026-11-02"
+            revision={revision}
+          />
+        </DashboardQueryScope>
+      </TooltipProvider>
+    </LanguageProvider>
+  );
+  const view = render(element("1"));
+  expect(
+    view.container.querySelector('[data-slot="heatmap-skeleton"]'),
+  ).not.toBeNull();
+  expect(screen.getByRole("status").className).toContain("sr-only");
+  expect(screen.getByRole("status").closest('[aria-busy="true"]')).toBeNull();
+  await act(async () => {
+    finish(block);
+  });
+  await screen.findByText(/2025-01-06/);
+  const title = screen.getByText(/2025-01-06/);
+  expect(
+    view.container.querySelector('[data-slot="heatmap-skeleton"]'),
+  ).toBeNull();
+  view.rerender(element("2"));
+  expect(screen.getByText(/2025-01-06/)).toBe(title);
+  expect(
+    view.container.querySelector('[data-slot="heatmap-skeleton"]'),
+  ).toBeNull();
+  expect(
+    view.container.querySelectorAll('[data-slot="skeleton"]'),
+  ).toHaveLength(1);
+  await act(async () => {
+    finish(block);
+  });
+  expect(screen.getByText(/2025-01-06/)).toBe(title);
 });
