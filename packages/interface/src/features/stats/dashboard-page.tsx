@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { HostError } from "@ccbar/host-api";
 import type {
   DashboardHeatmap,
@@ -10,7 +14,7 @@ import type {
 } from "@ccbar/host-api/window";
 import { useHost, errorMessage } from "@/host/host-context";
 import { ResourceFeedback } from "@/components/resource-feedback";
-import { DashboardQueryScope } from "./dashboard-query";
+import { DashboardQueryScope, useRetainedResult } from "./dashboard-query";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/lib/i18n";
 import { DashboardFilters, civilInput } from "./dashboard-filters";
@@ -41,6 +45,7 @@ function DashboardContent({
   onService: (value?: UsageService) => void;
 }) {
   const { api, bootstrap } = useHost();
+  const queryClient = useQueryClient();
   const t = useTranslation();
   const [range, setRange] = useState<DashboardQuery["range"]>("last7");
   const [metric, setMetric] = useState<DashboardMetric>("tokens");
@@ -98,6 +103,7 @@ function DashboardContent({
   const requests = useQuery({
     queryKey: ["requests", requestKey, cursor, requestSort],
     enabled: activeTab === "requests",
+    placeholderData: keepPreviousData,
     queryFn: ({ signal }) => {
       const generation = ++requestGeneration.current;
       const identity = requestIdentity;
@@ -115,8 +121,16 @@ function DashboardContent({
             reason.code === "invalid_cursor" &&
             currentRequestIdentity.current === identity &&
             requestGeneration.current === generation
-          )
+          ) {
+            // A database revision can invalidate the whole pagination chain.
+            // Returning to a fresh cached first page would reuse its old cursor.
+            void queryClient.invalidateQueries({
+              queryKey: ["requests", requestKey, undefined, requestSort],
+              exact: true,
+              refetchType: "none",
+            });
             setCursors([]);
+          }
           throw reason;
         });
     },
@@ -124,6 +138,8 @@ function DashboardContent({
       !cursor && (range !== "custom" || custom?.followNow) ? 60000 : false,
     refetchIntervalInBackground: false,
   });
+  const dashboardResult = useRetainedResult(dashboard);
+  const requestResult = useRetainedResult(requests);
   useEffect(() => {
     setSource(undefined);
     setModel(undefined);
@@ -134,12 +150,20 @@ function DashboardContent({
   useEffect(() => {
     if (
       cursor &&
+      !requests.isPlaceholderData &&
+      !dashboard.isPlaceholderData &&
       requests.data &&
       dashboard.data &&
       requests.data.revision !== dashboard.data.revision
     )
       setCursors([]);
-  }, [cursor, requests.data, dashboard.data]);
+  }, [
+    cursor,
+    requests.data,
+    requests.isPlaceholderData,
+    dashboard.data,
+    dashboard.isPlaceholderData,
+  ]);
   const labels = [
     t("Cost", "总成本"),
     t("Requests", "总请求数"),
@@ -189,7 +213,7 @@ function DashboardContent({
         onModel={setModel}
       />
       <ResourceFeedback
-        data={dashboard.data ?? null}
+        data={dashboardResult.data ?? null}
         error={dashboard.error ? errorMessage(dashboard.error) : null}
         loading={dashboard.isLoading}
         onRetry={() => void dashboard.refetch()}
@@ -203,18 +227,23 @@ function DashboardContent({
                   {t("Updating request details…", "正在更新请求明细…")}
                 </p>
               )}
-              {dashboard.isPlaceholderData && (
+              {dashboardResult.isPreviousData && (
                 <p role="status" className="text-muted-foreground">
-                  {t(
-                    "Changing filters; showing previous results temporarily.",
-                    "正在切换筛选，暂显示上次结果。",
-                  )}
+                  {dashboard.isError
+                    ? t(
+                        "Filters could not be applied; showing previous results.",
+                        "筛选未能完成，显示的是上次结果。",
+                      )
+                    : t(
+                        "Changing filters; showing previous results temporarily.",
+                        "正在切换筛选，暂显示上次结果。",
+                      )}
                 </p>
               )}
               <div
                 aria-busy={dashboard.isFetching}
                 className="space-y-4 motion-safe:transition-opacity motion-safe:duration-150 motion-safe:ease-[cubic-bezier(0.23,1,0.32,1)]"
-                style={{ opacity: dashboard.isPlaceholderData ? 0.6 : 1 }}
+                style={{ opacity: dashboardResult.isPreviousData ? 0.6 : 1 }}
               >
                 {data.coverage.incomplete && !data.coverage.refreshing && (
                   <div
@@ -289,7 +318,7 @@ function DashboardContent({
                         : t("Hide chart", "收起图表")}
                     </Button>
                   </div>
-                  <div inert={dashboard.isPlaceholderData}>
+                  <div inert={dashboardResult.isPreviousData}>
                     {!collapsed &&
                       (range === "all" ? (
                         <HeatmapResource
@@ -309,7 +338,7 @@ function DashboardContent({
                       ))}
                   </div>
                 </section>
-                <div inert={dashboard.isPlaceholderData}>
+                <div inert={dashboardResult.isPreviousData}>
                   <DashboardTable
                     data={data}
                     tab={activeTab}
@@ -319,9 +348,11 @@ function DashboardContent({
                       setCursors([]);
                       setRequestSort(value);
                     }}
-                    requests={requests.data ?? null}
-                    loading={requests.isLoading}
+                    requests={requestResult.data ?? null}
+                    loading={requests.isFetching}
+                    previousData={requestResult.isPreviousData}
                     error={requests.error ? errorMessage(requests.error) : null}
+                    retry={() => void requests.refetch()}
                     cursor={cursor}
                     next={(value) => setCursors((old) => [...old, value])}
                     previous={() => setCursors((old) => old.slice(0, -1))}

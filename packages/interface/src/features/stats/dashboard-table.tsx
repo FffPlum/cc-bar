@@ -26,6 +26,8 @@ export function DashboardTable({
   requests,
   error,
   loading,
+  previousData = false,
+  retry,
   cursor,
   next,
   previous,
@@ -39,6 +41,8 @@ export function DashboardTable({
   requests: DashboardRequests | null;
   error: string | null;
   loading: boolean;
+  previousData?: boolean;
+  retry?: () => void;
   cursor?: string;
   next: (cursor: string) => void;
   previous: () => void;
@@ -154,7 +158,7 @@ export function DashboardTable({
         ))}
       </div>
       {tab === "requests" ? (
-        <div>
+        <div aria-busy={loading}>
           {loading && !requests && (
             <p role="status" className="p-3 text-muted-foreground">
               {t("Loading request records…", "正在加载请求记录…")}
@@ -163,11 +167,29 @@ export function DashboardTable({
           {error && (
             <p role="alert" className="p-3">
               {error}{" "}
+              {retry && (
+                <Button size="sm" variant="outline" onClick={retry}>
+                  {t("Retry", "重试")}
+                </Button>
+              )}
               {cursor && (
                 <Button size="sm" variant="outline" onClick={reset}>
                   {t("Return to first page", "返回首页")}
                 </Button>
               )}
+            </p>
+          )}
+          {previousData && (
+            <p role="status" className="px-4 py-2 text-muted-foreground">
+              {error
+                ? t(
+                    "Request records could not be updated; showing previous results.",
+                    "请求记录未能更新，显示的是上次结果。",
+                  )
+                : t(
+                    "Updating request records; showing previous results temporarily.",
+                    "正在更新请求记录，暂显示上次结果。",
+                  )}
             </p>
           )}
           {requests?.coverage.incomplete && (
@@ -244,7 +266,7 @@ export function DashboardTable({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={!cursor}
+                disabled={!cursor || previousData}
                 onClick={previous}
               >
                 {t("Previous", "上一页")}
@@ -252,7 +274,7 @@ export function DashboardTable({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={!requests?.nextCursor}
+                disabled={!requests?.nextCursor || previousData}
                 onClick={() =>
                   requests?.nextCursor && next(requests.nextCursor)
                 }

@@ -237,4 +237,178 @@ final class UsageRequestIndexSQLiteTests: XCTestCase {
         XCTAssertTrue(restored.sourceKeys.isEmpty)
         XCTAssertEqual(restored.incompleteApps, [.codex])
     }
+
+    private var utcCalendar: Calendar {
+        var result = Calendar(identifier: .gregorian)
+        result.timeZone = TimeZone(secondsFromGMT: 0)!
+        return result
+    }
+    private var queryDay: Date { utcCalendar.startOfDay(for: Date(timeIntervalSince1970: 1_800_000_000)) }
+    private func queryRow(_ id: String, app: UsageApp = .codex, model: String = "gpt-test", offset: TimeInterval = 100,
+                          input: Int = 10, output: Int = 200, cost: Decimal? = 1,
+                          timing: RequestTiming? = nil) -> UsageRequestIndexStore.Row {
+        .init(id: id, conversationHash: fingerprint("conversation"), app: app, model: model, speed: .unknown,
+            day: queryDay, timestamp: queryDay.addingTimeInterval(offset), input: input, output: output,
+            cacheRead: 2, cacheCreation: 3, requests: 1, cost: cost,
+            costInput: cost, costOutput: nil, costRead: nil, costCreation: nil, timing: timing)
+    }
+    private func canonical(_ rows: [UsageRequestIndexStore.Row]) -> [UsageBucket] {
+        // Input can contain repeated partitions; the query must combine canonical buckets in SQL.
+        rows.map { row in
+            var timing = GenerationTiming.zero
+            timing.add(row.timing, outputTokens: row.output)
+            return UsageBucket(app: row.app, model: row.model, speed: row.speed, day: row.day,
+                inputTokens: row.input, outputTokens: row.output, cacheReadTokens: row.cacheRead,
+                cacheCreationTokens: row.cacheCreation, costUSD: row.cost ?? 0, requestCount: row.requests,
+                hasUnpricedUsage: row.cost == nil, timing: timing)
+        }
+    }
+    private func query(apps: Set<UsageApp> = [.codex, .claude], model: String? = nil,
+                       from: TimeInterval = 0, to: TimeInterval = 86400,
+                       hourly: Bool = false, page: UsageRequestIndexStore.Page? = nil) -> UsageRequestIndexStore.Query {
+        .init(apps: apps, model: model, from: queryDay.addingTimeInterval(from), to: queryDay.addingTimeInterval(to),
+            calendar: utcCalendar, hourly: hourly, page: page)
+    }
+
+    func testSQLFiltersPagesAndDecimalSortingAreExact() throws {
+        let base = Decimal(string: "123456789.123456789123456789")!
+        let rows = [queryRow("c", cost: base), queryRow("a", cost: base),
+            queryRow("b", cost: base + Decimal(string: "0.000000000000000001")!),
+            queryRow("other-app", app: .claude), queryRow("other-model", model: "other"),
+            queryRow("at-exclusive-end", offset: 200)]
+        try store.save(payload(rows))
+        let q = query(apps: [.codex], model: "gpt-test", from: 100, to: 200,
+            page: .init(offset: 0, limit: 2, sort: "cost", descending: true))
+        let first = try store.query(q, canonical: canonical(rows))
+        XCTAssertEqual(first.totalCount, 3)
+        XCTAssertEqual(first.rows.map(\.id), ["b", "a"])
+        XCTAssertEqual(first.buckets.count, 1)
+        XCTAssertEqual(first.buckets[0].requestCount, 3)
+        XCTAssertEqual(first.buckets[0].costUSD, base * 3 + Decimal(string: "0.000000000000000001")!)
+        var next = q
+        next.page?.offset = 2
+        XCTAssertEqual(try store.query(next, canonical: canonical(rows)).rows.map(\.id), ["c"])
+        next.page?.offset = 100
+        XCTAssertTrue(try store.query(next, canonical: canonical(rows)).rows.isEmpty)
+        next.model = "x' OR 1=1 --"
+        XCTAssertEqual(try store.query(next, canonical: canonical(rows)).totalCount, 0)
+    }
+
+    func testSQLAggregatesTimingAndRetainsFullPartitionCoverageForPartialRange() throws {
+        let rows = [queryRow("a", offset: 100, timing: RequestTiming(firstTokenMs: 50, generationMs: 1000)),
+            queryRow("b", offset: 3700, cost: nil, timing: RequestTiming(firstTokenMs: nil, generationMs: 2000, isEstimated: true)),
+            queryRow("c", offset: 7300, output: 5, timing: RequestTiming(firstTokenMs: 100, generationMs: 1))]
+        try store.save(payload(rows))
+        let results = try store.queryBatch([query(from: 0, to: 7200, hourly: true), query(from: 3600, to: 7200)], canonical: canonical(rows))
+        XCTAssertEqual(results[0].metadata.revision, results[1].metadata.revision)
+        XCTAssertEqual(results[0].buckets.map(\.day), [queryDay, queryDay.addingTimeInterval(3600)])
+        XCTAssertEqual(results[0].buckets[0].timing.firstTokenMs, 50)
+        XCTAssertEqual(results[0].buckets[0].timing.timedOutputTokens, 200)
+        XCTAssertEqual(results[0].buckets[1].timing.estimatedGenerationMs, 2000)
+        XCTAssertTrue(results[0].buckets[1].hasUnpricedUsage)
+        XCTAssertEqual(results[1].buckets[0].requestCount, 1)
+        XCTAssertEqual(results[1].partitions[0].requestCount, 3)
+        XCTAssertEqual(results[1].partitions[0].timing.firstTokenMs, 150)
+        XCTAssertTrue(results[1].rows.isEmpty, "Aggregate-only queries must never return request rows")
+    }
+
+    func testSQLRejectsUnacceptedPartitionAndMarksPricingMismatch() throws {
+        let rows = [queryRow("a"), queryRow("b", app: .claude)]
+        try store.save(payload(rows))
+        var buckets = canonical(rows)
+        buckets[0].inputTokens = 1
+        buckets[1].costUSD = 2
+        let result = try store.query(query(page: .init(offset: 0, limit: 20)), canonical: buckets)
+        XCTAssertEqual(result.rows.map(\.id), ["b"])
+        XCTAssertEqual(result.pendingPartitions.map(\.app), [.codex])
+        XCTAssertEqual(result.pricingMismatches.map(\.app), [.claude])
+        XCTAssertTrue(result.buckets[0].costIncomplete)
+    }
+
+    func testMetadataDoesNotDecodeDetailsAndMalformedAggregateIsNotSilentlyAccepted() throws {
+        let rows = [queryRow("a")]
+        try store.save(payload(rows))
+        try withDatabase { try execute($0, "UPDATE requests SET cost='12junk'") }
+        guard case .ready(let first) = store.loadMetadata() else { return XCTFail("Metadata must not load rows") }
+        guard case .ready(let second) = store.loadMetadata() else { return XCTFail("Metadata must remain readable") }
+        XCTAssertEqual(first.revision, second.revision)
+        XCTAssertThrowsError(try store.query(query(), canonical: canonical(rows))) { error in
+            XCTAssertTrue(UsageRequestIndexStore.queryFailureRequiresRebuild(error))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path), "Confirmed damaged details are quarantined")
+    }
+
+    func testPartialWritesPreserveUntouchedRowsAndFailedSourceMetadata() throws {
+        let first = [queryRow("codex"), queryRow("claude", app: .claude)]
+        try store.save(payload(first))
+        guard case .ready(let before) = store.loadMetadata() else { return XCTFail("Expected metadata") }
+        try store.saveChanges(payload([queryRow("new-claude", app: .claude)],
+            keys: [.codex: fingerprint("codex"), .claude: fingerprint("changed")], incomplete: [.codex]), replacingApps: [.claude])
+        guard case .ready(let after) = store.loadMetadata() else { return XCTFail("Expected metadata") }
+        XCTAssertNotEqual(before.revision, after.revision)
+        XCTAssertEqual(after.incompleteApps, [.codex])
+        XCTAssertEqual(Set(store.load()?.rows.map(\.id) ?? []), ["codex", "new-claude"])
+    }
+
+    func testConcurrentReadersUseIndependentSharedReadTransactions() async throws {
+        let rows = (0..<200).map { queryRow(String($0), offset: Double($0)) }
+        try store.save(payload(rows))
+        let store = self.store
+        let request = query(page: .init(offset: 50, limit: 10))
+        let canonical = canonical(rows)
+        let counts = try await withThrowingTaskGroup(of: Int.self) { group in
+            for _ in 0..<8 {
+                group.addTask { try store.query(request, canonical: canonical).rows.count }
+            }
+            var values: [Int] = []
+            for try await count in group { values.append(count) }
+            return values
+        }
+        XCTAssertEqual(counts, Array(repeating: 10, count: 8))
+    }
+
+
+    func testSQLHourlyBucketsPreserveBothOccurrencesOfDaylightSavingHour() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let start = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 11, day: 1)))
+        let end = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: start))
+        XCTAssertEqual(end.timeIntervalSince(start), 25 * 3600)
+        let rows = [5400.0, 9000.0].enumerated().map { index, offset in
+            UsageRequestIndexStore.Row(id: "dst-\(index)", conversationHash: fingerprint("dst"), app: .codex,
+                model: "gpt-test", speed: .unknown, day: start, timestamp: start.addingTimeInterval(offset),
+                input: 1, output: 2, cacheRead: 0, cacheCreation: 0, requests: 1,
+                cost: 1, costInput: nil, costOutput: nil, costRead: nil, costCreation: nil, timing: nil)
+        }
+        try store.save(payload(rows))
+        let result = try store.query(.init(apps: [.codex], from: start, to: end, calendar: calendar, hourly: true), canonical: canonical(rows))
+        XCTAssertEqual(result.buckets.map { $0.day.timeIntervalSince(start) }, [3600, 7200])
+        XCTAssertEqual(result.buckets.map(\.requestCount), [1, 1])
+        XCTAssertEqual(result.partitions[0].requestCount, 2)
+    }
+
+    func testDecimalAggregateOverflowPreservesDatabase() throws {
+        let rows = [queryRow("a", cost: NSDecimalNumber.maximum.decimalValue),
+            queryRow("b", cost: NSDecimalNumber.maximum.decimalValue)]
+        try store.save(payload(rows))
+        XCTAssertThrowsError(try store.query(query(), canonical: canonical(rows))) { error in
+            XCTAssertFalse(UsageRequestIndexStore.queryFailureRequiresRebuild(error))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: databaseURL.path))
+        guard case .ready = store.loadMetadata() else { return XCTFail("Overflow must preserve readable metadata") }
+    }
+
+
+    func testSQLRejectsMalformedAndOutOfRangeStoredCounts() throws {
+        let rows = [queryRow("a")]
+        for invalid in ["'not-a-count'", "-1", "1000000000001"] {
+            try store.save(payload(rows))
+            try withDatabase { try execute($0, "UPDATE requests SET input=\(invalid)") }
+            XCTAssertThrowsError(try store.query(query(), canonical: canonical(rows))) { error in
+                XCTAssertTrue(UsageRequestIndexStore.queryFailureRequiresRebuild(error))
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path))
+        }
+    }
+
 }

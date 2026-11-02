@@ -57,13 +57,9 @@ final class HostWindowUsageService {
     let settings: SettingsStore
     let actions: HostWindowUsageActions
     let now: () -> Date
-    var dashboardIndex: UsageRequestIndexSnapshot?
-    var dashboardVerifiedCache: [UsageRequestRecord]?
-    var dashboardVerifiedCacheKey: String?
-    var dashboardPreviousPartitions: [DashboardPartition: [UsageRequestRecord]] = [:]
-    var dashboardPendingPartitions: Set<DashboardPartition> = []
-    var dashboardPricingMismatch: Set<DashboardPartition> = []
-    var dashboardIndexProvider: (() async -> UsageRequestIndexSnapshot)?
+    // Test fixtures may select an isolated SQLite store; production uses UsageService's store.
+    var dashboardStore: UsageRequestIndexStore?
+    var dashboardStatusProvider: (() -> UsageRequestIndexStatus)?
     private let overviewCache = StatsOverviewCache()
     private let projectPageCache = ProjectPageCache()
     private var opaqueIDs: [String: String] = [:]
@@ -83,7 +79,7 @@ final class HostWindowUsageService {
     private var pendingCursorRequest: CursorRequest?
     private var cursorAttempts: [CursorRequest: Date] = [:]
     private var refreshTask: Task<Void, Never>?
-    private var generation = 0
+    private(set) var generation = 0
     /// The owning Host API uses this for invalidation after background operations.
     var didChange: (() -> Void)?
     var refreshingUsage: Bool { refreshTask != nil }
@@ -108,11 +104,6 @@ final class HostWindowUsageService {
     }
 
     func invalidate() {
-        dashboardVerifiedCache = nil
-        dashboardVerifiedCacheKey = nil
-        dashboardPreviousPartitions.removeAll()
-        dashboardPendingPartitions.removeAll()
-        dashboardPricingMismatch.removeAll()
         generation += 1
         cursorTask?.cancel(); cursorTask = nil
         refreshTask?.cancel(); refreshTask = nil

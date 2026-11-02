@@ -8,14 +8,14 @@ nonisolated struct UsageRequestRecord: Sendable {
     let entry: UsageEntry
 }
 
-nonisolated struct UsageRequestIndexSnapshot: Sendable {
-    let records: [UsageRequestRecord]
+/// Only index readiness is held in memory. Request rows stay in SQLite.
+nonisolated struct UsageRequestIndexStatus: Sendable {
     let revision: String
-    /// Sources whose read failed or for which individual committed records are unavailable.
     let incompleteApps: Set<UsageApp>
-    /// Read failures that can be retried without a canonical revision change.
     var retryableApps: Set<UsageApp> = []
     var isRefreshing = false
+    var isReady = false
+    var isUnavailable = false
 }
 
 nonisolated enum UsageRequestIndex {
@@ -294,17 +294,24 @@ final class UsageService {
     #if DEBUG
     private(set) var requestIndexFingerprintCalculations = 0
     #endif
-    private var requestIndexCache: (key: String, snapshot: UsageRequestIndexSnapshot)?
-    private var requestIndexSourceKeys: [UsageApp: String] = [:]
+    private var requestIndexMetadata: UsageRequestIndexStore.Metadata?
+    private var requestIndexRetryableApps: Set<UsageApp> = []
     private(set) var requestIndexRevision: UInt64 = 0
     private var requestIndexWarmTask: Task<Void, Never>?
+    private var requestIndexBuildTask: Task<RequestIndexUpdate, Never>?
     private var requestIndexHistoryReady = false
-    private var requestIndexWriteTask: Task<Void, Never>?
     private var requestIndexDiskLoaded = false
-    private var requestIndexConversationHashes: [String: String] = [:]
+    private var requestIndexUnavailable = false
     private var requestIndexRetryAfter: Date?
-    private let requestIndexLoadingRevision = "loading"
-    private var requestIndexTask: (key: String, task: Task<UsageRequestIndexSnapshot, Never>)?
+
+    var requestIndexStore: UsageRequestIndexStore { UsageRequestIndexStore(directory: historyStore.directory) }
+
+    private nonisolated struct RequestIndexUpdate: Sendable {
+        var rows: [UsageRequestIndexStore.Row] = []
+        var incomplete = false
+        var retryable = false
+        var replace = true
+    }
 
     private let historyStore: UsageSnapshotStore
     private let roots: UsageScanRoots
@@ -431,242 +438,209 @@ final class UsageService {
         return keys
     }
 
-    /// Returns immediately; the authoritative daily rollups remain available while warming.
-    func requestIndexSnapshotForDisplay() -> UsageRequestIndexSnapshot {
+    /// Returns only metadata. A display read never restores or scans request rows.
+    func requestIndexStatusForDisplay() -> UsageRequestIndexStatus {
         guard requestIndexHistoryReady else {
-            return UsageRequestIndexSnapshot(records: [], revision: requestIndexLoadingRevision,
-                incompleteApps: Set(UsageApp.allCases), isRefreshing: true)
+            return UsageRequestIndexStatus(revision: "loading", incompleteApps: Set(UsageApp.allCases), isRefreshing: true)
         }
         let keys = requestIndexFingerprintsCache.flatMap { $0.token == requestIndexInputToken ? $0.keys : nil } ?? [:]
-        let valid = Set(UsageApp.localApps.filter { keys[$0] == requestIndexSourceKeys[$0] && keys[$0] != nil })
-        let cached = requestIndexCache?.snapshot
-        let needsRefresh = !requestIndexDiskLoaded || valid.count < UsageApp.localApps.count || !(cached?.retryableApps.isEmpty ?? true)
-        if needsRefresh { scheduleRequestIndexWarm() }
-        return UsageRequestIndexSnapshot(
-            records: cached?.records ?? [],
-            revision: cached?.revision ?? requestIndexLoadingRevision,
-            incompleteApps: (cached?.incompleteApps ?? Set(UsageApp.allCases)).union(Set(UsageApp.localApps).subtracting(valid)),
-            retryableApps: cached?.retryableApps ?? [], isRefreshing: requestIndexWarmTask != nil)
+        let valid = Set(UsageApp.localApps.filter { keys[$0] == requestIndexMetadata?.sourceKeys[$0] && keys[$0] != nil })
+        if !requestIndexDiskLoaded || valid.count < UsageApp.localApps.count || !requestIndexRetryableApps.isEmpty {
+            scheduleRequestIndexWarm()
+        }
+        return UsageRequestIndexStatus(revision: requestIndexMetadata?.revision ?? "loading",
+            incompleteApps: (requestIndexMetadata?.incompleteApps ?? Set(UsageApp.allCases))
+                .union(Set(UsageApp.localApps).subtracting(valid)),
+            retryableApps: requestIndexRetryableApps, isRefreshing: requestIndexWarmTask != nil,
+            isReady: requestIndexMetadata != nil, isUnavailable: requestIndexUnavailable)
+    }
+
+    /// Keep the last successful state while scheduling metadata recovery after a failed SQL read.
+    func requestIndexStorageReadFailed() {
+        requestIndexDiskLoaded = false
+        requestIndexUnavailable = true
+        requestIndexRetryAfter = Date().addingTimeInterval(2)
     }
 
     private func scheduleRequestIndexWarm() {
-        guard requestIndexHistoryReady, requestIndexWarmTask == nil, requestIndexRetryAfter.map({ $0 <= Date() }) ?? true else { return }
+        guard requestIndexHistoryReady, requestIndexWarmTask == nil,
+              requestIndexRetryAfter.map({ $0 <= Date() }) ?? true else { return }
         requestIndexWarmTask = Task { [weak self] in
             guard let self else { return }
-            if !self.requestIndexDiskLoaded {
-                self.requestIndexDiskLoaded = true
-                let store = UsageRequestIndexStore(directory: self.historyStore.directory)
-                let loaded = await Task.detached(priority: .utility) { store.loadResult() }.value
-                let payload: UsageRequestIndexStore.Payload?
-                switch loaded {
-                case .ready(let value): payload = value
-                case .needsRebuild: payload = nil
-                case .unavailable:
-                    // A locked or newer database is not an empty cache. Retry reading
-                    // it later instead of replaying missing logs and publishing zeros.
-                    self.requestIndexDiskLoaded = false
-                    self.requestIndexRetryAfter = Date().addingTimeInterval(30)
-                    self.requestIndexWarmTask = nil
-                    self.requestIndexRevision &+= 1
-                    return
-                }
-                if let payload, self.requestIndexCache == nil {
-                    guard let keys = await self.requestIndexFingerprints() else {
-                        self.requestIndexDiskLoaded = false
-                        self.requestIndexWarmTask = nil
-                        self.scheduleRequestIndexWarm()
-                        return
-                    }
-                    let capturedToken = self.requestIndexInputToken
-                    let valid = Set(UsageApp.localApps.filter { payload.sourceKeys[$0] == keys[$0] && keys[$0] != nil })
-                    let conversations = self.conversationAggregator.snapshot().infos
-                    let (records, hashes) = await Task.detached(priority: .utility) {
-                        let mapping = Dictionary(conversations.map { (UsageRequestIndexStore.hash($0.key), $0.key) }, uniquingKeysWith: { first, _ in first })
-                        let hashes = Dictionary(payload.rows.map { ($0.id, $0.conversationHash) }, uniquingKeysWith: { first, _ in first })
-                        let records = payload.rows.map { row in
-                            let breakdown: CostBreakdown?
-                            if let a = row.costInput, let b = row.costOutput, let c = row.costRead, let d = row.costCreation {
-                                breakdown = CostBreakdown(input: a, output: b, cacheRead: c, cacheCreation: d)
-                            } else { breakdown = nil }
-                            let entry = UsageEntry(app: row.app, conversationKey: mapping[row.conversationHash] ?? "",
-                                model: row.model, speed: row.speed, day: row.day, timestamp: row.timestamp,
-                                inputTokens: row.input, outputTokens: row.output, cacheReadTokens: row.cacheRead,
-                                cacheCreationTokens: row.cacheCreation, requestCount: row.requests,
-                                costUSD: row.cost, costBreakdown: breakdown, timing: row.timing)
-                            return UsageRequestRecord(id: row.id, entry: entry)
-                        }
-                        return (records, hashes)
-                    }.value
-                    guard self.requestIndexCache == nil, capturedToken == self.requestIndexInputToken else {
-                        self.requestIndexDiskLoaded = false
-                        self.requestIndexWarmTask = nil
-                        self.scheduleRequestIndexWarm()
-                        return
-                    }
-                    self.requestIndexConversationHashes = hashes
-                    let partial = UsageRequestIndexSnapshot(records: records, revision: UUID().uuidString,
-                        incompleteApps: payload.incompleteApps.union(Set(UsageApp.localApps).subtracting(valid)))
-                    self.requestIndexSourceKeys = payload.sourceKeys
-                    let key = UsageApp.localApps.map { keys[$0] ?? "" }.joined(separator: ":")
-                    self.requestIndexCache = (valid.count == UsageApp.localApps.count ? key : "partial", partial)
-                    self.requestIndexRevision &+= 1
-                }
-            }
-            while !Task.isCancelled {
-                while self.isScanning || self.isCycleRebuilding {
-                    try? await Task.sleep(nanoseconds: 200_000_000)
-                    guard !Task.isCancelled else { self.requestIndexWarmTask = nil; return }
-                }
-                let result = await self.requestIndexSnapshot()
-                guard self.requestIndexCache?.snapshot.revision == result.revision else { continue }
-                if !result.retryableApps.isEmpty { self.requestIndexRetryAfter = Date().addingTimeInterval(30) }
-                self.requestIndexWarmTask = nil
-                self.requestIndexRevision &+= 1
+            await self.updateRequestIndex()
+            self.requestIndexWarmTask = nil
+            self.requestIndexRevision &+= 1
+        }
+    }
+
+    /// One writer owns the sync chain. Import one changed source at a time and release
+    /// its parsed rows after committing; unchanged sources are never read into memory.
+    private func updateRequestIndex() async {
+        let store = requestIndexStore
+        if !requestIndexDiskLoaded {
+            let metadata = await Task.detached(priority: .utility) { store.loadMetadata() }.value
+            switch metadata {
+            case .ready(let value):
+                requestIndexMetadata = value
+                requestIndexDiskLoaded = true
+                requestIndexRevision &+= 1
+            case .needsRebuild:
+                requestIndexMetadata = nil
+                requestIndexDiskLoaded = true
+            case .unavailable:
+                requestIndexUnavailable = true
+                requestIndexRetryAfter = Date().addingTimeInterval(30)
                 return
             }
-            self.requestIndexWarmTask = nil
-        }
-    }
-
-    private func persistRequestIndex(_ result: UsageRequestIndexSnapshot, keys: [UsageApp: String]) {
-        let hashes = requestIndexConversationHashes
-        let store = UsageRequestIndexStore(directory: historyStore.directory)
-        let previous = requestIndexWriteTask
-        requestIndexWriteTask = Task { [weak self] in
-            let payload = await Task.detached(priority: .utility) {
-                let rows = result.records.map { record in
-                    let entry = record.entry
-                    return UsageRequestIndexStore.Row(id: record.id, conversationHash: entry.conversationKey.isEmpty ? (hashes[record.id] ?? UsageRequestIndexStore.hash("")) : UsageRequestIndexStore.hash(entry.conversationKey),
-                        app: entry.app, model: entry.model, speed: entry.speed, day: entry.day, timestamp: entry.timestamp,
-                        input: entry.inputTokens, output: entry.outputTokens, cacheRead: entry.cacheReadTokens,
-                        cacheCreation: entry.cacheCreationTokens, requests: entry.requestCount, cost: entry.costUSD,
-                        costInput: entry.costBreakdown?.input, costOutput: entry.costBreakdown?.output,
-                        costRead: entry.costBreakdown?.cacheRead, costCreation: entry.costBreakdown?.cacheCreation, timing: entry.timing)
-                }
-                let payload = UsageRequestIndexStore.Payload(version: 1, sourceKeys: keys,
-                    incompleteApps: result.incompleteApps, rows: rows)
-                return payload
-            }.value
-            await previous?.value
-            guard let self, !Task.isCancelled, self.requestIndexSourceKeys == keys,
-                  self.requestIndexCache?.snapshot.revision == result.revision else { return }
-            await Task.detached(priority: .utility) { try? store.save(payload) }.value
-        }
-    }
-
-    /// Reconstructs available details without changing canonical history. Coverage must
-    /// still be reconciled against daily rollups; absent historical files cannot be inferred.
-    func requestIndexSnapshot() async -> UsageRequestIndexSnapshot {
-        guard requestIndexHistoryReady else {
-            return UsageRequestIndexSnapshot(records: [], revision: requestIndexLoadingRevision,
-                incompleteApps: Set(UsageApp.allCases), isRefreshing: true)
         }
         for _ in 0..<3 {
-            guard let sourceKeys = await requestIndexFingerprints() else { continue }
-            let inputToken = requestIndexInputToken
-            let key = UsageApp.localApps.map { sourceKeys[$0] ?? "" }.joined(separator: ":")
-            if let cache = requestIndexCache, cache.key == key, cache.snapshot.retryableApps.isEmpty { return cache.snapshot }
-            let task: Task<UsageRequestIndexSnapshot, Never>
-            if let current = requestIndexTask, current.key == key {
-                task = current.task
-            } else {
-                if let current = requestIndexTask {
-                    _ = await current.task.value
-                    if requestIndexTask?.key == current.key { requestIndexTask = nil }
-                    continue
-                }
-                let roots = self.roots
-                let acceptedState = cachedScanState
-                let kimi = acceptedState?.kimi
-                let kimiComplete = kimi != nil
-                let legacyCodex = usesLegacyCodexModels
-                let prior = requestIndexCache?.snapshot
-                let oldKeys = requestIndexSourceKeys
-                let changed = Set(UsageApp.localApps.filter { sourceKeys[$0] != oldKeys[$0] }).union(prior?.retryableApps ?? [])
-                task = Task.detached(priority: .utility) {
-                    let cancelled = UsageRequestIndexSnapshot(records: [], revision: UUID().uuidString,
-                        incompleteApps: Set(UsageApp.allCases))
-                    var records = prior?.records.filter { !changed.contains($0.entry.app) } ?? []
-                    var incomplete = prior?.incompleteApps ?? [.dsh, .cursor]
-                    var retryable: Set<UsageApp> = []
-                    func replace(_ app: UsageApp, _ entries: [UsageEntry], failed: Bool, retry: Bool = true) {
-                        if failed {
-                            records.append(contentsOf: prior?.records.filter { $0.entry.app == app } ?? [])
-                            incomplete.insert(app)
-                            if retry { retryable.insert(app) }
-                        } else {
-                            records.append(contentsOf: UsageRequestIndex.records(from: entries))
-                            incomplete.remove(app)
-                        }
-                    }
-                    if Task.isCancelled { return cancelled }
-                    if changed.contains(.claude) {
-                        let result = ClaudeJSONLScanner.scan(previous: [:], seenMessageIds: [], root: roots.claudeRoot,
-                            conversationIndex: ConversationTitleIndex.ClaudeIndex(titles: [:], projects: [:]),
-                            acceptedBoundary: acceptedState?.claude ?? [:])
-                        replace(.claude, result.entries, failed: result.failedFileCount > 0 || result.hasDeferredMessages)
-                    }
-                    if Task.isCancelled { return cancelled }
-                    if changed.contains(.codex) {
-                        var result = await CodexJSONLScanner.scan(previous: [:], seenTokenIds: [], roots: roots.codexRoots, indexedTitles: [:],
-                            historicalBoundary: acceptedState?.codex ?? [:], priceHistorical: true)
-                        if legacyCodex { result = Self.legacyCodexResult(result) }
-                        replace(.codex, result.entries, failed: result.failedFileCount > 0)
-                    }
-                    if Task.isCancelled { return cancelled }
-                    if changed.contains(.pi) {
-                        let result = PiJSONLScanner.scan(previous: [:], seenEntryIds: [], root: roots.piRoot,
-                            acceptedBoundary: acceptedState?.pi ?? [:])
-                        replace(.pi, result.entries, failed: result.failedFileCount > 0)
-                    }
-                    if Task.isCancelled { return cancelled }
-                    if changed.contains(.opencode) {
-                        let result = OpencodeScanner.scan(previous: nil, databaseURL: roots.opencodeDatabaseURL)
-                        replace(.opencode, result.entries, failed: !result.isComplete,
-                            retry: FileManager.default.fileExists(atPath: roots.opencodeDatabaseURL.path))
-                    }
-                    if Task.isCancelled { return cancelled }
-                    if changed.contains(.antigravity) {
-                        let result = AntigravityScanner.scan(previous: nil, roots: roots.antigravityRoots)
-                        replace(.antigravity, result.entries, failed: !result.isComplete)
-                    }
-                    if Task.isCancelled { return cancelled }
-                    if changed.contains(.kimi) {
-                        replace(.kimi, kimi.map { KimiSessionScanner.committedEntries(from: $0) } ?? [],
-                            failed: kimi == nil || !kimiComplete, retry: false)
-                    }
-                    return UsageRequestIndexSnapshot(records: records, revision: UUID().uuidString,
-                        incompleteApps: incomplete, retryableApps: retryable)
-                }
-                requestIndexTask = (key, task)
+            while isScanning || isCycleRebuilding {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard !Task.isCancelled else { return }
             }
-            let result = await task.value
-            if requestIndexTask?.key == key { requestIndexTask = nil }
-            if inputToken == requestIndexInputToken {
-                if !isScanning {
-                    requestIndexCache = (key, result)
-                    requestIndexSourceKeys = sourceKeys.filter { !result.retryableApps.contains($0.key) }
-                        .merging(requestIndexSourceKeys.filter { result.retryableApps.contains($0.key) }) { new, _ in new }
-                    persistRequestIndex(result, keys: requestIndexSourceKeys)
+            guard !Task.isCancelled else { return }
+            guard let keys = await requestIndexFingerprints() else { continue }
+            let token = requestIndexInputToken
+            let changed = UsageApp.localApps.filter {
+                keys[$0] != requestIndexMetadata?.sourceKeys[$0] || requestIndexRetryableApps.contains($0)
+            }
+            if changed.isEmpty { requestIndexUnavailable = false; return }
+            let roots = roots
+            let accepted = cachedScanState
+            let legacy = usesLegacyCodexModels
+            let canonical = aggregator.snapshotLocal()
+            for app in changed {
+                guard token == requestIndexInputToken, !isScanning, !Task.isCancelled else { break }
+                let task = Task.detached(priority: .utility) {
+                    await Self.buildRequestIndexUpdate(app: app, roots: roots, accepted: accepted,
+                        legacyCodex: legacy, canonical: canonical.filter { $0.app == app })
                 }
-                return result
+                requestIndexBuildTask = task
+                let update = await task.value
+                requestIndexBuildTask = nil
+                guard token == requestIndexInputToken, !isScanning, !Task.isCancelled else { break }
+                var sourceKeys = requestIndexMetadata?.sourceKeys ?? [:]
+                var incomplete = requestIndexMetadata?.incompleteApps ?? [.dsh, .cursor]
+                if update.replace || !update.retryable { sourceKeys[app] = keys[app] }
+                if update.incomplete { incomplete.insert(app) } else { incomplete.remove(app) }
+                let payload = UsageRequestIndexStore.Payload(version: 1, sourceKeys: sourceKeys,
+                    incompleteApps: incomplete, rows: update.rows)
+                // Include failed sources in metadata without replacing their prior rows.
+                do {
+                    let metadata = try await Task.detached(priority: .utility) {
+                        try store.saveChanges(payload, replacingApps: update.replace ? [app] : [])
+                        guard case .ready(let result) = store.loadMetadata() else {
+                            throw CocoaError(.fileReadUnknown)
+                        }
+                        return result
+                    }.value
+                    requestIndexMetadata = metadata
+                    if update.retryable { requestIndexRetryableApps.insert(app) }
+                    else { requestIndexRetryableApps.remove(app) }
+                    requestIndexRevision &+= 1
+                } catch {
+                    // Preserve the last published metadata and rows. A failed database
+                    // write must not become a successful empty result in the frontend.
+                    requestIndexRetryAfter = Date().addingTimeInterval(30)
+                    requestIndexDiskLoaded = false
+                    requestIndexUnavailable = true
+                    return
+                }
+            }
+            if token == requestIndexInputToken {
+                requestIndexUnavailable = false
+                if !requestIndexRetryableApps.isEmpty { requestIndexRetryAfter = Date().addingTimeInterval(30) }
+                return
             }
         }
-        return UsageRequestIndexSnapshot(records: [], revision: UUID().uuidString,
-            incompleteApps: Set(UsageApp.allCases))
+    }
+
+    private nonisolated static func buildRequestIndexUpdate(app: UsageApp, roots: UsageScanRoots,
+        accepted: ScanState?, legacyCodex: Bool, canonical: [UsageBucket]) async -> RequestIndexUpdate {
+        var entries: [UsageEntry] = []
+        var failed = false
+        var retryable = true
+        switch app {
+        case .claude:
+            let result = ClaudeJSONLScanner.scan(previous: [:], seenMessageIds: [], root: roots.claudeRoot,
+                conversationIndex: ConversationTitleIndex.ClaudeIndex(titles: [:], projects: [:]),
+                acceptedBoundary: accepted?.claude ?? [:])
+            entries = result.entries
+            failed = result.failedFileCount > 0 || result.hasDeferredMessages
+        case .codex:
+            var result = await CodexJSONLScanner.scan(previous: [:], seenTokenIds: [], roots: roots.codexRoots,
+                indexedTitles: [:], historicalBoundary: accepted?.codex ?? [:], priceHistorical: true)
+            if legacyCodex { result = Self.legacyCodexResult(result) }
+            entries = result.entries
+            failed = result.failedFileCount > 0
+        case .pi:
+            let result = PiJSONLScanner.scan(previous: [:], seenEntryIds: [], root: roots.piRoot,
+                acceptedBoundary: accepted?.pi ?? [:])
+            entries = result.entries
+            failed = result.failedFileCount > 0
+        case .opencode:
+            let result = OpencodeScanner.scan(previous: nil, databaseURL: roots.opencodeDatabaseURL)
+            entries = result.entries
+            failed = !result.isComplete
+            retryable = FileManager.default.fileExists(atPath: roots.opencodeDatabaseURL.path)
+        case .antigravity:
+            let result = AntigravityScanner.scan(previous: nil, roots: roots.antigravityRoots)
+            entries = result.entries
+            failed = !result.isComplete
+        case .kimi:
+            entries = accepted?.kimi.map { KimiSessionScanner.committedEntries(from: $0) } ?? []
+            failed = accepted?.kimi == nil
+            retryable = false
+        case .dsh, .cursor:
+            return RequestIndexUpdate(incomplete: true)
+        }
+        guard !Task.isCancelled, !failed else {
+            return RequestIndexUpdate(incomplete: true, retryable: retryable, replace: false)
+        }
+        // Validate at ingestion, never by restoring all persisted details for a query.
+        // A source ahead of accepted history leaves the previous SQLite rows intact.
+        struct Partition: Hashable { let model: String; let speed: UsageSpeed; let day: Date }
+        var remaining: [Partition: UsageBucket] = [:]
+        for bucket in canonical { remaining[Partition(model: bucket.model, speed: bucket.speed, day: bucket.day)] = bucket }
+        entries = entries.filter { remaining[Partition(model: $0.model, speed: $0.speed, day: $0.day)] != nil }
+        for entry in entries {
+            let key = Partition(model: entry.model, speed: entry.speed, day: entry.day)
+            guard var bucket = remaining[key], bucket.inputTokens >= entry.inputTokens,
+                  bucket.outputTokens >= entry.outputTokens, bucket.cacheReadTokens >= entry.cacheReadTokens,
+                  bucket.cacheCreationTokens >= entry.cacheCreationTokens, bucket.requestCount >= entry.requestCount else {
+                return RequestIndexUpdate(incomplete: true, retryable: true, replace: false)
+            }
+            bucket.inputTokens -= entry.inputTokens; bucket.outputTokens -= entry.outputTokens
+            bucket.cacheReadTokens -= entry.cacheReadTokens; bucket.cacheCreationTokens -= entry.cacheCreationTokens
+            bucket.requestCount -= entry.requestCount
+            remaining[key] = bucket
+        }
+        let rows = UsageRequestIndex.records(from: entries).map { record in
+            let e = record.entry
+            return UsageRequestIndexStore.Row(id: record.id, conversationHash: UsageRequestIndexStore.hash(e.conversationKey),
+                app: e.app, model: e.model, speed: e.speed, day: e.day, timestamp: e.timestamp,
+                input: e.inputTokens, output: e.outputTokens, cacheRead: e.cacheReadTokens,
+                cacheCreation: e.cacheCreationTokens, requests: e.requestCount, cost: e.costUSD,
+                costInput: e.costBreakdown?.input, costOutput: e.costBreakdown?.output,
+                costRead: e.costBreakdown?.cacheRead, costCreation: e.costBreakdown?.cacheCreation, timing: e.timing)
+        }
+        return RequestIndexUpdate(rows: rows)
     }
 
     isolated deinit {
-        requestIndexTask?.task.cancel()
+        requestIndexBuildTask?.cancel()
         requestIndexFingerprintTask?.task.cancel()
         requestIndexWarmTask?.cancel()
-        requestIndexWriteTask?.cancel()
     }
 
     #if DEBUG
-    func waitForRequestIndexForTesting() async {
+    func waitForRequestIndexForTesting() async { await requestIndexWarmTask?.value }
+
+    func synchronizeRequestIndexForTesting() async {
         await requestIndexWarmTask?.value
-        await requestIndexWriteTask?.value
+        requestIndexRetryAfter = nil
+        scheduleRequestIndexWarm()
+        await requestIndexWarmTask?.value
     }
     #endif
 

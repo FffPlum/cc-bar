@@ -3,6 +3,19 @@ import Observation
 @testable import CCBar
 
 final class UsageRequestIndexTests: XCTestCase {
+    /// Test fixtures contain only a few rows. Exercise the production bounded SQL
+    /// query rather than restoring a full index even in lifecycle assertions.
+    @MainActor
+    private func page(_ service: UsageService, app: UsageApp) throws -> [UsageRequestIndexStore.Row] {
+        let result = try service.requestIndexStore.query(
+            .init(apps: [app], from: .distantPast, to: .distantFuture,
+                  page: .init(offset: 0, limit: 10)),
+            canonical: service.aggregator.snapshotLocal())
+        XCTAssertLessThanOrEqual(result.totalCount, 10, "Fixture must fit a bounded test page")
+        XCTAssertEqual(result.rows.count, result.totalCount)
+        return result.rows
+    }
+
     func testIdenticalRequestsRemainDistinctAndIDsAreStable() {
         let entry = UsageEntry(app: .codex, conversationKey: "codex:test", model: "model", speed: .standard,
                                day: Date(timeIntervalSince1970: 0), timestamp: Date(timeIntervalSince1970: 3600),
@@ -33,19 +46,24 @@ final class UsageRequestIndexTests: XCTestCase {
             timestamp: "2026-09-20T02:00:00Z", input: 100, output: 10)
         try env.append(secondLine, to: file)
         let before = service.aggregator.snapshotLocal()
-        let initial = await service.requestIndexSnapshot()
-        XCTAssertEqual(initial.records.filter { $0.entry.app == .claude }.count, 1)
+        await service.synchronizeRequestIndexForTesting()
+        let initial = service.requestIndexStatusForDisplay()
+        let initialRows = try page(service, app: .claude)
+        XCTAssertEqual(initialRows.count, 1)
         XCTAssertEqual(service.aggregator.snapshotLocal(), before)
-        let cached = await service.requestIndexSnapshot()
+        await service.synchronizeRequestIndexForTesting()
+        let cached = service.requestIndexStatusForDisplay()
         XCTAssertEqual(cached.revision, initial.revision)
         await service.scanNow()
-        let updated = await service.requestIndexSnapshot()
-        XCTAssertEqual(updated.records.filter { $0.entry.app == .claude }.count, 2)
+        await service.synchronizeRequestIndexForTesting()
+        let updated = service.requestIndexStatusForDisplay()
+        let updatedRows = try page(service, app: .claude)
+        XCTAssertEqual(updatedRows.count, 2)
         XCTAssertNotEqual(updated.revision, initial.revision)
         let restarted = env.makeService()
         await env.bootstrap(restarted)
-        let restored = await restarted.requestIndexSnapshot()
-        XCTAssertEqual(restored.records.filter { $0.entry.app == .claude }.count, 1)
+        await restarted.synchronizeRequestIndexForTesting()
+        XCTAssertEqual(try page(restarted, app: .claude).count, 1)
     }
     @MainActor
     func testUnchangedSourceReusesRecordsWhenAnotherSourceChanges() async throws {
@@ -56,17 +74,21 @@ final class UsageRequestIndexTests: XCTestCase {
         let service = env.makeService()
         await env.bootstrap(service)
         await service.scanNow()
-        let initial = await service.requestIndexSnapshot()
-        XCTAssertEqual(initial.records.filter { $0.entry.app == .claude }.count, 1)
+        await service.synchronizeRequestIndexForTesting()
+        let initial = service.requestIndexStatusForDisplay()
+        let initialRows = try page(service, app: .claude)
+        XCTAssertEqual(initialRows.count, 1)
         // If Claude were rescanned here, its temporarily unavailable file would yield no record.
         try FileManager.default.removeItem(at: file)
         let date = Date(timeIntervalSince1970: 1_800_000_000)
         service.aggregator.ingestLocal([UsageEntry(app: .codex, conversationKey: "codex:test",
             model: "model", speed: .standard, day: date, timestamp: date, inputTokens: 1,
             outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: nil, costBreakdown: nil)])
-        let updated = await service.requestIndexSnapshot()
-        XCTAssertEqual(updated.records.filter { $0.entry.app == .claude }.map(\.id),
-                       initial.records.filter { $0.entry.app == .claude }.map(\.id))
+        await service.synchronizeRequestIndexForTesting()
+        let updated = service.requestIndexStatusForDisplay()
+        let updatedRows = try page(service, app: .claude)
+        XCTAssertEqual(updatedRows.map(\.id),
+                       initialRows.map(\.id))
         XCTAssertNotEqual(updated.revision, initial.revision)
     }
     @MainActor
@@ -81,10 +103,10 @@ final class UsageRequestIndexTests: XCTestCase {
         let later = env.codexLines(id: "session", model: "gpt-5", timestampPrefix: "2026-09-20T02:00:00",
             input: 200, cachedInput: 20, output: 40)
         for line in later { try env.append(line, to: file) }
-        let result = await service.requestIndexSnapshot()
-        let records = result.records.filter { $0.entry.app == .codex }
+        await service.synchronizeRequestIndexForTesting()
+        let records = try page(service, app: .codex)
         XCTAssertEqual(records.count, 1)
-        XCTAssertEqual(records.first?.entry.inputTokens, 90)
+        XCTAssertEqual(records.first?.input, 90)
     }
     @MainActor
     func testTemporaryReadFailureRetainsRecordsAndRetriesWithoutRevisionChange() async throws {
@@ -95,30 +117,34 @@ final class UsageRequestIndexTests: XCTestCase {
         let service = env.makeService()
         await env.bootstrap(service)
         await service.scanNow()
-        let initial = await service.requestIndexSnapshot()
-        let oldRecords = initial.records.filter { $0.entry.app == .claude }
+        await service.synchronizeRequestIndexForTesting()
+        let initial = service.requestIndexStatusForDisplay()
+        let initialRows = try page(service, app: .claude)
+        let oldRecords = initialRows
         XCTAssertEqual(oldRecords.count, 1)
         let data = try Data(contentsOf: file)
         let date = Date(timeIntervalSince1970: 1_800_000_000)
         service.aggregator.ingestLocal([UsageEntry(app: .claude, conversationKey: "claude:other",
             model: "model", speed: .standard, day: date, timestamp: date, inputTokens: 1,
             outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: nil, costBreakdown: nil)])
-        let duringChange = service.requestIndexSnapshotForDisplay()
-        XCTAssertEqual(duringChange.records.filter { $0.entry.app == .claude }.map(\.id), oldRecords.map(\.id))
+        let duringChange = service.requestIndexStatusForDisplay()
+        XCTAssertEqual(try page(service, app: .claude).map(\.id), oldRecords.map(\.id))
         XCTAssertEqual(duringChange.revision, initial.revision)
         try Data().write(to: file)
-        let failed = await service.requestIndexSnapshot()
+        await service.synchronizeRequestIndexForTesting()
+        let failed = service.requestIndexStatusForDisplay()
         XCTAssertTrue(failed.retryableApps.contains(.claude))
         XCTAssertTrue(failed.incompleteApps.contains(.claude))
-        XCTAssertEqual(failed.records.filter { $0.entry.app == .claude }.map(\.id), oldRecords.map(\.id))
-        let displayFailed = service.requestIndexSnapshotForDisplay()
-        XCTAssertEqual(displayFailed.records.filter { $0.entry.app == .claude }.map(\.id), oldRecords.map(\.id))
+        XCTAssertEqual(try page(service, app: .claude).map(\.id), oldRecords.map(\.id))
+        let displayFailed = service.requestIndexStatusForDisplay()
+        XCTAssertTrue(displayFailed.isReady)
         XCTAssertTrue(displayFailed.incompleteApps.contains(.claude))
         try data.write(to: file)
-        let recovered = await service.requestIndexSnapshot()
+        await service.synchronizeRequestIndexForTesting()
+        let recovered = service.requestIndexStatusForDisplay()
         XCTAssertFalse(recovered.retryableApps.contains(.claude))
         XCTAssertFalse(recovered.incompleteApps.contains(.claude))
-        XCTAssertEqual(recovered.records.filter { $0.entry.app == .claude }.map(\.id), oldRecords.map(\.id))
+        XCTAssertEqual(try page(service, app: .claude).map(\.id), oldRecords.map(\.id))
     }
     @MainActor
     func testSidecarLoadsDuringPausedScanAndWarmCompletesAfterward() async throws {
@@ -128,7 +154,7 @@ final class UsageRequestIndexTests: XCTestCase {
         let first = env.makeService()
         await env.bootstrap(first)
         await first.scanNow()
-        _ = await first.requestIndexSnapshot()
+        await first.synchronizeRequestIndexForTesting()
         await first.waitForRequestIndexForTesting()
         let restarted = env.makeService()
         await env.bootstrap(restarted)
@@ -142,7 +168,7 @@ final class UsageRequestIndexTests: XCTestCase {
         let scan = Task { await restarted.scanNow() }
         await fulfillment(of: [started], timeout: 3)
         let loaded = expectation(description: "sidecar published during scan")
-        if restarted.requestIndexSnapshotForDisplay().records.contains(where: { $0.entry.app == .claude }) {
+        if restarted.requestIndexStatusForDisplay().isReady {
             loaded.fulfill()
         } else {
             withObservationTracking {
@@ -150,19 +176,20 @@ final class UsageRequestIndexTests: XCTestCase {
             } onChange: { loaded.fulfill() }
         }
         await fulfillment(of: [loaded], timeout: 3)
-        let cached = restarted.requestIndexSnapshotForDisplay()
-        XCTAssertEqual(cached.records.filter { $0.entry.app == .claude }.count, 1)
+        let cached = restarted.requestIndexStatusForDisplay()
+        XCTAssertTrue(cached.isReady)
+        XCTAssertEqual(try page(restarted, app: .claude).count, 1)
         XCTAssertTrue(cached.isRefreshing)
         let revision = restarted.requestIndexRevision
-        for _ in 0..<20 { _ = restarted.requestIndexSnapshotForDisplay() }
+        for _ in 0..<20 { _ = restarted.requestIndexStatusForDisplay() }
         XCTAssertEqual(restarted.requestIndexRevision, revision)
         restarted.scanStartedForIndexTesting = nil
         resume?.resume()
         resume = nil
         await scan.value
         await restarted.waitForRequestIndexForTesting()
-        XCTAssertFalse(restarted.requestIndexSnapshotForDisplay().isRefreshing)
-        XCTAssertEqual(restarted.requestIndexSnapshotForDisplay().records.filter { $0.entry.app == .claude }.count, 1)
+        XCTAssertFalse(restarted.requestIndexStatusForDisplay().isRefreshing)
+        XCTAssertEqual(try page(restarted, app: .claude).count, 1)
     }
 
     @MainActor
@@ -180,15 +207,16 @@ final class UsageRequestIndexTests: XCTestCase {
         let first = makeService()
         await env.bootstrap(first)
         await first.scanNow()
-        let original = await first.requestIndexSnapshot()
-        XCTAssertEqual(original.records.filter { $0.entry.app == .kimi }.count, 1)
+        await first.synchronizeRequestIndexForTesting()
+        let original = try page(first, app: .kimi)
+        XCTAssertEqual(original.count, 1)
         await first.waitForRequestIndexForTesting()
         try FileManager.default.removeItem(at: share)
         let restarted = makeService()
         await env.bootstrap(restarted)
         await restarted.waitForRequestIndexForTesting()
-        let restored = restarted.requestIndexSnapshotForDisplay()
-        XCTAssertEqual(restored.records.filter { $0.entry.app == .kimi }.map(\.id), original.records.filter { $0.entry.app == .kimi }.map(\.id))
+        let restored = restarted.requestIndexStatusForDisplay()
+        XCTAssertEqual(try page(restarted, app: .kimi).map(\.id), original.map(\.id))
         XCTAssertFalse(restored.incompleteApps.contains(.kimi))
     }
 
@@ -208,9 +236,22 @@ final class UsageRequestIndexTests: XCTestCase {
         XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("private-session"))
         let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
         XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.intValue, 0o600)
-        XCTAssertEqual(store.load()?.rows.count, 1)
+        guard case .ready(let metadata) = store.loadMetadata() else {
+            return XCTFail("Expected SQLite source metadata")
+        }
+        XCTAssertEqual(metadata.sourceKeys[.claude], String(repeating: "a", count: 64))
+        let query = UsageRequestIndexStore.Query(apps: [.claude], from: .distantPast, to: .distantFuture,
+                                                page: .init(offset: 0, limit: 1))
+        let canonical = [UsageBucket(app: .claude, model: "model", speed: .standard, day: date,
+            inputTokens: 2, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0,
+            costUSD: 0, requestCount: 1, hasUnpricedUsage: true)]
+        XCTAssertEqual(try store.query(query, canonical: canonical).rows.count, 1)
         try Data("bad".utf8).write(to: url)
-        XCTAssertNil(store.load())
+        // Query failure is not a successful empty page; startup can quarantine and rebuild it.
+        XCTAssertThrowsError(try store.query(query, canonical: canonical))
+        guard case .needsRebuild = store.loadMetadata() else {
+            return XCTFail("Confirmed corruption should rebuild the derived index")
+        }
     }
     @MainActor
     func testRestartUsesPersistedIndexWithoutScanningUnchangedSource() async throws {
@@ -219,25 +260,27 @@ final class UsageRequestIndexTests: XCTestCase {
             timestamp: "2026-09-20T01:00:00Z", input: 100, output: 10)
         let file = try env.writeClaudeLog(session: "session", lines: [line])
         let service = env.makeService()
-        let beforeBootstrap = service.requestIndexSnapshotForDisplay()
+        let beforeBootstrap = service.requestIndexStatusForDisplay()
         XCTAssertTrue(beforeBootstrap.isRefreshing)
-        XCTAssertTrue(beforeBootstrap.records.isEmpty)
+        XCTAssertFalse(beforeBootstrap.isReady)
+        XCTAssertFalse(Mirror(reflecting: beforeBootstrap).children.contains { ["records", "rows"].contains($0.label ?? "") })
         await env.bootstrap(service)
         await service.scanNow()
-        _ = await service.requestIndexSnapshot()
+        await service.synchronizeRequestIndexForTesting()
         await service.waitForRequestIndexForTesting()
-        let before = service.requestIndexSnapshotForDisplay()
-        XCTAssertEqual(before.records.filter { $0.entry.app == .claude }.count, 1)
+        let before = service.requestIndexStatusForDisplay()
+        XCTAssertTrue(before.isReady)
+        XCTAssertEqual(try page(service, app: .claude).count, 1)
         try FileManager.default.removeItem(at: file)
         let restarted = env.makeService()
         await env.bootstrap(restarted)
         await restarted.waitForRequestIndexForTesting()
-        let restored = restarted.requestIndexSnapshotForDisplay()
+        let restored = restarted.requestIndexStatusForDisplay()
         // A rescan of the removed source could not produce this record.
-        XCTAssertEqual(restored.records.filter { $0.entry.app == .claude }.count, 1)
+        XCTAssertEqual(try page(restarted, app: .claude).count, 1)
         XCTAssertFalse(restored.isRefreshing)
         let calculations = restarted.requestIndexFingerprintCalculations
-        for _ in 0..<50 { _ = restarted.requestIndexSnapshotForDisplay() }
+        for _ in 0..<50 { _ = restarted.requestIndexStatusForDisplay() }
         XCTAssertEqual(restarted.requestIndexFingerprintCalculations, calculations)
     }
 }

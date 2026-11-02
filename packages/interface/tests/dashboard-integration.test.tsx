@@ -665,3 +665,176 @@ it("updates application selection immediately while its result is pending", asyn
   expect(screen.getByText(/Changing filters/)).toBeTruthy();
   finish(scoped);
 });
+
+const renderDashboard = () =>
+  render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+const requestPage = (modelID: string, nextCursor: string | null = null) => ({
+  revision: "1",
+  resolvedRange,
+  totalCount: 2,
+  rows: [
+    {
+      id: modelID,
+      service: "codex",
+      sourceID: "session:codex",
+      modelID,
+      timestamp: "2026-11-01T10:00:00Z",
+      totals: total,
+    },
+  ],
+  nextCursor,
+  coverage,
+  status,
+});
+
+it("keeps request rows while paging and immediately reuses a cached page", async () => {
+  const { act } = await import("@testing-library/react");
+  let finish!: (value: any) => void;
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  api.usageRequests.mockReset().mockImplementation((query: any) =>
+    query.cursor
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : (Promise.resolve(requestPage("first-page-model", "page-2")) as never),
+  );
+  renderDashboard();
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  await screen.findByText("first-page-model");
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("first-page-model")).toBeTruthy();
+  expect(screen.queryByText("Loading request records…")).toBeNull();
+  expect(
+    (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(
+    (screen.getByRole("button", { name: "Previous" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  await act(async () => {
+    finish(requestPage("second-page-model"));
+  });
+  await screen.findByText("second-page-model");
+  fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+  expect(screen.getByText("first-page-model")).toBeTruthy();
+  expect(api.usageRequests).toHaveBeenCalledTimes(2);
+});
+
+it("retains the last request page when the next page fails and supports retry", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  api.usageRequests
+    .mockReset()
+    .mockResolvedValueOnce(requestPage("retained-model", "page-2") as never)
+    .mockRejectedValueOnce(new Error("database temporarily busy"))
+    .mockResolvedValueOnce(requestPage("retried-model") as never);
+  renderDashboard();
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  await screen.findByText("retained-model");
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByRole("alert");
+  expect(screen.getByText("retained-model")).toBeTruthy();
+  expect(screen.getByText(/Request records could not be updated/)).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByText("retried-model");
+  expect(screen.queryByText("retained-model")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("retains prior dashboard results after filter failure without caching them under the failed key", async () => {
+  api.usageDashboard
+    .mockReset()
+    .mockResolvedValueOnce(data)
+    .mockRejectedValueOnce(new Error("database temporarily busy"))
+    .mockResolvedValueOnce({
+      ...data,
+      kpiDisplay: { ...data.kpiDisplay, cost: "$30" },
+    });
+  renderDashboard();
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 30 days",
+    }),
+  );
+  await screen.findByText(/Filters could not be applied/);
+  expect(screen.getByText("$1")).toBeTruthy();
+  expect(screen.getByRole("table").closest("[inert]")).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByText("$30");
+  expect(screen.getByRole("table").closest("[inert]")).toBeNull();
+  expect(api.usageDashboard.mock.lastCall?.[0]).toMatchObject({
+    range: "last30",
+  });
+});
+
+it.each(["usage", "pricing"])(
+  "keeps displayed results during %s background refresh and on failure",
+  async (domain) => {
+    const { act } = await import("@testing-library/react");
+    let fail!: (reason: Error) => void;
+    api.usageDashboard
+      .mockReset()
+      .mockResolvedValueOnce(data)
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            fail = reject;
+          }),
+      );
+    renderDashboard();
+    await screen.findByText("$1");
+    const table = screen.getByRole("table");
+    await act(async () => {
+      for (const listener of listeners) listener({ domains: [domain] });
+    });
+    await waitFor(() => expect(fail).toBeTypeOf("function"));
+    expect(screen.getByText("$1")).toBeTruthy();
+    expect(screen.getByRole("table")).toBe(table);
+    await act(async () => {
+      fail(new Error("temporarily unavailable"));
+    });
+    await screen.findByText(/Refresh failed/);
+    expect(screen.getByText("$1")).toBeTruthy();
+    expect(screen.getByRole("table")).toBe(table);
+  },
+);
+
+it("revalidates the cached first page when a database change expires its pagination cursor", async () => {
+  const { HostError } = await import("@ccbar/host-api");
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  api.usageRequests
+    .mockReset()
+    .mockResolvedValueOnce(
+      requestPage("outdated-page", "expired-cursor") as never,
+    )
+    .mockRejectedValueOnce(new HostError("invalid_cursor", "expired"))
+    .mockResolvedValueOnce(requestPage("current-page", "fresh-cursor") as never)
+    .mockResolvedValueOnce(requestPage("current-next-page") as never);
+  renderDashboard();
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  await screen.findByText("outdated-page");
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByText("current-page");
+  expect(api.usageRequests).toHaveBeenCalledTimes(3);
+  expect(api.usageRequests.mock.lastCall?.[0].cursor).toBeUndefined();
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByText("current-next-page");
+  expect(api.usageRequests.mock.lastCall?.[0]).toMatchObject({
+    cursor: "fresh-cursor",
+  });
+});

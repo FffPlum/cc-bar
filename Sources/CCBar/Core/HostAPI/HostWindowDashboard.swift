@@ -1,15 +1,6 @@
 import Foundation
 import CryptoKit
 
-// Daily snapshots contain no request timestamps. Keep that limitation explicit until a
-// transactional request index can supply event-level records and coverage.
-struct DashboardPartition: Hashable {
-        let app: UsageApp
-        let model: String
-        let speed: UsageSpeed
-        let day: Date
-}
-
 extension HostWindowUsageService {
     private struct DashboardQuery {
         var from: Date
@@ -75,68 +66,81 @@ extension HostWindowUsageService {
         return DashboardQuery(from: from, to: to, asOf: instant, service: service, source: try string("sourceID"), model: try string("modelID"), metric: metric, hourly: range == "today" || range == "last24h" || (range == "custom" && to.timeIntervalSince(from) <= 86400 * 2), naturalDays: ["today", "last7", "last14", "last30", "all"].contains(range), allTime: range == "all")
     }
 
-    private func partition(_ entry: UsageEntry) -> DashboardPartition { DashboardPartition(app: entry.app, model: entry.model, speed: entry.speed, day: entry.day) }
-    private func partition(_ bucket: UsageBucket) -> DashboardPartition { DashboardPartition(app: bucket.app, model: bucket.model, speed: bucket.speed, day: bucket.day) }
-    private func eventBucket(_ entry: UsageEntry) -> UsageBucket {
-        var timing = GenerationTiming.zero
-        timing.add(entry.timing, outputTokens: entry.outputTokens)
-        return UsageBucket(app: entry.app, model: entry.model, speed: entry.speed, day: entry.day,
-            inputTokens: entry.inputTokens, outputTokens: entry.outputTokens, cacheReadTokens: entry.cacheReadTokens,
-            cacheCreationTokens: entry.cacheCreationTokens, costUSD: entry.costUSD ?? 0,
-            requestCount: entry.requestCount, hasUnpricedUsage: entry.costUSD == nil, costIncomplete: dashboardPricingMismatch.contains(partition(entry)), timing: timing)
+    private typealias SQLResult = UsageRequestIndexStore.QueryResult
+    private typealias Partition = UsageRequestIndexStore.Partition
+    private struct DashboardData {
+        let status: UsageRequestIndexStatus
+        let canonical: [UsageBucket]
+        let results: [SQLResult]
+        let revision: String
+        func result(_ index: Int = 0) -> SQLResult? { results.indices.contains(index) ? results[index] : nil }
     }
-    private func verifiedRecords() -> [UsageRequestRecord] {
-        guard let index = dashboardIndex else { return [] }
-        let cacheKey = "\(state.usageService.aggregator.revision):\(index.revision)"
-        if dashboardVerifiedCacheKey == cacheKey, let cached = dashboardVerifiedCache { return cached }
-        let canonical = Dictionary(grouping: state.usageService.aggregator.snapshot(), by: { partition($0) })
-        let groups = Dictionary(grouping: index.records, by: { partition($0.entry) })
-        var accepted: [DashboardPartition: [UsageRequestRecord]] = [:]
-        var pending = Set<DashboardPartition>()
-        var pricingMismatch = Set<DashboardPartition>()
-        for (key, records) in groups {
-            guard let buckets = canonical[key] else { continue }
-            let expected = dashboardTotal(buckets)
-            func fits(_ records: [UsageRequestRecord]) -> Bool {
-                let actual = dashboardTotal(records.map { eventBucket($0.entry) })
-                return actual.inputTokens <= expected.inputTokens && actual.outputTokens <= expected.outputTokens
-                    && actual.cacheReadTokens <= expected.cacheReadTokens && actual.cacheCreationTokens <= expected.cacheCreationTokens
-                    && actual.requestCount <= expected.requestCount
-            }
-            if fits(records) { accepted[key] = records }
-            else {
-                pending.insert(key)
-                if let previous = dashboardPreviousPartitions[key], fits(previous) { accepted[key] = previous }
-            }
-            if let chosen = accepted[key] {
-                let actual = dashboardTotal(chosen.map { eventBucket($0.entry) })
-                if actual.costUSD != expected.costUSD { pricingMismatch.insert(key) }
-            }
+
+    private func partition(_ bucket: UsageBucket) -> Partition {
+        Partition(app: bucket.app, model: bucket.model, speed: bucket.speed, day: bucket.day)
+    }
+    private func sqlQuery(_ q: DashboardQuery, from: Date, to: Date, applyModel: Bool = true,
+                          applySource: Bool = true, hourly: Bool = false,
+                          page: UsageRequestIndexStore.Page? = nil) -> UsageRequestIndexStore.Query {
+        let apps = Set(settings.visibleUsageApps.filter { app in
+            (q.service == nil || q.service == app) && (!applySource || q.source == nil || q.source == dashboardSource(app))
+        })
+        return UsageRequestIndexStore.Query(apps: from < to ? apps : [], model: applyModel ? q.model : nil,
+            from: from, to: from < to ? to : from.addingTimeInterval(1), calendar: .current, hourly: hourly, page: page)
+    }
+    private func queryDetails(_ queries: [UsageRequestIndexStore.Query]) async throws -> DashboardData {
+        let status = dashboardStatusProvider?() ?? state.usageService.requestIndexStatusForDisplay()
+        guard !status.isUnavailable else {
+            throw HostError(code: "usage_unavailable", message: "Request history is temporarily unavailable; retry shortly")
         }
-        dashboardPreviousPartitions = accepted
-        dashboardPendingPartitions = pending
-        dashboardPricingMismatch = pricingMismatch
-        let verified = accepted.values.flatMap { $0 }
-        dashboardVerifiedCache = verified
-        dashboardVerifiedCacheKey = cacheKey
-        return verified
-    }
-    private func selectedEvents(_ q: DashboardQuery, from: Date, to: Date, applyModel: Bool = true, applySource: Bool = true) -> [UsageRequestRecord] {
-        verifiedRecords().filter { record in
-            let e = record.entry
-            return settings.visibleUsageApps.contains(e.app) && (q.service == nil || q.service == e.app)
-                && (!applySource || q.source == nil || q.source == dashboardSource(e.app))
-                && (!applyModel || q.model == nil || q.model == e.model) && e.timestamp >= from && e.timestamp < to
+        let canonical = state.usageService.aggregator.snapshot()
+        let aggregateRevision = state.usageService.aggregator.revision
+        guard status.isReady else {
+            return DashboardData(status: status, canonical: canonical, results: [], revision: "\(aggregateRevision):\(status.revision)")
         }
+        let store = dashboardStore ?? state.usageService.requestIndexStore
+        let visible = settings.visibleUsageApps
+        let privacy = settings.privacyMode
+        let contextGeneration = generation
+        let results: [SQLResult]
+        do {
+            let task = Task.detached(priority: .userInitiated) {
+                try store.queryBatch(queries, canonical: canonical)
+            }
+            results = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        } catch {
+            if Task.isCancelled || UsageRequestIndexStore.isCancellation(error) {
+                throw HostError(code: "cancelled", message: "Usage query was cancelled")
+            }
+            if dashboardStore == nil {
+                state.usageService.requestIndexStorageReadFailed()
+            }
+            // A failed refresh must not replace the frontend's successful query result with zeros.
+            throw HostError(code: "usage_unavailable", message: "Request history is temporarily unavailable; retry shortly")
+        }
+        guard !Task.isCancelled, generation == contextGeneration,
+              settings.visibleUsageApps == visible, settings.privacyMode == privacy else {
+            throw HostError(code: "cancelled", message: "Usage query context changed")
+        }
+        return DashboardData(status: status, canonical: canonical, results: results,
+            revision: "\(aggregateRevision):\(results.first?.metadata.revision ?? status.revision)")
     }
-    private func selectedBuckets(_ q: DashboardQuery, from: Date, to: Date, applyModel: Bool = true, applySource: Bool = true) -> [UsageBucket] {
-        let complete = dashboardBuckets(q, from: from, to: to, applyModel: applyModel, applySource: applySource)
+    private func isCompleteDay(_ day: Date, _ q: DashboardQuery, from: Date, to: Date) -> Bool {
         let calendar = Calendar.current
-        let partial = selectedEvents(q, from: from, to: to, applyModel: applyModel, applySource: applySource).filter { record in
-            let day = record.entry.day
-            guard let end = calendar.date(byAdding: .day, value: 1, to: day) else { return false }
-            return !(day >= from && (end <= to || (q.naturalDays && day == calendar.startOfDay(for: q.asOf) && to >= q.asOf)))
-        }.map { eventBucket($0.entry) }
+        guard let end = calendar.date(byAdding: .day, value: 1, to: day) else { return false }
+        return day >= from && (end <= to || (q.naturalDays && day == calendar.startOfDay(for: q.asOf) && to >= q.asOf))
+    }
+    private func selectedBuckets(_ q: DashboardQuery, data: DashboardData, result: SQLResult?,
+                                 from: Date, to: Date, applyModel: Bool = true, applySource: Bool = true) -> [UsageBucket] {
+        // Daily aggregates preserve history whose source logs no longer exist. Only partial
+        // days use event aggregates, computed by SQLite without materializing detail rows.
+        let complete = dashboardBuckets(q, canonical: data.canonical, from: from, to: to,
+            applyModel: applyModel, applySource: applySource)
+        let partial = (result?.buckets ?? []).filter { !isCompleteDay($0.day, q, from: from, to: to) }
         return complete + partial
     }
     private func dashboardSourceTitle(_ app: UsageApp) -> String {
@@ -154,9 +158,9 @@ extension HostWindowUsageService {
         return "\(name) · \(app == .cursor ? tr("Remote metering", "远端计量") : tr("Session logs", "会话日志"))"
     }
     private func dashboardSource(_ app: UsageApp) -> String { "\(app.rawValue).\(app == .cursor ? "remoteDashboard" : "localLogs")" }
-    private func dashboardBuckets(_ q: DashboardQuery, from: Date, to: Date, applyModel: Bool = true, applySource: Bool = true) -> [UsageBucket] {
+    private func dashboardBuckets(_ q: DashboardQuery, canonical: [UsageBucket], from: Date, to: Date, applyModel: Bool = true, applySource: Bool = true) -> [UsageBucket] {
         let calendar = Calendar.current
-        return state.usageService.aggregator.snapshot().filter { b in
+        return canonical.filter { b in
             guard settings.visibleUsageApps.contains(b.app), q.service == nil || q.service == b.app,
                   !applySource || q.source == nil || q.source == dashboardSource(b.app),
                   !applyModel || q.model == nil || q.model == b.model,
@@ -172,18 +176,19 @@ extension HostWindowUsageService {
     private func dashboardRange(_ q: DashboardQuery) -> HostJSON {
         .object(["from": dateJSON(q.from), "to": dateJSON(q.to), "timeZone": .string(TimeZone.current.identifier), "granularity": .string(q.hourly ? "hour" : (q.to.timeIntervalSince(q.from) > 730 * 86400 ? "month" : "day")), "asOf": dateJSON(q.asOf)])
     }
-    private func dashboardCoverage(_ q: DashboardQuery, from: Date, to: Date, includeCompleteDays: Bool) -> HostJSON {
+    private func dashboardCoverage(_ q: DashboardQuery, data: DashboardData, result: SQLResult?,
+                                   from: Date, to: Date, includeCompleteDays: Bool) -> HostJSON {
         let calendar = Calendar.current
-        let candidates = state.usageService.aggregator.snapshot().filter { b in
+        let candidates = data.canonical.filter { b in
             guard settings.visibleUsageApps.contains(b.app), q.service == nil || q.service == b.app,
                   q.source == nil || q.source == dashboardSource(b.app), q.model == nil || q.model == b.model,
                   let end = calendar.date(byAdding: .day, value: 1, to: b.day) else { return false }
             return b.day < to && end > from && (includeCompleteDays || !(b.day >= from && end <= to))
         }
-        let groups = Dictionary(grouping: verifiedRecords(), by: { partition($0.entry) })
+        let groups = Dictionary(grouping: result?.partitions ?? [], by: partition)
         var residual = UsageTotals.zero
         for b in candidates {
-            let known = dashboardTotal((groups[partition(b)] ?? []).map { eventBucket($0.entry) })
+            let known = dashboardTotal(groups[partition(b)] ?? [])
             var rest = UsageTotals.zero
             rest.inputTokens = max(0, b.inputTokens - known.inputTokens)
             rest.outputTokens = max(0, b.outputTokens - known.outputTokens)
@@ -196,14 +201,12 @@ extension HostWindowUsageService {
             residual.add(rest)
         }
         let hasResidual = residual.totalTokens > 0 || residual.requestCount > 0
-        let selected = selectedEvents(q, from: from, to: to)
-        let unavailable = dashboardIndex?.incompleteApps.contains(where: { app in
-            candidates.contains(where: { $0.app == app })
-        }) ?? true
-        let pending = candidates.contains { dashboardPendingPartitions.contains(partition($0)) }
-        let refreshing = dashboardIndex?.isRefreshing ?? true
+        let incompleteApps = data.status.incompleteApps.union(result?.metadata.incompleteApps ?? [])
+        let unavailable = candidates.contains { incompleteApps.contains($0.app) }
+        let pending = candidates.contains { result?.pendingPartitions.contains(partition($0)) ?? false }
+        let refreshing = data.status.isRefreshing
         let incomplete = hasResidual || unavailable || pending || refreshing
-        let precision = hasResidual ? (selected.isEmpty ? "day" : "mixed") : "event"
+        let precision = hasResidual ? ((result?.buckets.isEmpty ?? true) ? "day" : "mixed") : "event"
         return .object(["precision": .string(precision), "incomplete": .bool(incomplete), "refreshing": .bool(refreshing), "unlocatedTotals": totalsJSON(residual), "message": incomplete ? .string(tr("Some historical usage has no verified request timestamp.", "部分历史用量缺少可核验的请求时间。")) : .null])
     }
     private func dashboardValue(_ t: UsageTotals, metric: String) -> Double {
@@ -234,22 +237,24 @@ extension HostWindowUsageService {
         prepareCursorHistory(query: HostStatsQuery(range: .custom, granularity: .day, service: q.service,
             current: bounds, previous: nil, chart: bounds, highlightedPeriodStart: nil))
     }
-    private func dashboardRevision() -> String { "\(state.usageService.aggregator.revision):\(dashboardIndex?.revision ?? "none")" }
 
     func dashboard(_ params: [String: HostJSON]) async throws -> HostJSON {
-        if let provider = dashboardIndexProvider { dashboardIndex = await provider() }
-        else { dashboardIndex = state.usageService.requestIndexSnapshotForDisplay() }
         let q = try dashboardQuery(params)
         let windowStart = Calendar.current.date(byAdding: .day, value: -371, to: q.to) ?? q.from
         dashboardPrepareCursor(q, from: max(q.from, windowStart), to: q.to)
-        let buckets = selectedBuckets(q, from: q.from, to: q.to)
         var allServicesQuery = q
         allServicesQuery.service = nil
         allServicesQuery.source = nil
         allServicesQuery.model = nil
-        let allFacetBuckets = selectedBuckets(allServicesQuery, from: q.from, to: q.to)
+        var queries = [sqlQuery(q, from: q.from, to: q.to),
+            sqlQuery(allServicesQuery, from: q.from, to: q.to),
+            sqlQuery(q, from: q.from, to: q.to, applyModel: false, applySource: false)]
+        if q.hourly { queries.append(sqlQuery(q, from: q.from, to: q.to, hourly: true)) }
+        let data = try await queryDetails(queries)
+        let buckets = selectedBuckets(q, data: data, result: data.result(), from: q.from, to: q.to)
+        let allFacetBuckets = selectedBuckets(allServicesQuery, data: data, result: data.result(1), from: q.from, to: q.to)
         let apps = Array(Set(allFacetBuckets.map(\.app))).sorted { $0.rawValue < $1.rawValue }
-        let sourceBuckets = selectedBuckets(q, from: q.from, to: q.to, applyModel: false, applySource: false)
+        let sourceBuckets = selectedBuckets(q, data: data, result: data.result(2), from: q.from, to: q.to, applyModel: false, applySource: false)
         let sources = Array(Set(sourceBuckets.map(\.app))).sorted { $0.rawValue < $1.rawValue }
         let models = Array(Set(sourceBuckets.map(\.model))).sorted()
         let sourceFacets: [HostJSON] = sources.map { app in
@@ -267,17 +272,14 @@ extension HostWindowUsageService {
         let monthly = !q.hourly && q.to.timeIntervalSince(q.from) > 730 * 86400
         let component: Calendar.Component = q.hourly ? .hour : (monthly ? .month : .day)
         var day = calendar.dateInterval(of: component, for: q.from)?.start ?? q.from
-        let hourlyEvents = q.hourly ? selectedEvents(q, from: q.from, to: q.to) : []
-        let eventGroups = Dictionary(grouping: hourlyEvents) { record in
-            calendar.dateInterval(of: component, for: record.entry.timestamp)?.start ?? record.entry.timestamp
-        }
+        let eventGroups = Dictionary(grouping: data.result(3)?.buckets ?? [], by: \.day)
         let bucketGroups = Dictionary(grouping: buckets) { bucket in
             calendar.dateInterval(of: component, for: bucket.day)?.start ?? bucket.day
         }
         var sampleData: [(Date, [UsageBucket])] = []
         while day < q.to {
             guard let next = calendar.date(byAdding: component, value: 1, to: day), next > day else { break }
-            let rows = q.hourly ? (eventGroups[day] ?? []).map { eventBucket($0.entry) } : (bucketGroups[day] ?? [])
+            let rows = q.hourly ? (eventGroups[day] ?? []) : (bucketGroups[day] ?? [])
             sampleData.append((day, rows)); day = next
         }
         let maxValue = sampleData.map { dashboardValue(dashboardTotal($0.1), metric: q.metric) }.max() ?? 0
@@ -318,7 +320,7 @@ extension HostWindowUsageService {
         integerFormatter.numberStyle = .decimal
         func formatted(_ value: Int) -> String { integerFormatter.string(from: NSNumber(value: value)) ?? String(value) }
         let kpiDisplay: HostJSON = .object(["cost": .string(actions.formatCost(total.costUSD, .standard)), "requests": .string(formatted(total.requestCount)), "tokens": .string(StatsFormatter.compactToken(total.totalTokens)), "cacheHitRate": .string(String(format: "%.1f%%", total.cacheHitRate * 100))])
-        return .object(["kpiDisplay": kpiDisplay, "revision": .string(dashboardRevision()), "resolvedRange": dashboardRange(q), "coverage": dashboardCoverage(q, from: q.from, to: q.to, includeCompleteDays: q.hourly), "totals": totalsJSON(total), "facets": .object(["services": .array(apps.map { app in dashboardFacet(app.rawValue, title: app.rawValue, buckets: allFacetBuckets.filter { $0.app == app }) }), "sources": .array(sourceFacets), "models": .array(models.map { m in dashboardFacet(m, title: m, buckets: sourceBuckets.filter { $0.model == m }) })]), "providerRows": .array(providerRows), "modelRows": .array(modelRows), "samples": .array(samples), "axisTicks": .array(axisTicks), "status": statusJSON()])
+        return .object(["kpiDisplay": kpiDisplay, "revision": .string(data.revision), "resolvedRange": dashboardRange(q), "coverage": dashboardCoverage(q, data: data, result: data.result(), from: q.from, to: q.to, includeCompleteDays: q.hourly), "totals": totalsJSON(total), "facets": .object(["services": .array(apps.map { app in dashboardFacet(app.rawValue, title: app.rawValue, buckets: allFacetBuckets.filter { $0.app == app }) }), "sources": .array(sourceFacets), "models": .array(models.map { m in dashboardFacet(m, title: m, buckets: sourceBuckets.filter { $0.model == m }) })]), "providerRows": .array(providerRows), "modelRows": .array(modelRows), "samples": .array(samples), "axisTicks": .array(axisTicks), "status": statusJSON()])
     }
 
     private struct RequestCursor: Codable {
@@ -335,8 +337,6 @@ extension HostWindowUsageService {
         return SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
     }
     func dashboardRequests(_ params: [String: HostJSON]) async throws -> HostJSON {
-        if let provider = dashboardIndexProvider { dashboardIndex = await provider() }
-        else { dashboardIndex = state.usageService.requestIndexSnapshotForDisplay() }
         var q = try dashboardQuery(params, extra: ["cursor", "limit", "sort", "direction"])
         var limit = 100
         if let raw = params["limit"] {
@@ -345,15 +345,18 @@ extension HostWindowUsageService {
         }
         dashboardPrepareCursor(q, from: max(q.from, q.to.addingTimeInterval(-371 * 86400)), to: q.to)
         let fingerprint = requestFingerprint(params)
-        let revision = dashboardRevision()
+        var cursorRevision: String?
         var offset = 0
         if let raw = params["cursor"] {
             guard case .string(let encoded) = raw, encoded.count <= 4096, let data = Data(base64Encoded: encoded),
-                  let cursor = try? JSONDecoder().decode(RequestCursor.self, from: data), cursor.revision == revision,
-                  cursor.fingerprint == fingerprint, cursor.offset >= 0, cursor.from < cursor.to else {
+                  let cursor = try? JSONDecoder().decode(RequestCursor.self, from: data),
+                  cursor.fingerprint == fingerprint, cursor.offset >= 0, cursor.from < cursor.to,
+                  cursor.to.timeIntervalSince(cursor.from) <= 100 * 366 * 86400,
+                  cursor.asOf.timeIntervalSince1970.isFinite else {
                 throw HostError(code: "invalid_cursor", message: "Request history changed; reload the first page")
             }
             q.from = cursor.from; q.to = cursor.to; q.asOf = cursor.asOf; offset = cursor.offset
+            cursorRevision = cursor.revision
         }
         func option(_ key: String, fallback: String, allowed: Set<String>) throws -> String {
             guard let raw = params[key] else { return fallback }
@@ -362,40 +365,49 @@ extension HostWindowUsageService {
         }
         let sort = try option("sort", fallback: "time", allowed: ["time", "cost", "tokens"])
         let descending = try option("direction", fallback: "desc", allowed: ["asc", "desc"]) == "desc"
-        let records = selectedEvents(q, from: q.from, to: q.to).filter { $0.entry.requestCount > 0 }.sorted { lhs, rhs in
-            let a = lhs.entry, b = rhs.entry
-            let order: ComparisonResult
-            switch sort {
-            case "cost": order = NSDecimalNumber(decimal: a.costUSD ?? 0).compare(NSDecimalNumber(decimal: b.costUSD ?? 0))
-            case "tokens":
-                let x = a.inputTokens + a.outputTokens + a.cacheReadTokens + a.cacheCreationTokens
-                let y = b.inputTokens + b.outputTokens + b.cacheReadTokens + b.cacheCreationTokens
-                order = x == y ? .orderedSame : (x < y ? .orderedAscending : .orderedDescending)
-            default: order = a.timestamp == b.timestamp ? .orderedSame : (a.timestamp < b.timestamp ? .orderedAscending : .orderedDescending)
-            }
-            if order == .orderedSame { return lhs.id < rhs.id }
-            return descending ? order == .orderedDescending : order == .orderedAscending
+        let page = UsageRequestIndexStore.Page(offset: offset, limit: limit, sort: sort, descending: descending)
+        let data = try await queryDetails([sqlQuery(q, from: q.from, to: q.to, page: page)])
+        let revision = data.revision
+        guard cursorRevision == nil || cursorRevision == revision else {
+            throw HostError(code: "invalid_cursor", message: "Request history changed; reload the first page")
         }
-        guard offset <= records.count else { throw HostError(code: "invalid_cursor", message: "Invalid request cursor") }
-        let rows: [HostJSON] = records.dropFirst(offset).prefix(limit).map { record in
-            let e = record.entry
-            return .object(["id": .string(record.id), "timestamp": dateJSON(e.timestamp), "service": .string(e.app.rawValue),
-                "sourceID": .string(dashboardSource(e.app)), "modelID": .string(e.model),
-                "totals": totalsJSON(dashboardTotal([eventBucket(e)])), "status": .string("unknown"),
-                "conversationID": state.usageService.conversationAggregator.detail(key: e.conversationKey, metric: settings.statsRankMetric) == nil ? .null : .string(opaqueID(e.conversationKey, category: "conversation"))])
+        let result = data.result()
+        let totalCount = result?.totalCount ?? 0
+        guard offset <= totalCount else { throw HostError(code: "invalid_cursor", message: "Invalid request cursor") }
+        let records = result?.rows ?? []
+        let requestedHashes = Set(records.map(\.conversationHash))
+        let conversations = state.usageService.conversationAggregator.snapshot().infos
+        let conversationKeys = Dictionary(conversations.compactMap { info -> (String, String)? in
+            let hash = UsageRequestIndexStore.hash(info.key)
+            return requestedHashes.contains(hash) ? (hash, info.key) : nil
+        }, uniquingKeysWith: { first, _ in first })
+        let rows: [HostJSON] = records.map { row in
+            var timing = GenerationTiming.zero
+            timing.add(row.timing, outputTokens: row.output)
+            let key = Partition(app: row.app, model: row.model, speed: row.speed, day: row.day)
+            let bucket = UsageBucket(app: row.app, model: row.model, speed: row.speed, day: row.day,
+                inputTokens: row.input, outputTokens: row.output, cacheReadTokens: row.cacheRead,
+                cacheCreationTokens: row.cacheCreation, costUSD: row.cost ?? 0, requestCount: row.requests,
+                hasUnpricedUsage: row.cost == nil, costIncomplete: result?.pricingMismatches.contains(key) ?? false, timing: timing)
+            let conversation: HostJSON
+            if let key = conversationKeys[row.conversationHash],
+               state.usageService.conversationAggregator.detail(key: key, metric: settings.statsRankMetric) != nil {
+                conversation = .string(opaqueID(key, category: "conversation"))
+            } else { conversation = .null }
+            return .object(["id": .string(row.id), "timestamp": dateJSON(row.timestamp), "service": .string(row.app.rawValue),
+                "sourceID": .string(dashboardSource(row.app)), "modelID": .string(row.model),
+                "totals": totalsJSON(dashboardTotal([bucket])), "status": .string("unknown"), "conversationID": conversation])
         }
         let nextOffset = offset + rows.count
         let cursor: HostJSON
-        if nextOffset < records.count {
+        if nextOffset < totalCount {
             let state = RequestCursor(revision: revision, fingerprint: fingerprint, from: q.from, to: q.to, asOf: q.asOf, offset: nextOffset)
             cursor = .string(try JSONEncoder().encode(state).base64EncodedString())
         } else { cursor = .null }
-        return .object(["revision": .string(revision), "resolvedRange": dashboardRange(q), "totalCount": .number(Decimal(records.count)), "rows": .array(rows), "nextCursor": cursor, "coverage": dashboardCoverage(q, from: q.from, to: q.to, includeCompleteDays: true), "status": statusJSON()])
+        return .object(["revision": .string(revision), "resolvedRange": dashboardRange(q), "totalCount": .number(Decimal(totalCount)), "rows": .array(rows), "nextCursor": cursor, "coverage": dashboardCoverage(q, data: data, result: data.result(), from: q.from, to: q.to, includeCompleteDays: true), "status": statusJSON()])
     }
 
     func dashboardHeatmap(_ params: [String: HostJSON]) async throws -> HostJSON {
-        if let provider = dashboardIndexProvider { dashboardIndex = await provider() }
-        else { dashboardIndex = state.usageService.requestIndexSnapshotForDisplay() }
         let q = try dashboardQuery(params, extra: ["beforeDay"])
         var calendar = Calendar.current
         calendar.firstWeekday = 2
@@ -422,7 +434,8 @@ extension HostWindowUsageService {
         let pageFrom = q.allTime ? start : max(start, q.from)
         let pageTo = min(end, q.to)
         dashboardPrepareCursor(q, from: pageFrom, to: pageTo)
-        let buckets = selectedBuckets(q, from: pageFrom, to: pageTo)
+        let data = try await queryDetails([sqlQuery(q, from: pageFrom, to: max(pageFrom, pageTo))])
+        let buckets = selectedBuckets(q, data: data, result: data.result(), from: pageFrom, to: pageTo)
         var items: [(Date, UsageTotals)] = []
         var day = start
         while day < end, let next = calendar.date(byAdding: .day, value: 1, to: day) {
@@ -435,12 +448,12 @@ extension HostWindowUsageService {
             return .object(["day": .string(formatter.string(from: date)), "totals": totalsJSON(totals), "value": numberJSON(value), "label": .string(dashboardLabel(totals, metric: q.metric)), "normalizedValue": numberJSON(maximum > 0 ? value / maximum : 0)])
         }
         let total = dashboardTotal(buckets)
-        let earliest = state.usageService.aggregator.snapshot().map(\.day).min()
+        let earliest = data.canonical.map(\.day).min()
         let cursorHistoryUnknown = q.allTime && state.cursorAccount?.userID != nil
             && settings.isUsageServiceEffectivelyVisible(.cursor)
             && (q.service == nil || q.service == .cursor)
             && (q.source == nil || q.source == dashboardSource(.cursor))
         let hasOlder = cursorHistoryUnknown || (earliest.map { $0 < start } ?? false)
-        return .object(["fromDay": .string(formatter.string(from: start)), "toDay": .string(formatter.string(from: end)), "timeZone": .string(calendar.timeZone.identifier), "days": .array(days), "totals": totalsJSON(total), "nextBeforeDay": hasOlder ? .string(formatter.string(from: start)) : .null, "coverage": dashboardCoverage(q, from: pageFrom, to: pageTo, includeCompleteDays: false), "status": statusJSON()])
+        return .object(["fromDay": .string(formatter.string(from: start)), "toDay": .string(formatter.string(from: end)), "timeZone": .string(calendar.timeZone.identifier), "days": .array(days), "totals": totalsJSON(total), "nextBeforeDay": hasOlder ? .string(formatter.string(from: start)) : .null, "coverage": dashboardCoverage(q, data: data, result: data.result(), from: pageFrom, to: pageTo, includeCompleteDays: false), "status": statusJSON()])
     }
 }

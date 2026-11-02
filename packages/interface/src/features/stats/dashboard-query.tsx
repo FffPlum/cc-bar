@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useHost } from "@/host/host-context";
 import type { WindowAPI } from "@ccbar/host-api/window";
@@ -6,6 +6,25 @@ import type { WindowAPI } from "@ccbar/host-api/window";
 let nextScopeId = 0;
 type Scope = { id: number; context: string; client: QueryClient };
 const sessionScopes = new WeakMap<WindowAPI, Scope>();
+
+// Query placeholderData ends when a new key fails. Keep the last successful
+// response visible in that case, but never put it into the new key's cache.
+// This hook lives inside the keyed scope, so privacy/context changes reset it.
+export function useRetainedResult<T>(query: {
+  data: T | undefined;
+  isPlaceholderData: boolean;
+}) {
+  const lastSuccess = useRef<T | undefined>(undefined);
+  if (query.data !== undefined && !query.isPlaceholderData)
+    lastSuccess.current = query.data;
+  return {
+    data: query.data ?? lastSuccess.current,
+    isPreviousData:
+      query.isPlaceholderData ||
+      (query.data === undefined && lastSuccess.current !== undefined),
+  };
+}
+
 function scopeFor(api: WindowAPI, context: string): Scope {
   const existing = sessionScopes.get(api);
   if (existing?.context === context) return existing;

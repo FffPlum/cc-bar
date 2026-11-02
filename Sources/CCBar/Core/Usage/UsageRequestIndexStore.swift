@@ -32,9 +32,9 @@ nonisolated struct UsageRequestIndexStore: Sendable {
         let rows: [Row]
     }
     let directory: URL
-    private var url: URL { directory.appendingPathComponent("request-index.sqlite3") }
-    private static let applicationID = 0x43434252
-    private static let maximumRows = 1_000_000
+    var url: URL { directory.appendingPathComponent("request-index.sqlite3") }
+    static let applicationID = 0x43434252
+    static let maximumRows = 1_000_000
 
     enum LoadResult: Sendable {
         case ready(Payload)
@@ -42,16 +42,17 @@ nonisolated struct UsageRequestIndexStore: Sendable {
         case unavailable
     }
 
-    private enum StoreError: Error {
+    enum StoreError: Error {
         case sqlite(Int32)
         case invalidData
+        case invalidQuery
         case unsupportedDatabase
 
         var isCorruption: Bool {
             switch self {
             case .sqlite(let code): return code & 0xff == SQLITE_CORRUPT || code & 0xff == SQLITE_NOTADB
             case .invalidData: return true
-            case .unsupportedDatabase: return false
+            case .unsupportedDatabase, .invalidQuery: return false
             }
         }
     }
@@ -85,11 +86,21 @@ nonisolated struct UsageRequestIndexStore: Sendable {
     }
 
     func save(_ payload: Payload) throws {
+        try savePayload(payload, replacingApps: nil)
+    }
+
+    /// Metadata is updated for supplied sources. Only explicitly replaced sources lose
+    /// their old rows; failed scans can mark a source incomplete without discarding data.
+    func saveChanges(_ payload: Payload, replacingApps: Set<UsageApp>) throws {
+        try savePayload(payload, replacingApps: replacingApps)
+    }
+
+    private func savePayload(_ payload: Payload, replacingApps: Set<UsageApp>?) throws {
         try Self.validate(payload)
         try withLock {
             if FileManager.default.fileExists(atPath: url.path) {
                 do {
-                    try writeDatabase(payload, at: url, initialize: false)
+                    try writeDatabase(payload, at: url, initialize: false, replacingApps: replacingApps)
                     return
                 } catch let error as StoreError where error.isCorruption {
                     try quarantine()
@@ -102,7 +113,7 @@ nonisolated struct UsageRequestIndexStore: Sendable {
                 try? FileManager.default.removeItem(at: temporary)
                 try? FileManager.default.removeItem(atPath: temporary.path + "-journal")
             }
-            try writeDatabase(payload, at: temporary, initialize: true)
+            try writeDatabase(payload, at: temporary, initialize: true, replacingApps: replacingApps)
             guard rename(temporary.path, url.path) == 0 else {
                 throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
             }
@@ -111,19 +122,24 @@ nonisolated struct UsageRequestIndexStore: Sendable {
 
     /// Serializes our short-lived connections, including first creation and quarantine.
     /// SQLite transactions still arbitrate with other SQLite clients; no global umask.
-    private func withLock<T>(_ body: () throws -> T) throws -> T {
+    func withLock<T>(shared: Bool = false, _ body: () throws -> T) throws -> T {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let lockURL = directory.appendingPathComponent("request-index.lock")
         let descriptor = open(lockURL.path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         defer { close(descriptor) }
         guard fchmod(descriptor, 0o600) == 0 else { throw POSIXError(.EACCES) }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { throw StoreError.sqlite(SQLITE_BUSY) }
+        let deadline = Date().addingTimeInterval(0.5)
+        while flock(descriptor, (shared ? LOCK_SH : LOCK_EX) | LOCK_NB) != 0 {
+            guard errno == EWOULDBLOCK || errno == EINTR, Date() < deadline else { throw StoreError.sqlite(SQLITE_BUSY) }
+            try Task.checkCancellation()
+            usleep(10_000)
+        }
         defer { flock(descriptor, LOCK_UN) }
         return try body()
     }
 
-    private func quarantine() throws {
+    func quarantine() throws {
         // Never rename a database with a potentially active journal/WAL writer.
         guard ["-journal", "-wal", "-shm"].allSatisfy({ !FileManager.default.fileExists(atPath: url.path + $0) }) else {
             throw StoreError.sqlite(SQLITE_BUSY)
@@ -132,7 +148,7 @@ nonisolated struct UsageRequestIndexStore: Sendable {
         try FileManager.default.moveItem(at: url, to: destination)
     }
 
-    private func readDatabase() throws -> Payload {
+    func readDatabase() throws -> Payload {
         let db = try Connection(url: url, create: false)
         try db.execute("BEGIN")
         defer { try? db.execute("ROLLBACK") }
@@ -171,7 +187,7 @@ nonisolated struct UsageRequestIndexStore: Sendable {
         return payload
     }
 
-    private func writeDatabase(_ payload: Payload, at path: URL, initialize: Bool) throws {
+    func writeDatabase(_ payload: Payload, at path: URL, initialize: Bool, replacingApps: Set<UsageApp>?) throws {
         let db = try Connection(url: path, create: initialize)
         // The cache has one serialized background writer and startup reads. Rollback
         // journaling keeps recovery/permissions simple without long-lived WAL sidecars.
@@ -197,15 +213,16 @@ nonisolated struct UsageRequestIndexStore: Sendable {
                 PRAGMA user_version=1;
                 """)
         } else { try validateSchema(db) }
+        try db.execute("CREATE INDEX IF NOT EXISTS requests_partition ON requests(app,model,speed,day)")
         let old = try readSources(db)
         let groups = Dictionary(grouping: payload.rows, by: \.app)
         let apps = Set(payload.sourceKeys.keys).union(payload.incompleteApps).union(groups.keys)
-        for app in Set(old.keys).subtracting(apps) {
+        for app in (replacingApps ?? Set(old.keys)).subtracting(apps) {
             try db.run("DELETE FROM sources WHERE app=?", [.text(app.rawValue)])
         }
         for app in apps.sorted(by: { $0.rawValue < $1.rawValue }) {
             let fingerprint = payload.sourceKeys[app]
-            let changed = fingerprint == nil || old[app]?.fingerprint != fingerprint
+            let changed = replacingApps.map { $0.contains(app) } ?? (fingerprint == nil || old[app]?.fingerprint != fingerprint)
             try db.run("INSERT INTO sources(app,fingerprint,incomplete) VALUES(?,?,?) ON CONFLICT(app) DO UPDATE SET fingerprint=excluded.fingerprint,incomplete=excluded.incomplete",
                 [.text(app.rawValue), fingerprint.map(Value.text) ?? .null, .integer(payload.incompleteApps.contains(app) ? 1 : 0)])
             guard changed else { continue }
@@ -227,21 +244,23 @@ nonisolated struct UsageRequestIndexStore: Sendable {
                 try db.check(sqlite3_clear_bindings(insert))
             }
         }
+        try db.execute("CREATE TABLE IF NOT EXISTS cache_metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        try db.run("INSERT INTO cache_metadata(key,value) VALUES('revision',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [.text(UUID().uuidString)])
         try db.execute("COMMIT")
     }
 
-    private func validateSchema(_ db: Connection) throws {
+    func validateSchema(_ db: Connection) throws {
         guard try db.scalarInt("PRAGMA application_id") == Self.applicationID,
               try db.scalarInt("PRAGMA user_version") == 1 else { throw StoreError.unsupportedDatabase }
         guard try db.scalarInt("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('sources','requests')") == 2 else { throw StoreError.invalidData }
     }
 
-    private struct Source {
+    struct Source {
         let fingerprint: String?
         let incomplete: Bool
     }
 
-    private func readSources(_ db: Connection) throws -> [UsageApp: Source] {
+    func readSources(_ db: Connection) throws -> [UsageApp: Source] {
         let statement = try db.prepare("SELECT app,fingerprint,incomplete FROM sources")
         defer { sqlite3_finalize(statement) }
         var result: [UsageApp: Source] = [:]
@@ -255,11 +274,11 @@ nonisolated struct UsageRequestIndexStore: Sendable {
         return result
     }
 
-    private static func validHash(_ value: String) -> Bool {
+    static func validHash(_ value: String) -> Bool {
         value.utf8.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 
-    private static func validate(_ payload: Payload) throws {
+    static func validate(_ payload: Payload) throws {
         guard payload.version == 1, payload.rows.count <= maximumRows,
               payload.sourceKeys.values.allSatisfy(validHash) else { throw StoreError.invalidData }
         var identifiers = Set<String>()
@@ -278,7 +297,7 @@ nonisolated struct UsageRequestIndexStore: Sendable {
         }
     }
 
-    private func text(_ statement: OpaquePointer, _ column: Int32) throws -> String {
+    func text(_ statement: OpaquePointer, _ column: Int32) throws -> String {
         guard sqlite3_column_type(statement, column) == SQLITE_TEXT,
               sqlite3_column_bytes(statement, column) <= 4096,
               let pointer = sqlite3_column_text(statement, column) else { throw StoreError.invalidData }
@@ -287,21 +306,21 @@ nonisolated struct UsageRequestIndexStore: Sendable {
         return string
     }
 
-    private func integer(_ statement: OpaquePointer, _ column: Int32) throws -> Int {
+    func integer(_ statement: OpaquePointer, _ column: Int32) throws -> Int {
         guard sqlite3_column_type(statement, column) == SQLITE_INTEGER else { throw StoreError.invalidData }
         let value = sqlite3_column_int64(statement, column)
         guard value >= 0, value <= 1_000_000_000_000 else { throw StoreError.invalidData }
         return Int(value)
     }
 
-    private func real(_ statement: OpaquePointer, _ column: Int32) throws -> Double {
+    func real(_ statement: OpaquePointer, _ column: Int32) throws -> Double {
         guard [SQLITE_FLOAT, SQLITE_INTEGER].contains(sqlite3_column_type(statement, column)) else { throw StoreError.invalidData }
         let value = sqlite3_column_double(statement, column)
         guard value.isFinite else { throw StoreError.invalidData }
         return value
     }
 
-    private func decimal(_ statement: OpaquePointer, _ column: Int32) throws -> Decimal? {
+    func decimal(_ statement: OpaquePointer, _ column: Int32) throws -> Decimal? {
         guard sqlite3_column_type(statement, column) != SQLITE_NULL else { return nil }
         let raw = try text(statement, column)
         guard raw.range(of: #"^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?$"#, options: .regularExpression) != nil,
@@ -309,10 +328,10 @@ nonisolated struct UsageRequestIndexStore: Sendable {
         return value
     }
 
-    private enum Value { case text(String), integer(Int64), real(Double), null }
+    enum Value { case text(String), integer(Int64), real(Double), null }
 
-    private final class Connection {
-        private let handle: OpaquePointer
+    final class Connection {
+        let handle: OpaquePointer
         init(url: URL, create: Bool) throws {
             if create {
                 let fd = open(url.path, O_CREAT | O_EXCL | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)

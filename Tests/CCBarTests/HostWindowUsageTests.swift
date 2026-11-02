@@ -186,7 +186,7 @@ final class HostWindowUsageTests: XCTestCase {
         XCTAssertEqual(try object(initial["totals"])["totalTokens"], .number(7))
         XCTAssertEqual(try object(initial["coverage"])["refreshing"], .bool(true))
         XCTAssertEqual(try object(initial["coverage"])["incomplete"], .bool(true))
-        service.dashboardIndexProvider = { UsageRequestIndexSnapshot(records: [UsageRequestRecord(id: "cached", entry: entry)], revision: "ready", incompleteApps: []) }
+        try fixture.index(service, records: [UsageRequestRecord(id: "cached", entry: entry)], revision: "ready")
         let ready = try object(await service.handle("window.usage.requests", params: ["range": .string("today"), "metric": .string("tokens")]))
         XCTAssertEqual(try object(ready["coverage"])["refreshing"], .bool(false))
         XCTAssertEqual(try object(XCTUnwrap(array(ready["rows"]).first))["conversationID"], .null)
@@ -205,9 +205,9 @@ final class HostWindowUsageTests: XCTestCase {
         let entries = [entry(.codex, 60, 40, 2), entry(.claude, 40, 10, 3)]
         fixture.state.usageService.aggregator.ingestLocal(entries)
         let service = fixture.service()
-        service.dashboardIndexProvider = { UsageRequestIndexSnapshot(records: entries.enumerated().map {
+        try fixture.index(service, records: entries.enumerated().map {
             UsageRequestRecord(id: String($0.offset), entry: $0.element)
-        }, revision: "segments", incompleteApps: []) }
+        }, revision: "segments")
         func numeric(_ value: HostJSON?) throws -> Double {
             guard case .number(let n) = value else { throw XCTUnwrapError.unexpectedJSON }
             return NSDecimalNumber(decimal: n).doubleValue
@@ -243,7 +243,7 @@ final class HostWindowUsageTests: XCTestCase {
             day: day, timestamp: fixture.now.addingTimeInterval(-60), inputTokens: 0, outputTokens: 5,
             cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: 0, costBreakdown: nil)
         fixture.state.usageService.aggregator.ingestLocal([outputOnly])
-        service.dashboardIndexProvider = { UsageRequestIndexSnapshot(records: [UsageRequestRecord(id: "zero", entry: outputOnly)], revision: "zero", incompleteApps: []) }
+        try fixture.index(service, records: [UsageRequestRecord(id: "zero", entry: outputOnly)], revision: "zero")
         let zero = try object(await service.handle("window.usage.dashboard", params: ["range": .string("today"), "metric": .string("cacheHitRate"), "modelID": .string("zero")]))
         let zeroSamples = try array(zero["samples"]).map { try object($0) }
         let zeroSample = try XCTUnwrap(zeroSamples.first { (try? array($0["segments"]).isEmpty) == false })
@@ -271,9 +271,9 @@ final class HostWindowUsageTests: XCTestCase {
             entry(.claude, "c", start, 32)]
         fixture.state.usageService.aggregator.ingestLocal(entries)
         let service = fixture.service()
-        service.dashboardIndexProvider = { UsageRequestIndexSnapshot(records: entries.enumerated().map {
+        try fixture.index(service, records: entries.enumerated().map {
             UsageRequestRecord(id: String($0.offset), entry: $0.element)
-        }, revision: "boundaries", incompleteApps: []) }
+        }, revision: "boundaries")
         var query: [String: HostJSON] = ["range": .string("custom"), "metric": .string("tokens"),
             "customFrom": .string("2026-11-01T05:00:00Z"), "customTo": .string("2026-11-01T07:00:00Z"),
             "service": .string("codex"), "sourceID": .string("codex.localLogs"), "modelID": .string("a")]
@@ -534,7 +534,7 @@ final class HostWindowUsageTests: XCTestCase {
             cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: 1, costBreakdown: nil)
         fixture.state.usageService.aggregator.ingestLocal([entry, extra])
         let service = fixture.service()
-        service.dashboardIndexProvider = { UsageRequestIndexSnapshot(records: [UsageRequestRecord(id: "one", entry: entry)], revision: "test", incompleteApps: []) }
+        try fixture.index(service, records: [UsageRequestRecord(id: "one", entry: entry)], revision: "test")
         let query: [String: HostJSON] = ["range": .string("last24h"), "metric": .string("tokens")]
         let dashboard = try object(await service.handle("window.usage.dashboard", params: query))
         XCTAssertEqual(try object(dashboard["totals"])["totalTokens"], .number(10))
@@ -551,7 +551,7 @@ final class HostWindowUsageTests: XCTestCase {
         XCTAssertEqual(try array(heatmap["days"]).count, 371)
 
         var revision = "page-1"
-        service.dashboardIndexProvider = { UsageRequestIndexSnapshot(records: [UsageRequestRecord(id: "one", entry: entry), UsageRequestRecord(id: "two", entry: extra)], revision: revision, incompleteApps: []) }
+        try fixture.index(service, records: [UsageRequestRecord(id: "one", entry: entry), UsageRequestRecord(id: "two", entry: extra)], revision: revision)
         var pageQuery = query
         pageQuery["limit"] = .number(1)
         pageQuery["sort"] = .string("tokens")
@@ -565,17 +565,18 @@ final class HostWindowUsageTests: XCTestCase {
         await assertError("invalid_cursor") { try await service.handle("window.usage.requests", params: pageQuery) }
         fixture.show([.codex])
         revision = "page-2"
+        try fixture.index(service, records: [UsageRequestRecord(id: "one", entry: entry), UsageRequestRecord(id: "two", entry: extra)], revision: revision)
         await assertError("invalid_cursor") { try await service.handle("window.usage.requests", params: pageQuery) }
 
         let exceeding = UsageEntry(app: .codex, conversationKey: "bad", model: "gpt-test", speed: .standard,
             day: day, timestamp: fixture.now.addingTimeInterval(-500), inputTokens: 100, outputTokens: 0,
             cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: 1, costBreakdown: nil)
-        service.dashboardIndexProvider = { UsageRequestIndexSnapshot(records: [UsageRequestRecord(id: "bad", entry: exceeding)], revision: "overflow", incompleteApps: []) }
+        try fixture.index(service, records: [UsageRequestRecord(id: "bad", entry: exceeding)], revision: "overflow")
         let rejected = try object(await service.handle("window.usage.requests", params: query))
-        XCTAssertEqual(rejected["totalCount"], .number(2))
+        XCTAssertEqual(rejected["totalCount"], .number(0), "An invalid on-disk partition must fail closed; background imports retain old valid rows before writing")
         XCTAssertEqual(try object(rejected["coverage"])["incomplete"], .bool(true))
         fixture.state.usageService.aggregator.ingestLocal([exceeding])
-        service.dashboardIndexProvider = { UsageRequestIndexSnapshot(records: [UsageRequestRecord(id: "one", entry: entry), UsageRequestRecord(id: "two", entry: extra), UsageRequestRecord(id: "bad", entry: exceeding)], revision: "committed", incompleteApps: []) }
+        try fixture.index(service, records: [UsageRequestRecord(id: "one", entry: entry), UsageRequestRecord(id: "two", entry: extra), UsageRequestRecord(id: "bad", entry: exceeding)], revision: "committed")
         let committed = try object(await service.handle("window.usage.requests", params: query))
         XCTAssertEqual(committed["totalCount"], .number(3))
         let long: [String: HostJSON] = ["range": .string("custom"), "metric": .string("tokens"), "customFrom": .string("2020-01-01T00:00:00Z"), "customTo": .string("2026-03-10T00:00:00Z")]
@@ -590,7 +591,7 @@ final class HostWindowUsageTests: XCTestCase {
         advisor.requestCount = 0
         advisor.inputTokens = 3
         fixture.state.usageService.aggregator.ingestLocal([advisor])
-        service.dashboardIndexProvider = { UsageRequestIndexSnapshot(records: [UsageRequestRecord(id: "one", entry: entry), UsageRequestRecord(id: "advisor", entry: advisor)], revision: "advisor", incompleteApps: []) }
+        try fixture.index(service, records: [UsageRequestRecord(id: "one", entry: entry), UsageRequestRecord(id: "advisor", entry: advisor)], revision: "advisor")
         let advisorDashboard = try object(await service.handle("window.usage.dashboard", params: query))
         XCTAssertEqual(try object(advisorDashboard["totals"])["totalTokens"], .number(13))
         let advisorRequests = try object(await service.handle("window.usage.requests", params: query))
@@ -599,11 +600,69 @@ final class HostWindowUsageTests: XCTestCase {
         var unpriced = entry
         unpriced.costUSD = nil
         fixture.state.usageService.aggregator.ingestLocal([unpriced])
-        service.dashboardIndexProvider = { UsageRequestIndexSnapshot(records: [UsageRequestRecord(id: "unpriced", entry: unpriced)], revision: "unpriced", incompleteApps: []) }
+        try fixture.index(service, records: [UsageRequestRecord(id: "unpriced", entry: unpriced)], revision: "unpriced")
         let unpricedDashboard = try object(await service.handle("window.usage.dashboard", params: query))
         XCTAssertEqual(try object(unpricedDashboard["coverage"])["incomplete"], .bool(false))
         XCTAssertEqual(try object(unpricedDashboard["coverage"])["precision"], .string("event"))
         XCTAssertEqual(try object(unpricedDashboard["totals"])["hasUnpricedUsage"], .bool(true))
+    }
+
+    func testSQLRequestPagesSurviveNewHostAndReadErrorsDoNotReturnEmptySuccess() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex])
+        let info = fixture.info("database-conversation", app: .codex, project: "database-project")
+        fixture.load(infos: [info], buckets: [fixture.bucket(info, tokens: 30)])
+        let day = Calendar.current.startOfDay(for: fixture.now)
+        let entries = (1...3).map { n in
+            UsageEntry(app: .codex, conversationKey: info.key, model: "gpt-5", speed: .standard,
+                day: day, timestamp: fixture.now.addingTimeInterval(Double(-n * 60)),
+                inputTokens: n * 5, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+                costUSD: Decimal(n), costBreakdown: nil)
+        }
+        fixture.state.usageService.aggregator.load(from: [])
+        fixture.state.usageService.aggregator.ingestLocal(entries)
+        let writer = fixture.service()
+        try fixture.index(writer, records: entries.enumerated().map { UsageRequestRecord(id: String($0.offset), entry: $0.element) }, revision: "persistent-pages")
+        let reader = fixture.service()
+        reader.dashboardStore = writer.dashboardStore
+        reader.dashboardStatusProvider = writer.dashboardStatusProvider
+        let query: [String: HostJSON] = ["range": .string("today"), "metric": .string("cost"), "limit": .number(1), "sort": .string("cost")]
+        let first = try object(await reader.handle("window.usage.requests", params: query))
+        XCTAssertEqual(first["totalCount"], .number(3))
+        let rows = try array(first["rows"])
+        XCTAssertEqual(rows.count, 1)
+        let row = try object(XCTUnwrap(rows.first))
+        XCTAssertEqual(row["id"], .string("2"))
+        XCTAssertNotEqual(row["conversationID"], .null)
+        let wire = String(decoding: try JSONEncoder().encode(HostJSON.object(first)), as: UTF8.self)
+        XCTAssertFalse(wire.contains(info.key), "Only opaque conversation identities may cross the Host API")
+        let db = fixture.root.appendingPathComponent("query-index/request-index.sqlite3")
+        try FileManager.default.removeItem(at: db)
+        await assertError("usage_unavailable") { try await reader.handle("window.usage.requests", params: query) }
+        await assertError("usage_unavailable") { try await reader.handle("window.usage.dashboard", params: query.filter { $0.key != "limit" && $0.key != "sort" }) }
+    }
+
+    func testCancelledSQLQueryDoesNotMarkDatabaseUnavailable() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex])
+        PricingCatalogStore.shared.disableNetworkForTesting()
+        await fixture.state.usageService.bootstrap(appState: fixture.state)
+        await fixture.state.usageService.synchronizeRequestIndexForTesting()
+        let before = fixture.state.usageService.requestIndexStatusForDisplay()
+        XCTAssertTrue(before.isReady)
+        XCTAssertFalse(before.isUnavailable)
+        // Use the actual UsageService store and status, so the failure-recovery path is
+        // observable. The task is cancelled before yielding the main actor to its body.
+        let service = fixture.service()
+        let query: [String: HostJSON] = ["range": .string("today"), "metric": .string("tokens")]
+        let task = Task { try await service.handle("window.usage.requests", params: query) }
+        task.cancel()
+        await assertError("cancelled") { try await task.value }
+        XCTAssertFalse(fixture.state.usageService.requestIndexStatusForDisplay().isUnavailable)
+        let next = try object(await service.handle("window.usage.requests", params: query))
+        XCTAssertEqual(next["totalCount"], .number(0))
     }
 
     private func object(_ value: HostJSON?) throws -> [String: HostJSON] {
@@ -626,8 +685,9 @@ final class HostWindowUsageTests: XCTestCase {
     private enum XCTUnwrapError: Error { case unexpectedJSON }
 }
 
-/// Every store and log root belongs to this temporary directory. No bootstrap, scan,
-/// credential discovery or network operation is called by these integration tests.
+/// Every store and log root belongs to this temporary directory. These tests never
+/// bootstrap AppState, discover credentials, or perform network operations.
+/// The cancellation test bootstraps only the isolated UsageService with network disabled.
 @MainActor
 private final class UsageWindowFixture {
     let suite = "HostWindowUsageTests.\(UUID().uuidString)"
@@ -663,6 +723,21 @@ private final class UsageWindowFixture {
     }
     func service(actions: HostWindowUsageActions? = nil) -> HostWindowUsageService {
         HostWindowUsageService(state: state, settings: settings, actions: actions ?? self.actions(), now: { self.now })
+    }
+    func index(_ service: HostWindowUsageService, records: [UsageRequestRecord], revision: String) throws {
+        let store = UsageRequestIndexStore(directory: root.appendingPathComponent("query-index"))
+        let rows = records.map { record in
+            let e = record.entry
+            return UsageRequestIndexStore.Row(id: record.id, conversationHash: UsageRequestIndexStore.hash(e.conversationKey),
+                app: e.app, model: e.model, speed: e.speed, day: e.day, timestamp: e.timestamp,
+                input: e.inputTokens, output: e.outputTokens, cacheRead: e.cacheReadTokens,
+                cacheCreation: e.cacheCreationTokens, requests: e.requestCount, cost: e.costUSD,
+                costInput: e.costBreakdown?.input, costOutput: e.costBreakdown?.output,
+                costRead: e.costBreakdown?.cacheRead, costCreation: e.costBreakdown?.cacheCreation, timing: e.timing)
+        }
+        try store.save(.init(version: 1, sourceKeys: Dictionary(uniqueKeysWithValues: Set(rows.map(\.app)).map { ($0, UsageRequestIndexStore.hash(revision)) }), incompleteApps: [], rows: rows))
+        service.dashboardStore = store
+        service.dashboardStatusProvider = { UsageRequestIndexStatus(revision: revision, incompleteApps: [], isReady: true) }
     }
     func day(_ day: Int) -> Date {
         StatsRange.weekStartMondayCalendar.date(from: DateComponents(year: 2026, month: 3, day: day))!

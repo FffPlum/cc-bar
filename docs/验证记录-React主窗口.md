@@ -147,3 +147,25 @@ Codex 对照 cc-switch 查询与日志同步源码制定方案，GPT-6.1 Terra �
 - 没有改变前端或窗口 DTO，因此没有重复运行前端/SDK 行为测试；没有启动 App 操作真实用量目录、迁移旧数据、打包或发布。新库将在用户下次启动本分支构建的 App 时由后台建立。验证通过后，按用户要求创建本地提交。
 
 日志：`/tmp/ccbar-sqlite-cache-tests.log`、`/tmp/ccbar-sqlite-cache-final-tests.log`、`/tmp/ccbar-sqlite-cache-debug.log`。
+
+
+### SQLite 查询与前端结果缓存
+
+日期：2026-11-02。用户要求进一步对齐 cc-switch：启动不恢复全量明细，明细筛选、排序、分页、计数与聚合由 SQL 完成，前端保留查询结果并后台更新。工作区仍为 `feature/react-main-window`。
+
+- `UsageService` 移除全量请求快照和请求到会话的常驻映射；启动只读取来源/事务元数据。后台逐来源解析、校验、事务提交后释放临时记录，失败来源保留旧行。
+- `UsageRequestIndexQueries` 用同一读事务处理关联查询，SQL 完成明细筛选和聚合，按 COUNT/ORDER/LIMIT/OFFSET 返回当前页。Decimal 聚合/排序保持精度，小时使用 Calendar 区间，分区与权威日桶核验。自然日汇总继续保留已清理日志的历史。
+- Host 移除内存明细筛选、排序、分区核验缓存；取消查询不误标数据库故障，数据库不可用返回错误，前端不会收到伪造空结果。
+- React 请求分页补上旧结果保留；筛选/分页失败保留可用内容、标记旧结果、禁用旧游标并提供重试。游标过期后先使首页缓存失效再重取，避免重复使用旧游标。
+
+验证结果：
+
+- Swift 定向回归 **43 项通过**（SQLite 18、请求索引生命周期 9、Host 16），日志 `/tmp/ccbar-sql-query-final-tests.log`。覆盖精确金额与排序、条件分页、计时聚合、覆盖缺口、夏令时重复小时、并发读取、取消、重启复用、来源局部写入与失败保留，以及畸形金额/计数隔离和合法金额溢出不误删库。测试只使用临时数据。
+- React 定向回归 **30 项通过**，日志 `/tmp/ccbar-sql-query-frontend-tests.log`；覆盖缓存返回、切换/翻页失败保留、后台事件刷新不卸载表格和失效游标恢复。TypeScript 静态检查通过。
+- 指定 Xcode Debug 构建 **BUILD SUCCEEDED**，日志 `/tmp/ccbar-sql-query-debug.log`；包含 SDK / 前端 TypeScript 与 Vite 构建。新 SQL 扩展显式标记 nonisolated，新增代码没有 actor 隔离警告。
+- `plutil -lint ccbar.xcodeproj/project.pbxproj` 与 `git diff --check` 通过。实际界面/动画观感仍由用户验收；未启动或替换安装的 App。验证通过后按用户要求创建本地提交，未推送。
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --skip-update --disable-automatic-resolution --filter 'UsageRequestIndex|HostWindowUsage'
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destination 'platform=macOS' build
+```
