@@ -192,6 +192,67 @@ final class HostWindowUsageTests: XCTestCase {
         XCTAssertEqual(try object(XCTUnwrap(array(ready["rows"]).first))["conversationID"], .null)
     }
 
+    func testDashboardSamplesStackVisibleServicesAndCacheContributions() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex, .claude])
+        let day = Calendar.current.startOfDay(for: fixture.now)
+        func entry(_ app: UsageApp, _ input: Int, _ read: Int, _ cost: Decimal) -> UsageEntry {
+            UsageEntry(app: app, conversationKey: "test", model: "model", speed: .standard,
+                day: day, timestamp: fixture.now.addingTimeInterval(-60), inputTokens: input, outputTokens: 0,
+                cacheReadTokens: read, cacheCreationTokens: 0, costUSD: cost, costBreakdown: nil)
+        }
+        let entries = [entry(.codex, 60, 40, 2), entry(.claude, 40, 10, 3)]
+        fixture.state.usageService.aggregator.ingestLocal(entries)
+        let service = fixture.service()
+        service.dashboardIndexProvider = { UsageRequestIndexSnapshot(records: entries.enumerated().map {
+            UsageRequestRecord(id: String($0.offset), entry: $0.element)
+        }, revision: "segments", incompleteApps: []) }
+        func numeric(_ value: HostJSON?) throws -> Double {
+            guard case .number(let n) = value else { throw XCTUnwrapError.unexpectedJSON }
+            return NSDecimalNumber(decimal: n).doubleValue
+        }
+        for range in ["today", "last7"] {
+            for metric in ["cost", "requests", "tokens", "cacheHitRate"] {
+                let response = try object(await service.handle("window.usage.dashboard", params: ["range": .string(range), "metric": .string(metric)]))
+                let samples = try array(response["samples"]).map { try object($0) }
+                let sample = try XCTUnwrap(samples.first { (try? numeric($0["value"])) ?? 0 > 0 })
+                let segments = try array(sample["segments"]).map { try object($0) }
+                XCTAssertEqual(segments.map { $0["service"] }, [.string("codex"), .string("claude")])
+                let values = try segments.map { try numeric($0["value"]) }
+                let shares = try segments.map { try numeric($0["share"]) }
+                XCTAssertEqual(values.reduce(0, +), try numeric(sample["value"]), accuracy: 1e-10)
+                XCTAssertEqual(shares.reduce(0, +), 1, accuracy: 1e-10)
+                if metric == "cacheHitRate" {
+                    XCTAssertEqual(values[0], 40.0 / 150.0, accuracy: 1e-10)
+                    XCTAssertEqual(shares[0], 0.8, accuracy: 1e-10)
+                    XCTAssertEqual(try numeric(object(segments[0]["totals"])["cacheHitRate"]), 0.4, accuracy: 1e-10)
+                }
+            }
+        }
+        let filtered = try object(await service.handle("window.usage.dashboard", params: ["range": .string("today"), "metric": .string("tokens"), "service": .string("claude")]))
+        let filteredSamples = try array(filtered["samples"]).map { try object($0) }
+        let nonempty = try XCTUnwrap(filteredSamples.first { (try? array($0["segments"]).isEmpty) == false })
+        XCTAssertEqual(try array(nonempty["segments"]).count, 1)
+        fixture.show([.codex])
+        let hidden = try object(await service.handle("window.usage.dashboard", params: ["range": .string("today"), "metric": .string("tokens")]))
+        let hiddenSamples = try array(hidden["samples"]).map { try object($0) }
+        let hiddenNonempty = try XCTUnwrap(hiddenSamples.first { (try? array($0["segments"]).isEmpty) == false })
+        XCTAssertEqual(try object(XCTUnwrap(array(hiddenNonempty["segments"]).first))["service"], .string("codex"))
+        let outputOnly = UsageEntry(app: .codex, conversationKey: "zero", model: "zero", speed: .standard,
+            day: day, timestamp: fixture.now.addingTimeInterval(-60), inputTokens: 0, outputTokens: 5,
+            cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: 0, costBreakdown: nil)
+        fixture.state.usageService.aggregator.ingestLocal([outputOnly])
+        service.dashboardIndexProvider = { UsageRequestIndexSnapshot(records: [UsageRequestRecord(id: "zero", entry: outputOnly)], revision: "zero", incompleteApps: []) }
+        let zero = try object(await service.handle("window.usage.dashboard", params: ["range": .string("today"), "metric": .string("cacheHitRate"), "modelID": .string("zero")]))
+        let zeroSamples = try array(zero["samples"]).map { try object($0) }
+        let zeroSample = try XCTUnwrap(zeroSamples.first { (try? array($0["segments"]).isEmpty) == false })
+        let zeroSegment = try object(XCTUnwrap(array(zeroSample["segments"]).first))
+        XCTAssertEqual(try numeric(zeroSample["value"]), 0)
+        XCTAssertEqual(try numeric(zeroSegment["value"]), 0)
+        XCTAssertEqual(try numeric(zeroSegment["share"]), 0)
+    }
+
     func testDashboardAbsoluteRangeAndFilterIntersection() async throws {
         let fixture = try UsageWindowFixture()
         defer { fixture.cleanup() }

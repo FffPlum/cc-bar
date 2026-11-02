@@ -274,16 +274,35 @@ extension HostWindowUsageService {
         let bucketGroups = Dictionary(grouping: buckets) { bucket in
             calendar.dateInterval(of: component, for: bucket.day)?.start ?? bucket.day
         }
-        var sampleData: [(Date, UsageTotals)] = []
+        var sampleData: [(Date, [UsageBucket])] = []
         while day < q.to {
             guard let next = calendar.date(byAdding: component, value: 1, to: day), next > day else { break }
-            let ts = q.hourly ? dashboardTotal((eventGroups[day] ?? []).map { eventBucket($0.entry) }) : dashboardTotal(bucketGroups[day] ?? [])
-            sampleData.append((day, ts)); day = next
+            let rows = q.hourly ? (eventGroups[day] ?? []).map { eventBucket($0.entry) } : (bucketGroups[day] ?? [])
+            sampleData.append((day, rows)); day = next
         }
-        let maxValue = sampleData.map { dashboardValue($0.1, metric: q.metric) }.max() ?? 0
-        let samples: [HostJSON] = sampleData.map { day, totals in
+        let maxValue = sampleData.map { dashboardValue(dashboardTotal($0.1), metric: q.metric) }.max() ?? 0
+        let samples: [HostJSON] = sampleData.map { day, rows in
+            let totals = dashboardTotal(rows)
             let value = dashboardValue(totals, metric: q.metric)
-            return .object(["key": dateJSON(day), "start": dateJSON(day), "totals": totalsJSON(totals), "value": numberJSON(value), "label": .string(dashboardLabel(totals, metric: q.metric)), "normalizedValue": numberJSON(maxValue > 0 ? value / maxValue : 0)])
+            let segments: [HostJSON] = settings.visibleUsageApps.compactMap { app in
+                let appRows = rows.filter { $0.app == app }
+                guard !appRows.isEmpty else { return nil }
+                let appTotals = dashboardTotal(appRows)
+                let contribution: Double
+                let share: Double
+                let label: String
+                if q.metric == "cacheHitRate" {
+                    contribution = totals.inputWithCacheTokens > 0 ? Double(appTotals.cacheReadTokens) / Double(totals.inputWithCacheTokens) : 0
+                    share = totals.cacheReadTokens > 0 ? Double(appTotals.cacheReadTokens) / Double(totals.cacheReadTokens) : 0
+                    label = String(format: tr("%.1f pp", "%.1f 个百分点"), contribution * 100)
+                } else {
+                    contribution = dashboardValue(appTotals, metric: q.metric)
+                    share = value > 0 ? contribution / value : 0
+                    label = dashboardLabel(appTotals, metric: q.metric)
+                }
+                return .object(["service": .string(app.rawValue), "totals": totalsJSON(appTotals), "value": numberJSON(contribution), "label": .string(label), "share": numberJSON(share)])
+            }
+            return .object(["key": dateJSON(day), "start": dateJSON(day), "totals": totalsJSON(totals), "value": numberJSON(value), "label": .string(dashboardLabel(totals, metric: q.metric)), "normalizedValue": numberJSON(maxValue > 0 ? value / maxValue : 0), "segments": .array(segments)])
         }
         let axisTicks: [HostJSON] = [0.0, 0.5, 1.0].map { position in
             let value = maxValue * position

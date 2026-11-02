@@ -125,3 +125,12 @@ Codex 对照 cc-switch 查询与日志同步源码制定方案，GPT-6.1 Terra �
 日志：`/tmp/ccbar-react-cache-swift-tests.log`、`/tmp/ccbar-react-cache-frontend-tests.log`、`/tmp/ccbar-react-cache-sdk-tests.log`、`/tmp/ccbar-react-cache-debug.log`。
 
 首次升级尚无派生缓存时仍需后台建立一次索引；有效缓存之后可跨重启复用，变化来源仍会后台更新。按用户要求，本轮完成后创建一次本地检查点提交，不推送、打包或发布；未启动应用做视觉审查，真实窗口切换和动画观感交由用户验收。
+
+### 统计趋势窄柱与应用占比
+
+按后续截图要求，由 GPT-6.1 Terra 修改宿主、SDK 与前端，Codex 审查数据口径并完成最终 Debug 验证。小时/日/月样本增加逐应用分段，前端按主题色或自定义色堆叠，补充图例、悬停数值/占比及无障碍说明。柱宽复用原设计 28/18/10/5px 分档，保留整列命中区；去除固定列间距避免密集日期溢出。零贡献保留应用说明，不画虚假柱高。缓存命中率使用总体输入量加权的百分点贡献，不相加各应用自身命中率。
+
+- `HostWindowUsageTests` **14 项通过**，新增断言覆盖小时事件与自然日桶、四项指标分段合计、应用筛选/隐藏和零分母；SDK **16 项通过**，包含分段必填与非法服务校验，热力图结构不变。
+- 前端 `dashboard-stacked-chart`、`dashboard`、`dashboard-integration` 三组 **28 项通过**；新增测试覆盖分段比例、零值/单应用、图例顺序、浅深主题/自定义色、键盘提示与缓存贡献标签。最终仅调整提示数值区域宽度后，柱图 4 项单独复跑与 TypeScript 检查通过。
+- 指定 Xcode **Debug build 通过**（`** BUILD SUCCEEDED **`），同步完成 SDK、TypeScript 和静态资源构建；仅有既有 AppIntents 元数据跳过提示。`git diff --check` 通过。
+- 日志：`/tmp/ccbar-dashboard-stacks-swift-tests.log`、`/tmp/ccbar-dashboard-stacks-sdk-tests.log`、`/tmp/ccbar-dashboard-stacks-debug.log`。未启动应用做视觉验收；本次改动尚未提交或推送。

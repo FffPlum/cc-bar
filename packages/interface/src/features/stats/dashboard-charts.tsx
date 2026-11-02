@@ -5,6 +5,8 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
+import { chartBarWidth } from "@/components/stacked-bar-chart";
+import { brandColor, serviceDisplayName } from "@/lib/display";
 import { useHost } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
 
@@ -15,7 +17,7 @@ export function DashboardChart({
   data: UsageDashboard;
   title: string;
 }) {
-  const { bootstrap } = useHost();
+  const { bootstrap, settings } = useHost();
   const t = useTranslation();
   if (
     data.resolvedRange.granularity === "hour" &&
@@ -35,6 +37,19 @@ export function DashboardChart({
       </div>
     );
   const samples = data.samples;
+  const present = new Set(
+    samples.flatMap((sample) =>
+      sample.segments.map((segment) => segment.service),
+    ),
+  );
+  const services = [
+    ...bootstrap.visibleUsageServices.filter((service) => present.has(service)),
+    ...Array.from(present).filter(
+      (service) => !bootstrap.visibleUsageServices.includes(service),
+    ),
+  ];
+  const colorFor = (service: (typeof services)[number]) =>
+    brandColor(service, settings, bootstrap.appearance === "dark");
   const indices = new Set(
     samples
       .map((_, i) => i)
@@ -55,14 +70,31 @@ export function DashboardChart({
   });
   return (
     <div className="p-4">
-      <h2 className="font-semibold">
-        {title} ·{" "}
-        {data.resolvedRange.granularity === "hour"
-          ? t("Hourly", "按小时")
-          : data.resolvedRange.granularity === "month"
-            ? t("Monthly", "按月")
-            : t("Daily", "按天")}
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold">
+          {title} ·{" "}
+          {data.resolvedRange.granularity === "hour"
+            ? t("Hourly", "按小时")
+            : data.resolvedRange.granularity === "month"
+              ? t("Monthly", "按月")
+              : t("Daily", "按天")}
+        </h2>
+        <div
+          aria-label={t("Applications", "应用")}
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+        >
+          {services.map((service) => (
+            <span key={service} className="inline-flex items-center gap-1">
+              <span
+                aria-hidden="true"
+                className="size-2 rounded-sm"
+                style={{ backgroundColor: colorFor(service) }}
+              />
+              {serviceDisplayName(service)}
+            </span>
+          ))}
+        </div>
+      </div>
       <div className="mt-4 flex gap-2">
         <div className="relative h-40 w-20 shrink-0 text-right text-[11px] text-muted-foreground">
           {data.axisTicks.map((tick) => (
@@ -75,8 +107,8 @@ export function DashboardChart({
             </span>
           ))}
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="relative flex h-40 items-end gap-1 border-b">
+        <div className="min-w-[5rem] flex-1">
+          <div className="relative flex h-40 items-end border-b">
             <div className="pointer-events-none absolute inset-x-0 top-0 border-t" />
             <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t" />
             {samples.map((s) => (
@@ -86,18 +118,40 @@ export function DashboardChart({
                     <button
                       type="button"
                       className="z-0 flex h-full min-w-0 flex-1 items-end justify-center"
-                      aria-label={`${fmt.format(new Date(s.start))}: ${s.label}`}
+                      aria-label={`${fmt.format(new Date(s.start))}: ${s.label}; ${s.segments
+                        .map(
+                          (segment) =>
+                            `${serviceDisplayName(segment.service)}: ${segment.label}, ${(segment.share * 100).toFixed(1)}%`,
+                        )
+                        .join("; ")}`}
                     />
                   }
                 >
                   <span
-                    className="w-full max-w-10 rounded-t bg-cyan-600"
+                    data-slot="dashboard-bar"
+                    className="flex shrink-0 flex-col-reverse overflow-hidden rounded-t-[2px]"
                     style={{
+                      width: chartBarWidth(samples.length),
+                      maxWidth: "100%",
                       height: `${Math.max(0, Math.min(1, s.normalizedValue)) * 100}%`,
                     }}
-                  />
+                  >
+                    {s.segments
+                      .filter((segment) => segment.share > 0)
+                      .map((segment) => (
+                        <span
+                          key={segment.service}
+                          data-service={segment.service}
+                          style={{
+                            height: `${Math.max(0, Math.min(1, segment.share)) * 100}%`,
+                            backgroundColor: colorFor(segment.service),
+                            flexShrink: 0,
+                          }}
+                        />
+                      ))}
+                  </span>
                 </TooltipTrigger>
-                <TooltipContent className="w-[200px] max-w-none flex-col items-stretch gap-1 bg-popover text-popover-foreground border p-3 shadow-md">
+                <TooltipContent className="w-[260px] max-w-none flex-col items-stretch gap-1 bg-popover text-popover-foreground border p-3 shadow-md">
                   <strong>
                     {new Date(s.start).toLocaleString(
                       bootstrap.resolvedLanguage,
@@ -107,6 +161,24 @@ export function DashboardChart({
                   <span>
                     {title}: {s.label}
                   </span>
+                  {s.segments.map((segment) => (
+                    <span
+                      key={segment.service}
+                      className="flex items-center gap-1.5"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="size-2 shrink-0 rounded-sm"
+                        style={{ backgroundColor: colorFor(segment.service) }}
+                      />
+                      <span className="min-w-0 flex-1">
+                        {serviceDisplayName(segment.service)}
+                      </span>
+                      <span className="max-w-[55%] break-words text-right">
+                        {segment.label} · {(segment.share * 100).toFixed(1)}%
+                      </span>
+                    </span>
+                  ))}
                   <span>Tokens: {s.totals.totalTokens.toLocaleString()}</span>
                   <span>
                     {t("Requests", "请求")}:{" "}
