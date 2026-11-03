@@ -1,9 +1,9 @@
 import type { DashboardHeatmap, UsageDashboard } from "@ccbar/host-api/window";
 import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
+  ChartDataTooltip,
+  ChartDataTooltipTrigger,
+  ChartDataTooltipContent,
+} from "@/components/chart-data-tooltip";
 import { Button } from "@/components/ui/button";
 import { chartBarWidth } from "@/components/stacked-bar-chart";
 import { brandColor, serviceDisplayName } from "@/lib/display";
@@ -98,9 +98,22 @@ export function DashboardChart({
         </div>
       </div>
       <div className="mt-4 flex gap-2">
-        <div className="relative h-40 w-20 shrink-0 text-right text-[11px] text-muted-foreground">
+        <div
+          data-slot="dashboard-y-axis"
+          className="relative h-40 w-max shrink-0 whitespace-nowrap text-right text-[11px] text-muted-foreground"
+        >
+          <div
+            data-slot="dashboard-axis-measure"
+            aria-hidden="true"
+            className="invisible flex w-max flex-col"
+          >
+            {data.axisTicks.map((tick) => (
+              <span key={tick.position}>{tick.label}</span>
+            ))}
+          </div>
           {data.axisTicks.map((tick) => (
             <span
+              data-slot="dashboard-axis-tick"
               key={tick.position}
               className="absolute right-0 translate-y-1/2"
               style={{ bottom: `${tick.position * 100}%` }}
@@ -114,8 +127,8 @@ export function DashboardChart({
             <div className="pointer-events-none absolute inset-x-0 top-0 border-t" />
             <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t" />
             {(empty ? [] : samples).map((s) => (
-              <Tooltip key={s.key}>
-                <TooltipTrigger
+              <ChartDataTooltip key={s.key}>
+                <ChartDataTooltipTrigger
                   render={
                     <button
                       type="button"
@@ -152,8 +165,8 @@ export function DashboardChart({
                         />
                       ))}
                   </span>
-                </TooltipTrigger>
-                <TooltipContent className="w-[260px] max-w-none flex-col items-stretch gap-1 bg-popover text-popover-foreground border p-3 shadow-md">
+                </ChartDataTooltipTrigger>
+                <ChartDataTooltipContent className="w-[260px]">
                   <strong>
                     {new Date(s.start).toLocaleString(
                       bootstrap.resolvedLanguage,
@@ -189,8 +202,8 @@ export function DashboardChart({
                   <span>
                     {t("Cost", "成本")}: {s.totals.costDisplay}
                   </span>
-                </TooltipContent>
-              </Tooltip>
+                </ChartDataTooltipContent>
+              </ChartDataTooltip>
             ))}
           </div>
           <div className="relative h-5 text-[10px] text-muted-foreground">
@@ -292,8 +305,8 @@ export function HeatmapBlocks({
                         className="aspect-square max-h-4"
                       />
                     ) : (
-                      <Tooltip key={day.day}>
-                        <TooltipTrigger
+                      <ChartDataTooltip key={day.day} trackCursorAxis="none">
+                        <ChartDataTooltipTrigger
                           render={
                             <button
                               type="button"
@@ -308,7 +321,7 @@ export function HeatmapBlocks({
                             />
                           }
                         />
-                        <TooltipContent className="w-[200px] max-w-none flex-col items-stretch gap-1 bg-popover text-popover-foreground border p-3 shadow-md">
+                        <ChartDataTooltipContent className="w-[200px]">
                           <strong>{day.day}</strong>
                           <span>
                             Tokens: {day.totals.totalTokens.toLocaleString()}
@@ -320,8 +333,8 @@ export function HeatmapBlocks({
                           <span>
                             {t("Cost", "成本")}: {day.totals.costDisplay}
                           </span>
-                        </TooltipContent>
-                      </Tooltip>
+                        </ChartDataTooltipContent>
+                      </ChartDataTooltip>
                     ),
                   )}
                 </div>

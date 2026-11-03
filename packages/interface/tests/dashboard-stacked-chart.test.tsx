@@ -129,7 +129,14 @@ it("shows weighted cache-rate contribution labels and shares in the tooltip", as
   renderChart([cached], "Cache hit rate");
   fireEvent.focus(screen.getByRole("button", { name: /Codex: 30.0 pp/ }));
   const detail = await screen.findByText("30.0 pp · 60.0%");
-  const tooltip = detail.closest('[data-slot="tooltip-content"]')!;
+  const tooltip = detail.closest('[data-slot="chart-data-tooltip"]')!;
   expect(screen.getByText("20.0 pp · 40.0%")).toBeTruthy();
   expect(tooltip.textContent).toContain("Cache hit rate: 50%");
+  expect(tooltip.textContent).toContain(
+    `Tokens: ${totals.totalTokens.toLocaleString()}`,
+  );
+  expect(tooltip.textContent).toContain(
+    `Requests: ${totals.requestCount.toLocaleString()}`,
+  );
+  expect(tooltip.textContent).toContain(`Cost: ${totals.costDisplay}`);
 });

@@ -769,6 +769,99 @@ final class HostWindowUsageTests: XCTestCase {
         XCTAssertEqual(hiddenServices.map { $0["id"] }, [.string("kimi"), .string("codex")])
     }
 
+    func testDashboardUsesNiceAxisAndMatchingBarNormalization() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex])
+        let day = Calendar.current.startOfDay(for: fixture.now)
+        let entry = UsageEntry(app: .codex, conversationKey: "nice-axis", model: "model", speed: .standard,
+            day: day, timestamp: fixture.now.addingTimeInterval(-60), inputTokens: 837, outputTokens: 0,
+            cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: 837, costBreakdown: nil)
+        fixture.state.usageService.aggregator.ingestLocal([entry])
+        let service = fixture.service()
+        try fixture.index(service, records: [UsageRequestRecord(id: "nice-axis", entry: entry)], revision: "nice-axis")
+        func numeric(_ value: HostJSON?) throws -> Double {
+            NSDecimalNumber(decimal: try number(value)).doubleValue
+        }
+        for metric in ["tokens", "cost", "requests"] {
+            let response = try object(await service.handle("window.usage.dashboard", params: ["range": .string("today"), "metric": .string(metric)]))
+            let axis = try array(response["axisTicks"]).map { try object($0) }
+            let expected: [HostJSON?] = switch metric {
+            case "cost": [.string("USD 0"), .string("USD 450"), .string("USD 900")]
+            case "requests": [.string("0"), .string("0.5"), .string("1")]
+            default: [.string("0"), .string("450"), .string("900")]
+            }
+            XCTAssertEqual(axis.map { $0["label"] }, expected)
+            let samples = try array(response["samples"]).map { try object($0) }
+            let sample = try XCTUnwrap(samples.first { (try? numeric($0["value"])) ?? 0 > 0 })
+            let expectedRatio = metric == "requests" ? 1 : 837.0 / 900.0
+            XCTAssertEqual(try numeric(sample["normalizedValue"]), expectedRatio, accuracy: 1e-10)
+        }
+    }
+
+    func testDashboardCostAxisUsesDisplayCurrencyBeforeRounding() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex])
+        let day = Calendar.current.startOfDay(for: fixture.now)
+        let entry = UsageEntry(app: .codex, conversationKey: "currency-axis", model: "model", speed: .standard,
+            day: day, timestamp: fixture.now.addingTimeInterval(-60), inputTokens: 1, outputTokens: 0,
+            cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: 120, costBreakdown: nil)
+        fixture.state.usageService.aggregator.ingestLocal([entry])
+        var actions = fixture.actions()
+        actions.costDisplayRate = { 7 }
+        actions.formatDisplayCost = { value in "CNY \(value.asPlainString)" }
+        let service = fixture.service(actions: actions)
+        try fixture.index(service, records: [UsageRequestRecord(id: "currency-axis", entry: entry)], revision: "currency-axis")
+        let response = try object(await service.handle("window.usage.dashboard", params: ["range": .string("today"), "metric": .string("cost")]))
+        let axis = try array(response["axisTicks"]).map { try object($0) }
+        XCTAssertEqual(axis.map { $0["label"] }, [.string("CNY 0"), .string("CNY 450"), .string("CNY 900")])
+        let samples = try array(response["samples"]).map { try object($0) }
+        let sample = try XCTUnwrap(samples.first { $0["value"] == .number(120) })
+        let normalized = NSDecimalNumber(decimal: try number(sample["normalizedValue"])).doubleValue
+        XCTAssertEqual(normalized, 840.0 / 900.0, accuracy: 1e-10)
+    }
+
+    func testDashboardCacheAxisUsesMinimumValidRateAndMatchingNormalization() async throws {
+        let cases: [(read: Int, ticks: [String], normalized: Double)] = [
+            (98, ["95.0%", "97.5%", "100.0%"], 0.6),
+            (95, ["90.0%", "95.0%", "100.0%"], 0.5),
+            (90, ["85.0%", "92.5%", "100.0%"], 1.0 / 3.0),
+            (60, ["0.0%", "50.0%", "100.0%"], 0.6),
+        ]
+        for testCase in cases {
+            let fixture = try UsageWindowFixture()
+            defer { fixture.cleanup() }
+            fixture.show([.codex])
+            let day = Calendar.current.startOfDay(for: fixture.now)
+            func entry(_ id: String, input: Int, read: Int, output: Int, timestamp: Date) -> UsageEntry {
+                UsageEntry(app: .codex, conversationKey: id, model: "model", speed: .standard,
+                    day: day, timestamp: timestamp, inputTokens: input, outputTokens: output,
+                    cacheReadTokens: read, cacheCreationTokens: 0, costUSD: 0, costBreakdown: nil)
+            }
+            let entries = [
+                entry("minimum", input: 100 - testCase.read, read: testCase.read, output: 0, timestamp: fixture.now.addingTimeInterval(-60)),
+                entry("full", input: 0, read: 100, output: 0, timestamp: fixture.now.addingTimeInterval(-3660)),
+                entry("invalid", input: 0, read: 0, output: 5, timestamp: fixture.now.addingTimeInterval(-7320)),
+            ]
+            fixture.state.usageService.aggregator.ingestLocal(entries)
+            let service = fixture.service()
+            try fixture.index(service, records: entries.map { UsageRequestRecord(id: $0.conversationKey, entry: $0) }, revision: "cache-axis")
+            let response = try object(await service.handle("window.usage.dashboard", params: ["range": .string("today"), "metric": .string("cacheHitRate")]))
+            let axis = try array(response["axisTicks"]).map { try object($0) }
+            XCTAssertEqual(axis.map { $0["label"] }, testCase.ticks.map { Optional(HostJSON.string($0)) })
+            let samples = try array(response["samples"]).map { try object($0) }
+            func numeric(_ value: HostJSON?) throws -> Double {
+                NSDecimalNumber(decimal: try number(value)).doubleValue
+            }
+            let minimumRate = Double(testCase.read) / 100
+            let minimum = try XCTUnwrap(samples.first { (try? numeric($0["value"])).map { abs($0 - minimumRate) < 1e-10 } == true })
+            let full = try XCTUnwrap(samples.first { (try? numeric($0["value"])) == 1 })
+            XCTAssertEqual(try numeric(minimum["normalizedValue"]), testCase.normalized, accuracy: 1e-10)
+            XCTAssertEqual(try numeric(full["normalizedValue"]), 1, accuracy: 1e-10)
+        }
+    }
+
     func testEmptyDashboardUsesDashesAndRetainsZeroSamplesWithReadableAxes() async throws {
         let fixture = try UsageWindowFixture()
         defer { fixture.cleanup() }
@@ -882,7 +975,7 @@ private final class UsageWindowFixture {
         settings.cursorAccountDetected = true
     }
     func actions() -> HostWindowUsageActions {
-        HostWindowUsageActions(copyConversationID: { self.copied.append($0) }, revealProject: { self.revealed.append($0) }, refreshUsage: {}, loadCursorHistory: { _ in }, formatCost: { value, _ in "USD \(value.asPlainString)" })
+        HostWindowUsageActions(copyConversationID: { self.copied.append($0) }, revealProject: { self.revealed.append($0) }, refreshUsage: {}, loadCursorHistory: { _ in }, formatCost: { value, _ in "USD \(value.asPlainString)" }, costDisplayRate: { 1 }, formatDisplayCost: { value in "USD \(value.asPlainString)" })
     }
     func service(actions: HostWindowUsageActions? = nil) -> HostWindowUsageService {
         HostWindowUsageService(state: state, settings: settings, actions: actions ?? self.actions(), now: { self.now })

@@ -214,6 +214,41 @@ extension HostWindowUsageService {
         let precision = hasResidual ? ((result?.buckets.isEmpty ?? true) ? "day" : "mixed") : "event"
         return DashboardCoverage(incomplete: incomplete, json: .object(["precision": .string(precision), "incomplete": .bool(incomplete), "refreshing": .bool(refreshing), "unlocatedTotals": totalsJSON(residual), "message": incomplete ? .string(tr("Some historical usage has no verified request timestamp.", "部分历史用量缺少可核验的请求时间。")) : .null]))
     }
+    private struct DashboardAxisScale {
+        let minimum: Double
+        let maximum: Double
+        var ticks: [Double] { [minimum, (minimum + maximum) / 2, maximum] }
+
+        static func standard(maximumValue: Double) -> Self {
+            guard maximumValue.isFinite, maximumValue > 0 else {
+                return Self(minimum: 0, maximum: 2)
+            }
+            let roughStep = maximumValue / 2
+            let magnitude = pow(10, floor(log10(roughStep)))
+            let step = ceil(roughStep / magnitude * 2) / 2 * magnitude
+            let maximum = step * 2
+            guard step.isFinite, maximum.isFinite, step > 0 else {
+                return Self(minimum: 0, maximum: maximumValue)
+            }
+            return Self(minimum: 0, maximum: maximum)
+        }
+
+        static func cacheHitRate(minimumValue: Double?) -> Self {
+            guard let minimumValue, minimumValue.isFinite else {
+                return Self(minimum: 0, maximum: 1)
+            }
+            let rate = min(1, max(0, minimumValue))
+            let padding = max((1 - rate) / 2, 0.02)
+            let rounded = floor(max(0, rate - padding) / 0.05 + 1e-9) * 0.05
+            return Self(minimum: rounded < 0.5 ? 0 : rounded, maximum: 1)
+        }
+
+        func normalized(_ value: Double) -> Double {
+            guard value.isFinite, maximum > minimum else { return 0 }
+            return min(1, max(0, (value - minimum) / (maximum - minimum)))
+        }
+    }
+
     private func dashboardValue(_ t: UsageTotals, metric: String) -> Double {
         switch metric {
         case "cost": return NSDecimalNumber(decimal: t.costUSD).doubleValue
@@ -222,6 +257,10 @@ extension HostWindowUsageService {
         default: return t.cacheHitRate
         }
     }
+    private func dashboardScaleValue(_ t: UsageTotals, metric: String, costRate: Decimal) -> Double {
+        guard metric == "cost" else { return dashboardValue(t, metric: metric) }
+        return NSDecimalNumber(decimal: t.costUSD * costRate).doubleValue
+    }
     private func dashboardLabel(_ t: UsageTotals, metric: String) -> String {
         switch metric {
         case "cost": return actions.formatCost(t.costUSD, .standard)
@@ -229,6 +268,29 @@ extension HostWindowUsageService {
         case "tokens": return StatsFormatter.compactToken(t.totalTokens)
         default: return String(format: "%.1f%%", t.cacheHitRate * 100)
         }
+    }
+    private func dashboardAxisNumberLabel(_ value: Double) -> String {
+        let magnitude = abs(value)
+        let divisor: Double
+        let suffix: String
+        switch L10n.current {
+        case .zh:
+            if magnitude >= 100_000_000 { (divisor, suffix) = (100_000_000, "亿") }
+            else if magnitude >= 10_000 { (divisor, suffix) = (10_000, "万") }
+            else { (divisor, suffix) = (1, "") }
+        case .en:
+            if magnitude >= 1_000_000_000 { (divisor, suffix) = (1_000_000_000, "B") }
+            else if magnitude >= 1_000_000 { (divisor, suffix) = (1_000_000, "M") }
+            else if magnitude >= 1_000 { (divisor, suffix) = (1_000, "k") }
+            else { (divisor, suffix) = (1, "") }
+        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: L10n.current == .zh ? "zh_CN" : "en_US")
+        formatter.maximumFractionDigits = 1
+        formatter.minimumFractionDigits = 0
+        let formatted = formatter.string(from: NSNumber(value: value / divisor)) ?? String(value / divisor)
+        return formatted + suffix
     }
     private func dashboardFacet(_ id: String, title: String, buckets: [UsageBucket]) -> HostJSON {
         .object(["id": .string(id), "title": .string(title), "requestCount": .number(Decimal(dashboardTotal(buckets).requestCount))])
@@ -287,7 +349,14 @@ extension HostWindowUsageService {
             let rows = q.hourly ? (eventGroups[day] ?? []) : (bucketGroups[day] ?? [])
             sampleData.append((day, rows)); day = next
         }
-        let maxValue = sampleData.map { dashboardValue(dashboardTotal($0.1), metric: q.metric) }.max() ?? 0
+        let configuredCostRate = q.metric == "cost" ? actions.costDisplayRate() : 1
+        let costRate = configuredCostRate > 0 ? configuredCostRate : 1
+        let maxValue = sampleData.map { dashboardScaleValue(dashboardTotal($0.1), metric: q.metric, costRate: costRate) }.max() ?? 0
+        let minimumCacheValue: Double? = q.metric == "cacheHitRate" ? sampleData.map { dashboardTotal($0.1) }
+            .filter { $0.inputWithCacheTokens > 0 }.map(\.cacheHitRate).min() : nil
+        let axis: DashboardAxisScale = q.metric == "cacheHitRate"
+            ? .cacheHitRate(minimumValue: minimumCacheValue)
+            : .standard(maximumValue: maxValue)
         let samples: [HostJSON] = sampleData.map { day, rows in
             let totals = dashboardTotal(rows)
             let value = dashboardValue(totals, metric: q.metric)
@@ -309,17 +378,15 @@ extension HostWindowUsageService {
                 }
                 return .object(["service": .string(app.rawValue), "totals": totalsJSON(appTotals), "value": numberJSON(contribution), "label": .string(label), "share": numberJSON(share)])
             }
-            return .object(["key": dateJSON(day), "start": dateJSON(day), "totals": totalsJSON(totals), "value": numberJSON(value), "label": .string(dashboardLabel(totals, metric: q.metric)), "normalizedValue": numberJSON(maxValue > 0 ? value / maxValue : 0), "segments": .array(segments)])
+            let scaleValue = dashboardScaleValue(totals, metric: q.metric, costRate: costRate)
+            return .object(["key": dateJSON(day), "start": dateJSON(day), "totals": totalsJSON(totals), "value": numberJSON(value), "label": .string(dashboardLabel(totals, metric: q.metric)), "normalizedValue": numberJSON(axis.normalized(scaleValue)), "segments": .array(segments)])
         }
-        // A zero series still needs a readable axis rather than three identical zeros.
-        let axisMaximum = maxValue > 0 ? maxValue : (q.metric == "cacheHitRate" ? 1 : 2)
-        let axisTicks: [HostJSON] = [0.0, 0.5, 1.0].map { position in
-            let value = axisMaximum * position
+        let axisTicks: [HostJSON] = zip([0.0, 0.5, 1.0], axis.ticks).map { position, value in
             let label: String
             switch q.metric {
-            case "cost": label = actions.formatCost(Decimal(value), .standard)
+            case "cost": label = actions.formatDisplayCost(Decimal(value))
             case "cacheHitRate": label = String(format: "%.1f%%", value * 100)
-            default: label = StatsFormatter.compactToken(Int(value.rounded()))
+            default: label = dashboardAxisNumberLabel(value)
             }
             return .object(["position": numberJSON(position), "label": .string(label)])
         }

@@ -17,6 +17,11 @@ struct HostWindowUsageActions {
         case .whole: CurrencyFormatter.whole(value)
         }
     }
+    var costDisplayRate: () -> Decimal = { CurrencyStore.shared.convert(1) ?? 1 }
+    var formatDisplayCost: (Decimal) -> String = { value in
+        let source = CurrencyStore.shared.convert(1) == nil ? "USD" : SettingsStore.shared.displayCurrency.code
+        return CurrencyFormatter.amount(value, from: source)
+    }
 
     static func live(state: AppState) -> Self {
         Self(
