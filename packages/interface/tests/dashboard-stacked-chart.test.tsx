@@ -128,8 +128,12 @@ it("shares the heatmap card across date cells", async () => {
       </TooltipProvider>
     </LanguageProvider>,
   );
-  const first = screen.getByRole("button", { name: "2026-11-01: 100" });
-  const next = screen.getByRole("button", { name: "2026-11-02: 100" });
+  const first = screen.getByRole("button", {
+    name: `2026-11-01: ${totals.totalTokens.toLocaleString("en")} Tokens`,
+  });
+  const next = screen.getByRole("button", {
+    name: `2026-11-02: ${totals.totalTokens.toLocaleString("en")} Tokens`,
+  });
   fireEvent.mouseEnter(first);
   const card = (
     await screen.findByText("2026-11-01", { selector: "strong" })

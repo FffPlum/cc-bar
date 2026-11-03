@@ -21,18 +21,16 @@ export function ChartSkeleton({ heatmap = false }: { heatmap?: boolean }) {
       <div
         aria-hidden="true"
         data-slot="heatmap-skeleton"
-        className="space-y-5 p-4"
+        className="min-w-0 space-y-5 p-4"
       >
         <div>
           <LoadingBlock className="h-5 w-32" />
           <LoadingBlock className="h-5 w-56" />
         </div>
         <div>
-          <LoadingBlock className="mb-2 h-5 w-48" />
-          <LoadingBlock className="mb-2 h-5 w-64" />
-          <div className="overflow-hidden">
-            <div className="min-w-[700px]">
-              <div className="ml-9 flex h-[15px] justify-between">
+          <div className="min-w-0">
+            <div className="w-full min-w-0 max-w-[1040px]">
+              <div className="ml-9 flex h-4 min-w-0 justify-between">
                 {[0, 1, 2, 3, 4, 5].map((index) => (
                   <LoadingBlock key={index} className="h-2 w-5" />
                 ))}
@@ -43,21 +41,17 @@ export function ChartSkeleton({ heatmap = false }: { heatmap?: boolean }) {
                     <LoadingBlock key={index} className="h-2 w-5" />
                   ))}
                 </div>
-                <div className="grid flex-1 grid-flow-col grid-rows-7 grid-cols-[repeat(53,minmax(0,1fr))] gap-[3px]">
+                <div className="grid min-w-0 flex-1 grid-flow-col grid-rows-7 grid-cols-[repeat(53,minmax(0,1fr))] gap-[3px]">
                   {Array.from({ length: 371 }, (_, index) => (
                     <LoadingBlock
                       key={index}
-                      className="aspect-square max-h-4 rounded-[3px]"
+                      className="aspect-square w-full min-w-0 max-h-4 rounded-[3px]"
                     />
                   ))}
                 </div>
               </div>
             </div>
           </div>
-        </div>
-        <div className="flex min-h-8 items-center justify-between">
-          <LoadingBlock className="h-8 w-24" />
-          <LoadingBlock className="h-3 w-36" />
         </div>
       </div>
     );

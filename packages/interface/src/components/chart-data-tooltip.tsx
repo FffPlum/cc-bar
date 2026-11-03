@@ -1,4 +1,11 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -11,16 +18,19 @@ interface HoverAnchor {
 const ChartTooltipPositionContext = createContext<{
   animatePosition: boolean;
   followCursor: boolean;
+  placement: "cursor" | "cell";
+  protectedElement?: Element;
   anchor?: TooltipPrimitive.Positioner.Props["anchor"];
-}>({ animatePosition: false, followCursor: true });
+}>({ animatePosition: false, followCursor: true, placement: "cursor" });
 
 // Match shadcn ChartTooltipContent's surface while keeping our DOM chart content.
 // Base UI supplies keyboard focus, portals and edge avoidance.
 export function ChartDataTooltip<Payload>({
   onOpenChange,
   trackCursorAxis = "both",
+  placement = "cursor",
   ...props
-}: TooltipPrimitive.Root.Props<Payload>) {
+}: TooltipPrimitive.Root.Props<Payload> & { placement?: "cursor" | "cell" }) {
   const [hover, setHover] = useState<HoverAnchor | null>(null);
   const element = hover?.element;
   useEffect(() => {
@@ -43,6 +53,8 @@ export function ChartDataTooltip<Payload>({
       // Keyboard focus continues to position immediately.
       animatePosition: hover !== null,
       followCursor: trackCursorAxis !== "none",
+      placement,
+      protectedElement: placement === "cell" ? hover?.element : undefined,
       // Commit the new trigger and pointer together. Base UI's cursor tracker can
       // otherwise retain the previous column until the next mousemove.
       anchor:
@@ -54,7 +66,8 @@ export function ChartDataTooltip<Payload>({
                 const trackX =
                   trackCursorAxis === "x" || trackCursorAxis === "both";
                 const trackY =
-                  trackCursorAxis === "y" || trackCursorAxis === "both";
+                  placement !== "cell" &&
+                  (trackCursorAxis === "y" || trackCursorAxis === "both");
                 const x = trackX ? hover.x : rect.x;
                 const y = trackY ? hover.y : rect.y;
                 const width = trackX ? 0 : rect.width;
@@ -73,7 +86,7 @@ export function ChartDataTooltip<Payload>({
             }
           : undefined,
     }),
-    [hover, trackCursorAxis],
+    [hover, trackCursorAxis, placement],
   );
   return (
     <ChartTooltipPositionContext.Provider value={position}>
@@ -108,24 +121,65 @@ export function ChartDataTooltipContent({
   children,
   ...props
 }: TooltipPrimitive.Popup.Props) {
-  const { animatePosition, followCursor, anchor } = useContext(
-    ChartTooltipPositionContext,
-  );
+  const { animatePosition, followCursor, placement, protectedElement, anchor } =
+    useContext(ChartTooltipPositionContext);
+  const [positioner, setPositioner] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (!positioner || !protectedElement) return;
+    let previousTransform = "";
+    const avoidCellDuringMotion = () => {
+      const transform = positioner.style.transform;
+      if (!transform || transform === previousTransform) return;
+      previousTransform = transform;
+      // Base UI avoids the cell at the destination. Also check the animation's
+      // swept bounds so a cross-row move or side flip cannot pass over it.
+      if (typeof DOMMatrixReadOnly === "undefined") {
+        positioner.style.setProperty("--cc-chart-tooltip-transition", "none");
+        return;
+      }
+      const matrix = new DOMMatrixReadOnly(transform);
+      const current = positioner.getBoundingClientRect();
+      const cell = protectedElement.getBoundingClientRect();
+      const left = (parseFloat(positioner.style.left) || 0) + matrix.m41;
+      const top = (parseFloat(positioner.style.top) || 0) + matrix.m42;
+      const crossesCell =
+        Math.min(current.left, left) < cell.right + 4 &&
+        Math.max(current.right, left + current.width) > cell.left - 4 &&
+        Math.min(current.top, top) < cell.bottom + 4 &&
+        Math.max(current.bottom, top + current.height) > cell.top - 4;
+      if (crossesCell) {
+        positioner.style.setProperty("--cc-chart-tooltip-transition", "none");
+      } else {
+        positioner.style.removeProperty("--cc-chart-tooltip-transition");
+      }
+    };
+    avoidCellDuringMotion();
+    const observer = new MutationObserver(avoidCellDuringMotion);
+    observer.observe(positioner, { attributes: true, attributeFilter: ["style"] });
+    return () => {
+      observer.disconnect();
+      positioner.style.removeProperty("--cc-chart-tooltip-transition");
+    };
+  }, [positioner, protectedElement, anchor]);
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Positioner
+        ref={setPositioner}
         data-slot="chart-data-tooltip-positioner"
         data-animated={animatePosition ? "" : undefined}
         anchor={anchor}
         positionMethod="fixed"
-        side="right"
-        align="start"
-        sideOffset={followCursor ? 12 : ({ anchor }) => 10 - anchor.width / 2}
+        side={placement === "cell" ? "bottom" : "right"}
+        align={placement === "cell" ? "center" : "start"}
+        sideOffset={
+          placement === "cell" || followCursor
+            ? 12
+            : ({ anchor }) => 10 - anchor.width / 2
+        }
         collisionPadding={8}
-        // Keep the pointer gap by changing sides; vertical limits only shift.
-        // Date-cell anchors retain their existing continuous edge clamping.
+        // Cells retain their full height: flipping above/below cannot cover them.
         collisionAvoidance={{
-          side: followCursor ? "flip" : "shift",
+          side: placement === "cell" || followCursor ? "flip" : "shift",
           align: "shift",
           fallbackAxisSide: "none",
         }}

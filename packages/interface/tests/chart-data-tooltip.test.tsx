@@ -10,7 +10,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 afterEach(() => vi.restoreAllMocks());
 
-const setup = (left = 100, top = 80) => {
+const setup = (
+  left = 100,
+  top = 80,
+  placement: "cursor" | "cell" = "cursor",
+) => {
   const rectangle = (x: number, y: number, width: number, height: number) =>
     ({
       x,
@@ -65,7 +69,7 @@ const setup = (left = 100, top = 80) => {
         payload="Next details"
         render={<button data-testid="next-column">Next column</button>}
       />
-      <ChartDataTooltip handle={handle}>
+      <ChartDataTooltip handle={handle} placement={placement}>
         {({ payload }) => (
           <ChartDataTooltipContent className="w-[260px]">
             <strong>Existing heading</strong>
@@ -77,6 +81,28 @@ const setup = (left = 100, top = 80) => {
   );
   return screen.getByRole("button", { name: "Column" });
 };
+
+it.each([
+  { top: 80, pointerY: 140, side: "bottom", cardTop: 252 },
+  { top: 500, pointerY: 580, side: "top", cardTop: 308 },
+])(
+  "places a cell card on the $side without covering its cell",
+  async ({ top, pointerY, side, cardTop }) => {
+    const trigger = setup(300, top, "cell");
+    fireEvent.mouseEnter(trigger, { clientX: 350, clientY: pointerY });
+    const positioner = (await screen.findByText("Existing details"))
+      .parentElement!.parentElement!;
+    await waitFor(() =>
+      expect(positioner.style.transform).toBe(`translate(220px, ${cardTop}px)`),
+    );
+    expect(positioner.getAttribute("data-side")).toBe(side);
+    expect(cardTop >= top + 160 + 12 || cardTop + 180 <= top - 12).toBe(true);
+    fireEvent.mouseMove(trigger, { clientX: 380, clientY: pointerY });
+    await waitFor(() =>
+      expect(positioner.style.transform).toBe(`translate(250px, ${cardTop}px)`),
+    );
+  },
+);
 
 it("follows the pointer on both axes with a 12px gap", async () => {
   const trigger = setup();

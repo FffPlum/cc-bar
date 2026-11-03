@@ -538,7 +538,9 @@ it("loads an older heatmap window", () => {
   wrap(<HeatmapBlocks blocks={[block]} onOlder={older} loading={false} />);
   fireEvent.click(screen.getByRole("button", { name: "Load older" }));
   expect(older).toHaveBeenCalledWith("2025-01-06");
-  expect(screen.getByLabelText("2025-01-06: 1")).toBeTruthy();
+  expect(
+    screen.getByLabelText(`2025-01-06: ${total.totalTokens.toLocaleString("en")} Tokens`),
+  ).toBeTruthy();
 });
 it("formats request log tokens and HH:mm:ss timestamps in Chinese", () => {
   const requestData = {
@@ -671,22 +673,29 @@ it("requests global sorting from the host and uses host axis labels", () => {
     ).map((tick) => tick.textContent),
   ).toEqual(["$0.00", "$12.34"]);
 });
-it("leaves future heatmap dates blank and stops the current block at today", () => {
+it("colors raw daily Tokens continuously and keeps future dates blank", () => {
   const block = {
     fromDay: "2026-10-26",
     toDay: "2026-11-09",
     timeZone: "UTC",
     days: [
       {
+        day: "2026-11-01",
+        totals: { ...total, totalTokens: 0 },
+        value: 999,
+        label: "$999",
+        normalizedValue: 1,
+      },
+      {
         day: "2026-11-02",
-        totals: total,
+        totals: { ...total, totalTokens: 1_000_000 },
         value: 1,
         label: "1",
         normalizedValue: 1,
       },
       {
         day: "2026-11-03",
-        totals: total,
+        totals: { ...total, totalTokens: 0 },
         value: 0,
         label: "0",
         normalizedValue: 0,
@@ -705,6 +714,21 @@ it("leaves future heatmap dates blank and stops the current block at today", () 
       loading={false}
     />,
   );
-  expect(screen.getByText(/2026-10-26 – 2026-11-02/)).toBeTruthy();
-  expect(screen.queryByLabelText("2026-11-03: 0")).toBeNull();
+  expect(screen.getByText("Usage heatmap")).toBeTruthy();
+  expect(screen.getByText("Daily Tokens in 53-week windows")).toBeTruthy();
+  expect(screen.queryByText(/2026-10-26 –/)).toBeNull();
+  expect(screen.queryByText("Less")).toBeNull();
+  expect(screen.queryByText("More")).toBeNull();
+  const cell = screen.getByLabelText("2026-11-02: 1,000,000 Tokens");
+  expect(cell.style.getPropertyValue("--cc-heatmap-color")).toBe(
+    "color-mix(in oklab, oklch(0.90 0.06 231), oklch(0.83 0.10 230) 50%)",
+  );
+  expect(cell.hasAttribute("data-empty")).toBe(false);
+  expect(
+    screen.getByLabelText("2026-11-01: 0 Tokens").hasAttribute("data-empty"),
+  ).toBe(true);
+  expect(
+    screen.queryByRole("group", { name: "Daily token color scale" }),
+  ).toBeNull();
+  expect(screen.queryByLabelText("2026-11-03: 0 Tokens")).toBeNull();
 });

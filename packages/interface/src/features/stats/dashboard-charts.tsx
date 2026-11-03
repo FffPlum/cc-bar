@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import type {
   DashboardHeatmap,
   DashboardMetric,
@@ -21,6 +21,10 @@ import {
 } from "@/lib/display";
 import { useHost } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
+import {
+  heatmapColorAtIntensity,
+  heatmapTokenIntensity,
+} from "@/lib/heatmap-scale";
 
 export function DashboardChart({
   data,
@@ -273,51 +277,32 @@ export function HeatmapBlocks({
   const t = useTranslation();
   const last = blocks.at(-1);
   return (
-    <div className="space-y-5 p-4">
+    <div className="min-w-0 space-y-5 p-4">
       <div>
         <h2 className="font-semibold">{t("Usage heatmap", "用量热力图")}</h2>
         <p className="text-muted-foreground">
-          {t("Daily usage in 53-week windows", "按 53 周分组显示每日用量")}
+          {t("Daily Tokens in 53-week windows", "按 53 周分组显示每日 Token 用量")}
         </p>
       </div>
       {blocks.map((block) => (
         <div key={block.fromDay}>
-          <h3 className="mb-2 font-medium">
-            {block.fromDay} –{" "}
-            {(() => {
-              const lastDay = new Date(
-                Date.parse(`${block.toDay}T00:00:00Z`) - 86400000,
-              )
-                .toISOString()
-                .slice(0, 10);
-              return today && today < lastDay ? today : lastDay;
-            })()}
-          </h3>
-          <p className="mb-2 text-muted-foreground">
-            {block.totals.totalTokens.toLocaleString()} Tokens ·{" "}
-            {block.totals.requestCount.toLocaleString()}{" "}
-            {t("requests", "次请求")} · {block.totals.costDisplay}
-          </p>
-          <div className="overflow-x-auto">
-            <div className="min-w-[700px]">
-              <div className="ml-9 grid grid-cols-[repeat(53,minmax(0,1fr))] text-[10px] text-muted-foreground">
-                {Array.from({ length: 53 }, (_, i) => {
-                  const day = block.days[i * 7]?.day;
-                  const previous = block.days[(i - 1) * 7]?.day;
-                  const show =
-                    day &&
-                    (!previous || day.slice(0, 7) !== previous.slice(0, 7));
+          <div className="min-w-0">
+            <div className="w-full min-w-0 max-w-[1040px]">
+              <div className="ml-9 grid h-4 min-w-0 grid-cols-[repeat(53,minmax(0,1fr))] gap-[3px] text-[10px] text-muted-foreground">
+                {heatmapMonthRanges(block.days).map(({ day, start, weeks }) => {
+                  // A partial month at either edge may be too narrow to label.
+                  // Keep every date cell, but omit labels that would collide.
+                  if (weeks < 3) return null;
                   return (
                     <span
-                      key={i}
-                      className="overflow-visible whitespace-nowrap"
+                      key={day}
+                      className="min-w-0 truncate"
+                      style={{ gridColumn: `${start + 1} / span ${weeks}` }}
                     >
-                      {show
-                        ? new Intl.DateTimeFormat(bootstrap.resolvedLanguage, {
-                            month: "short",
-                            timeZone: "UTC",
-                          }).format(new Date(`${day}T00:00:00Z`))
-                        : ""}
+                      {new Intl.DateTimeFormat(bootstrap.resolvedLanguage, {
+                        month: "short",
+                        timeZone: "UTC",
+                      }).format(new Date(`${day}T00:00:00Z`))}
                     </span>
                   );
                 })}
@@ -329,13 +314,13 @@ export function HeatmapBlocks({
                   <span>{t("Fri", "周五")}</span>
                   <span>{t("Sun", "周日")}</span>
                 </div>
-                <div className="grid flex-1 grid-flow-col grid-rows-7 grid-cols-[repeat(53,minmax(0,1fr))] gap-[3px]">
+                <div className="grid min-w-0 flex-1 grid-flow-col grid-rows-7 grid-cols-[repeat(53,minmax(0,1fr))] gap-[3px]">
                   {block.days.map((day) =>
                     today && day.day > today ? (
                       <span
                         key={day.day}
                         aria-hidden="true"
-                        className="aspect-square max-h-4"
+                        className="aspect-square w-full min-w-0 max-h-4"
                       />
                     ) : (
                       <ChartDataTooltipTrigger
@@ -345,14 +330,10 @@ export function HeatmapBlocks({
                         render={
                           <button
                             type="button"
-                            aria-label={`${day.day}: ${day.label}`}
-                            className="aspect-square max-h-4 rounded-[3px]"
-                            style={{
-                              backgroundColor:
-                                day.normalizedValue > 0
-                                  ? `rgba(8,145,178,${Math.max(0.2, Math.min(1, day.normalizedValue))})`
-                                  : "var(--muted)",
-                            }}
+                            aria-label={`${day.day}: ${day.totals.totalTokens.toLocaleString(bootstrap.resolvedLanguage)} Tokens`}
+                            className="cc-heatmap-color aspect-square w-full min-w-0 max-h-4 rounded-[3px]"
+                            data-empty={day.totals.totalTokens > 0 ? undefined : ""}
+                            style={heatmapTokenStyle(day.totals.totalTokens)}
                           />
                         }
                       />
@@ -364,7 +345,7 @@ export function HeatmapBlocks({
           </div>
         </div>
       ))}
-      <ChartDataTooltip handle={tooltipHandle} trackCursorAxis="none">
+      <ChartDataTooltip handle={tooltipHandle} placement="cell">
         {({ payload: key }) => {
           const day = blocks
             .flatMap((block) => block.days)
@@ -385,35 +366,35 @@ export function HeatmapBlocks({
           );
         }}
       </ChartDataTooltip>
-      <div className="flex min-h-8 items-center justify-between">
-        <div>
-          {last?.nextBeforeDay && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={loading}
-              onClick={() => onOlder(last.nextBeforeDay!)}
-            >
-              {t("Load older", "加载更早")}
-            </Button>
-          )}
-        </div>
-        <div className="flex items-center gap-1 text-muted-foreground">
-          <span>{t("Less", "少")}</span>
-          {[0, 0.2, 0.4, 0.7, 1].map((level) => (
-            <span
-              key={level}
-              className="size-3 rounded-sm"
-              style={{
-                backgroundColor: level
-                  ? `rgba(8,145,178,${level})`
-                  : "var(--muted)",
-              }}
-            />
-          ))}
-          <span>{t("More", "多")}</span>
-        </div>
-      </div>
+      {last?.nextBeforeDay && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={loading}
+          onClick={() => onOlder(last.nextBeforeDay!)}
+        >
+          {t("Load older", "加载更早")}
+        </Button>
+      )}
     </div>
   );
+}
+
+function heatmapMonthRanges(days: DashboardHeatmap["days"]) {
+  const weeks = days.filter((_, index) => index % 7 === 0);
+  const starts = weeks.flatMap(({ day }, index) =>
+    index === 0 || day.slice(0, 7) !== weeks[index - 1]!.day.slice(0, 7)
+      ? [{ day, start: index }]
+      : [],
+  );
+  return starts.map((month, index) => ({
+    ...month,
+    weeks: (starts[index + 1]?.start ?? weeks.length) - month.start,
+  }));
+}
+
+function heatmapTokenStyle(tokens: number): CSSProperties {
+  return {
+    "--cc-heatmap-color": heatmapColorAtIntensity(heatmapTokenIntensity(tokens)),
+  } as CSSProperties;
 }
