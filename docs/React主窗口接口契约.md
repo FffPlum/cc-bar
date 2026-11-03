@@ -84,6 +84,7 @@
 - 趋势 `samples[].segments` 必填，逐应用返回 `service / totals / value / label / share`，按可见服务顺序排列，遵循与整柱相同的筛选和分桶。费用、请求、Tokens 的 value 为应用实际指标，share 为该值占整柱值的比例。缓存命中率的 value 为应用缓存读取量除以整柱总输入量，label 标示百分点贡献，share 为应用缓存读取量占整柱缓存读取量的比例；各段 value 之和等于总体命中率，不累加各应用独立命中率。零分母的 share 为 0。热力图 DTO 不增加 segments。
 - `axisTicks` 固定返回位置 0 / 0.5 / 1 的三档标签，并与 `samples[].normalizedValue` 共用同一 scale。普通指标从 0 起按最大柱值向上取整齐步长和上限；费用 scale 先乘显示汇率，但 samples / segments 的原始 value 仍保留美元指标，轴标签才使用显示币种，不能再次换算。命中率上限为 1，下限按有输入侧 Token 柱子的最低命中率计算；无有效样本为 0。`normalizedValue` 是对应指标值在 scale 范围内的归一位置并截断到 0～1，而不是固定除以原始最大值。请求数、Tokens 和百分比轴标签最多一位小数。
 - `facets.services` 固定返回全部已启用用量应用，按设置顺序排列，所选范围没有用量的应用 `requestCount` 为 0；前端应用按钮直接读取 bootstrap 的 `visibleUsageServices`，加载或失败时也保持稳定。来源/模型候选仍由范围内实际用量生成。确认空用量的 `kpiDisplay` 返回 `—`，趋势保留范围内零样本和有效基准轴刻度。
+- 当前前端统计卡片在非空态不使用 `kpiDisplay.tokens` 的本地化文本，而是从 `totals.totalTokens` 调用 `formatTokensCompact`；请求日志及供应商/模型聚合表的 Token 列使用同一函数。这些位置固定显示 K / M / B 和最多三位有效数字，中文不切换为万、亿；`kpiDisplay.tokens` 继续保留给既有客户端，空态 `—` 不变。
 - `sourceID` 表示应用的会话日志或远端计量来源，不代表当前供应商配置或 API Key 的历史归属。来源与模型级联选项含请求数量；聚合表的 `successRate` 缺少失败分母时为 null，请求 `status` 为 unknown。
 - `coverage` 含 event / day / mixed 精度、incomplete、refreshing、unlocatedTotals 和 message；它描述请求时间与来源覆盖。`refreshing` 为必填布尔值，表示宿主正在准备请求明细；期间保留已有统计并显示更新提示，完成后再提示仍存在的覆盖缺口。金额缺价/不完整使用 `UsageTotals` 中的独立标记，不能混为时间戳缺失。
 - 概览 `requestLogCount: number | null` 为当前日期、应用、来源、模型筛选下可展示的日志行数，与明细 COUNT 使用同一 SQL 条件：仅已核验分区、范围内且请求数大于 0 的行。它不等于权威汇总 `totals.requestCount`，不计入只有汇总的历史请求和请求数为 0 的附属用量。概览只执行 COUNT，不读取明细行；索引尚未就绪返回 null，确认没有可展示日志返回 0。即使覆盖不完整也显示实际可展示条数。

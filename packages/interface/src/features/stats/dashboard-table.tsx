@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type {
   DashboardRequests,
   DashboardRow,
@@ -6,7 +6,7 @@ import type {
 } from "@ccbar/host-api/window";
 import { useHost } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
-import { serviceDisplayName } from "@/lib/display";
+import { formatTokensCompact, serviceDisplayName } from "@/lib/display";
 import { Button } from "@/components/ui/button";
 import { RequestPagination } from "./request-pagination";
 import {
@@ -14,6 +14,48 @@ import {
   LoadingBlock,
   TableSkeleton,
 } from "./dashboard-loading";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
+function DashboardNameLabel({ title }: { title: string }) {
+  const labelRef = useRef<HTMLSpanElement>(null);
+  const [truncated, setTruncated] = useState(false);
+  useLayoutEffect(() => {
+    const label = labelRef.current;
+    if (!label) return;
+    const update = () => setTruncated(label.scrollWidth > label.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(label);
+    return () => observer.disconnect();
+  }, [title]);
+  return (
+    <Tooltip disabled={!truncated}>
+      <TooltipTrigger
+        render={
+          <span
+            ref={labelRef}
+            data-slot="dashboard-name-label"
+            data-truncated={truncated}
+            tabIndex={truncated ? 0 : undefined}
+            className="block max-w-full truncate rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {title}
+          </span>
+        }
+      />
+      <TooltipContent
+        align="start"
+        className="max-w-sm whitespace-normal break-words"
+      >
+        {title}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 type Tab = "requests" | "providers" | "models";
 type Field =
@@ -291,7 +333,7 @@ export function DashboardTable({
                     </td>
                     <td className="px-3">{row.totals.costDisplay}</td>
                     <td className="px-3">
-                      {row.totals.totalTokens.toLocaleString()}
+                      {formatTokensCompact(row.totals.totalTokens)}
                     </td>
                   </tr>
                 ))}
@@ -323,6 +365,12 @@ export function DashboardTable({
         <div className="relative min-h-[196px]">
           {showSkeleton && <TableSkeleton columns={7} />}
           <table className="w-full table-fixed text-left">
+            <colgroup>
+              <col className="w-[28%]" />
+              {Array.from({ length: 6 }, (_, index) => (
+                <col key={index} className="w-[12%]" />
+              ))}
+            </colgroup>
             <thead className="bg-muted text-muted-foreground">
               <tr>
                 {[
@@ -356,15 +404,15 @@ export function DashboardTable({
               )}
               {rows.map((row) => (
                 <tr key={row.id} className="border-t">
-                  <td className="truncate px-3 py-3" title={row.title}>
-                    {row.title}
+                  <td className="px-3 py-3">
+                    <DashboardNameLabel title={row.title} />
                   </td>
                   <td className="px-3">
                     {row.totals.requestCount.toLocaleString()}
                   </td>
                   <td className="px-3">{row.totals.costDisplay}</td>
                   <td className="px-3">
-                    {row.totals.totalTokens.toLocaleString()}
+                    {formatTokensCompact(row.totals.totalTokens)}
                   </td>
                   <td className="px-3">
                     {row.successRate == null

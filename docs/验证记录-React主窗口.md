@@ -252,3 +252,29 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ccb
 - Swift 定向 **5 项通过**：整齐刻度与柱高、费用显示币种、四档命中率与无效率样本隔离、可见服务堆叠、空数据基准轴。首轮新增测试有一处类型错误，第二轮修正命中率测试期望并移除费用反换算尾差后，最终全部通过。
 - 前端 **3 个文件、9 项测试通过**，包含新增纵轴测试及既有柱体、提示卡片回归；TypeScript `tsc --noEmit` 检查通过。`git diff --check` 通过。
 - 未运行完整 Xcode Debug 构建、Vite 生产构建或真实 App 视觉验收，未提交或推送。实际 WKWebView 中的轴宽、顶部留白和动态命中率范围仍需手动检查。
+
+### 统计卡片与明细表 Token 单位
+
+日期：2026-11-03。按用户要求统一统计卡片、请求日志以及供应商/模型聚合表的 Token 显示单位。
+
+- 新增 `formatTokensCompact`：不足 10,000 使用带英文千位分隔的完整整数；达到后使用 K / M / B 和最多三位有效数字，进位到 1000K / 1000M 时升级单位。示例 9,999、10K、48.2K、189K、1M、18.2M、2.34B 均有覆盖，999,960 显示 1M。
+- 统计卡片在非空态从原始 `totalTokens` 计算显示，中文不再使用万、亿，空态继续显示 `—`；请求日志及供应商/模型聚合表的 Token 列复用同一函数，供应商表 48,210 显示 48.2K、模型表 999,960 显示 1M。趋势轴和提示卡格式未改变。
+- 前端 **3 个文件、62 项测试通过**，其中格式化函数 8 项、Dashboard 组件 19 项、Dashboard 集成 35 项；TypeScript `tsc --noEmit` 检查通过。首轮两项旧断言匹配到纵轴隐藏测量层与可见刻度的重复文本，改为读取可见刻度后全部通过，未因此修改生产实现。
+- `git diff --check` 通过。本次没有 Swift 改动，未重复 Swift 测试、完整 Xcode 或 Vite 生产构建，未启动 App 做真实窗口验收，未提交或推送。
+
+### 名称列省略与全称提示
+
+日期：2026-11-03。按用户要求调整供应商/模型表名称列宽度，并为省略名称提供应用内全称提示。
+
+- 名称列通过 `colgroup` 调整为表格宽度 28%，其余六列各 12%；名称标签保留单行省略，只有实际截断时才通过 Tooltip 换行显示全称，未截断名称不显示 Tooltip，也不加入额外 Tab 顺序。
+- `DashboardNameLabel` 通过 `scrollWidth > clientWidth` 检测溢出，并用 `ResizeObserver` 跟随文本和列宽变化；截断时复用 Base UI Tooltip 支持鼠标悬停和键盘聚焦，未截断时设置 `disabled`，移除重复的浏览器原生 `title`。请求日志和其他统计表面布局不变。
+- 前端 **3 个文件、63 项测试通过**，其中格式化函数 8 项、Dashboard 组件 20 项、Dashboard 集成 35 项；覆盖列宽、长名称截断与悬停/聚焦全称、短名称无 Tooltip 和无额外焦点。TypeScript `tsc --noEmit` 与 `git diff --check` 通过。
+- 本次没有 Swift 改动，未重复 Swift 测试、完整 Xcode 或 Vite 生产构建，未启动 App 做真实窗口视觉验收，未提交或推送。
+
+### 移除统计卡片收起按钮
+
+日期：2026-11-03。按用户要求移除统计卡片下方的收起/展开按钮，趋势图改为始终展开。
+
+- 删除 `collapsed` 状态和按钮容器，保留图表区域的 `data-slot`、加载骨架、数据更新、指标切换与表格结构，首载和加载完成后都始终渲染图表；指标表头与图表之间的分隔线由图表区域自身的 `border-t` 保留，不依赖按钮容器。
+- 前端 **3 个文件、63 项测试通过**，其中格式化函数 8 项、Dashboard 组件 20 项、Dashboard 集成 35 项；原折叠用例改为验证 Hide chart / Show chart 按钮不存在、图表区域持续存在且包含 `border-t`。TypeScript `tsc --noEmit` 与 `git diff --check` 通过。
+- 本次没有 Swift 改动，未重复 Swift 测试、完整 Xcode 或 Vite 生产构建，未启动 App 做真实窗口视觉验收，未提交或推送。

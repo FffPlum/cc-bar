@@ -16,6 +16,7 @@ import { ResourceFeedback } from "@/components/resource-feedback";
 import { DashboardQueryScope, useRetainedResult } from "./dashboard-query";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/lib/i18n";
+import { formatTokensCompact } from "@/lib/display";
 import { DashboardFilters, civilInput } from "./dashboard-filters";
 import { DashboardChart, HeatmapBlocks } from "./dashboard-charts";
 import { DashboardTable } from "./dashboard-table";
@@ -64,7 +65,6 @@ function DashboardContent({
   const [metric, setMetric] = useState<DashboardMetric>("tokens");
   const [sourceID, setSource] = useState<string>();
   const [modelID, setModel] = useState<string>();
-  const [collapsed, setCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "requests" | "providers" | "models"
   >("providers");
@@ -187,7 +187,13 @@ function DashboardContent({
           ? t("Updating request details…", "正在更新请求明细…")
           : null;
   const renderContent = (data: UsageDashboard | undefined) => {
-    const values = metrics.map((metric) => data?.kpiDisplay[metric]);
+    const values = metrics.map((metric) => {
+      if (!data) return undefined;
+      if (data.kpiDisplay[metric] === "—") return "—";
+      return metric === "tokens"
+        ? formatTokensCompact(data.totals.totalTokens)
+        : data.kpiDisplay[metric];
+    });
     const waiting = !data;
     const background = Boolean(data && dashboard.isFetching);
     const empty = Boolean(
@@ -287,49 +293,35 @@ function DashboardContent({
                 </button>
               ))}
             </div>
-            <div className="flex justify-center border-t">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setCollapsed(!collapsed)}
-                aria-expanded={!collapsed}
-              >
-                {collapsed
-                  ? t("Show chart", "展开图表")
-                  : t("Hide chart", "收起图表")}
-              </Button>
+            <div
+              data-slot="dashboard-chart-region"
+              className="relative border-t"
+              aria-busy={dashboard.isFetching}
+            >
+              {!data ? (
+                <ChartSkeleton heatmap={range === "all"} />
+              ) : (
+                <div inert={dashboardResult.isPreviousData}>
+                  {range === "all" ? (
+                    <HeatmapResource
+                      query={query}
+                      announceLoading={!loadingMessage}
+                      revision={data.revision}
+                      today={civilInput(
+                        new Date(data.resolvedRange.asOf),
+                        data.resolvedRange.timeZone,
+                      ).slice(0, 10)}
+                    />
+                  ) : (
+                    <DashboardChart
+                      data={data}
+                      title={labels[metrics.indexOf(metric)]!}
+                      empty={empty}
+                    />
+                  )}
+                </div>
+              )}
             </div>
-            {!collapsed && (
-              <div
-                data-slot="dashboard-chart-region"
-                className="relative"
-                aria-busy={dashboard.isFetching}
-              >
-                {!data ? (
-                  <ChartSkeleton heatmap={range === "all"} />
-                ) : (
-                  <div inert={dashboardResult.isPreviousData}>
-                    {range === "all" ? (
-                      <HeatmapResource
-                        query={query}
-                        announceLoading={!loadingMessage}
-                        revision={data.revision}
-                        today={civilInput(
-                          new Date(data.resolvedRange.asOf),
-                          data.resolvedRange.timeZone,
-                        ).slice(0, 10)}
-                      />
-                    ) : (
-                      <DashboardChart
-                        data={data}
-                        title={labels[metrics.indexOf(metric)]!}
-                        empty={empty}
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
           </section>
           <div>
             <DashboardTable

@@ -16,6 +16,27 @@ export function formatTokens(
   }).format(value);
 }
 
+export function formatTokensCompact(value: number): string {
+  const integer = new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  });
+  if (value < 10_000) return integer.format(value);
+
+  const divisors = [1_000, 1_000_000, 1_000_000_000];
+  const suffixes = ["K", "M", "B"];
+  let unit = value >= 1_000_000_000 ? 2 : value >= 1_000_000 ? 1 : 0;
+  const scaled = value / divisors[unit]!;
+  let rounded = Number(scaled.toPrecision(3));
+  if (rounded >= 1_000 && unit < suffixes.length - 1) {
+    unit += 1;
+    rounded = Number((scaled / 1_000).toPrecision(3));
+  }
+  const compact = new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 2,
+  }).format(rounded);
+  return compact + suffixes[unit]!;
+}
+
 export function formatInteger(
   value: number,
   language: ResolvedLanguage,

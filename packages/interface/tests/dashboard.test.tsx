@@ -5,7 +5,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type { DashboardHeatmap, UsageDashboard } from "@ccbar/host-api/window";
 import usage from "../../host-api/fixtures/window-usage.json";
 import {
@@ -23,6 +23,10 @@ import { LanguageProvider } from "@/lib/i18n";
 vi.mock("@/host/host-context", async () => {
   const f = await import("./fixtures");
   return { useHost: () => ({ bootstrap: f.bootstrap, settings: f.settings }) };
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 const total = usage["window.usage.overview"].totals;
 const data = {
@@ -368,6 +372,125 @@ it("does not show false hourly zero bars", () => {
   );
   expect(screen.getByText(/Hourly data is unavailable/)).toBeTruthy();
 });
+it("shows tooltips only for truncated aggregate names", async () => {
+  const longTitle = "provider-with-a-very-long-name-that-does-not-fit";
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(80);
+  vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(
+    function () {
+      return this.textContent === longTitle ? 160 : 80;
+    },
+  );
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  const aggregate = {
+    ...data,
+    providerRows: [
+      { ...data.providerRows[0]!, title: longTitle },
+      { ...data.providerRows[0]!, id: "short", title: "short" },
+    ],
+    modelRows: [],
+  } as UsageDashboard;
+  const view = wrap(
+    <DashboardTable
+      data={aggregate}
+      tab="providers"
+      onTabChange={() => {}}
+      requests={null}
+      error={null}
+      loading={false}
+      requestSort={{ sort: "time", direction: "desc" }}
+      onRequestSort={() => {}}
+      page={1}
+      pageSize={12}
+      onPageChange={() => {}}
+      onPageSizeChange={() => {}}
+    />,
+  );
+  const columns = view.container.querySelectorAll("col");
+  expect(columns).toHaveLength(7);
+  expect(columns[0]!.className).toBe("w-[28%]");
+  expect(
+    Array.from(columns)
+      .slice(1)
+      .every((column) => column.className === "w-[12%]"),
+  ).toBe(true);
+  const labels = view.container.querySelectorAll<HTMLElement>(
+    '[data-slot="dashboard-name-label"]',
+  );
+  await waitFor(() => expect(labels[0]!.dataset.truncated).toBe("true"));
+  expect(labels[0]!.className).toContain("truncate");
+  expect(labels[0]!.getAttribute("tabindex")).toBe("0");
+  expect(labels[0]!.getAttribute("title")).toBeNull();
+  expect(labels[1]!.dataset.truncated).toBe("false");
+  expect(labels[1]!.getAttribute("tabindex")).toBeNull();
+  fireEvent.mouseEnter(labels[1]!);
+  expect(document.querySelector('[data-slot="tooltip-content"]')).toBeNull();
+  fireEvent.mouseEnter(labels[0]!);
+  await waitFor(() =>
+    expect(
+      document.querySelector('[data-slot="tooltip-content"]')?.textContent,
+    ).toBe(longTitle),
+  );
+  fireEvent.mouseLeave(labels[0]!);
+  await waitFor(() =>
+    expect(document.querySelector('[data-slot="tooltip-content"]')).toBeNull(),
+  );
+  fireEvent.focus(labels[0]!);
+  await waitFor(() =>
+    expect(
+      document.querySelector('[data-slot="tooltip-content"]')?.textContent,
+    ).toBe(longTitle),
+  );
+});
+it("uses request log token formatting in provider and model tables", () => {
+  const provider = {
+    ...data.providerRows[0]!,
+    totals: { ...total, totalTokens: 48_210 },
+  };
+  const model = {
+    ...provider,
+    id: "model",
+    modelID: "model",
+    totals: { ...total, totalTokens: 999_960 },
+  };
+  const aggregate = {
+    ...data,
+    providerRows: [provider],
+    modelRows: [model],
+  } as UsageDashboard;
+  const table = (tab: "providers" | "models") => (
+    <DashboardTable
+      data={aggregate}
+      tab={tab}
+      onTabChange={() => {}}
+      requests={null}
+      error={null}
+      loading={false}
+      requestSort={{ sort: "time", direction: "desc" }}
+      onRequestSort={() => {}}
+      page={1}
+      pageSize={12}
+      onPageChange={() => {}}
+      onPageSizeChange={() => {}}
+    />
+  );
+  const view = wrap(table("providers"));
+  expect(screen.getByText("48.2K")).toBeTruthy();
+  expect(screen.queryByText("48,210")).toBeNull();
+  view.rerender(
+    <LanguageProvider language="en">
+      <TooltipProvider>{table("models")}</TooltipProvider>
+    </LanguageProvider>,
+  );
+  expect(screen.getByText("1M")).toBeTruthy();
+  expect(screen.queryByText("999,960")).toBeNull();
+});
 it("sorts aggregate rows and displays unknown values", () => {
   wrap(
     <DashboardTable
@@ -415,6 +538,53 @@ it("loads an older heatmap window", () => {
   fireEvent.click(screen.getByRole("button", { name: "Load older" }));
   expect(older).toHaveBeenCalledWith("2025-01-06");
   expect(screen.getByLabelText("2025-01-06: 1")).toBeTruthy();
+});
+it("formats request log tokens with K/M/B in Chinese", () => {
+  const requestData = {
+    revision: "1",
+    resolvedRange: data.resolvedRange,
+    totalCount: 1,
+    page: 1,
+    pageSize: 12,
+    rows: [
+      {
+        id: "request",
+        timestamp: "2026-11-01T00:00:00Z",
+        service: "codex" as const,
+        sourceID: "source",
+        modelID: "model",
+        totals: { ...total, totalTokens: 48_210 },
+        status: "unknown" as const,
+        conversationID: null,
+      },
+    ],
+    nextCursor: null,
+    coverage: data.coverage,
+    status: data.status,
+  };
+  render(
+    <LanguageProvider language="zh">
+      <TooltipProvider>
+        <DashboardTable
+          data={data}
+          tab="requests"
+          onTabChange={() => {}}
+          requests={requestData}
+          error={null}
+          loading={false}
+          requestSort={{ sort: "time", direction: "desc" }}
+          onRequestSort={() => {}}
+          page={1}
+          pageSize={12}
+          onPageChange={() => {}}
+          onPageSizeChange={() => {}}
+        />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  expect(screen.getByText("48.2K")).toBeTruthy();
+  expect(screen.queryByText("48,210")).toBeNull();
+  expect(screen.queryByText(/万/)).toBeNull();
 });
 it("requests global sorting from the host and uses host axis labels", () => {
   const sort = vi.fn();
@@ -468,7 +638,7 @@ it("requests global sorting from the host and uses host axis labels", () => {
   fireEvent.click(screen.getByRole("button", { name: /Cost/ }));
   expect(sort).toHaveBeenCalledWith({ sort: "cost", direction: "desc" });
   result.unmount();
-  wrap(
+  const chart = wrap(
     <DashboardChart
       data={{
         ...data,
@@ -480,7 +650,11 @@ it("requests global sorting from the host and uses host axis labels", () => {
       title="Cost"
     />,
   );
-  expect(screen.getByText("$12.34")).toBeTruthy();
+  expect(
+    Array.from(
+      chart.container.querySelectorAll('[data-slot="dashboard-axis-tick"]'),
+    ).map((tick) => tick.textContent),
+  ).toEqual(["$0.00", "$12.34"]);
 });
 it("leaves future heatmap dates blank and stops the current block at today", () => {
   const block = {

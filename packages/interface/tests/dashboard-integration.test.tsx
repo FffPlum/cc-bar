@@ -1090,8 +1090,11 @@ it("keeps KPI, chart axes and all table columns when a successful query is empty
   ).toBeNull();
   expect(screen.getByText("11/01")).toBeTruthy();
   expect(screen.getByText("11/03")).toBeTruthy();
-  expect(screen.getByText("1")).toBeTruthy();
-  expect(screen.getByText("2")).toBeTruthy();
+  expect(
+    Array.from(
+      view.container.querySelectorAll('[data-slot="dashboard-axis-tick"]'),
+    ).map((tick) => tick.textContent),
+  ).toEqual(["0", "1", "2"]);
   expect(screen.getAllByRole("columnheader")).toHaveLength(7);
   expect(screen.getByText("No data").getAttribute("colspan")).toBe("7");
   fireEvent.click(screen.getByRole("tab", { name: "Models 0" }));
@@ -1101,6 +1104,25 @@ it("keeps KPI, chart axes and all table columns when a successful query is empty
   expect(screen.getAllByRole("columnheader")).toHaveLength(6);
   expect(screen.getByText("No data").getAttribute("colspan")).toBe("6");
   await waitFor(() => expect(api.usageRequests).toHaveBeenCalled());
+});
+
+it("uses K/M/B for statistic card tokens in Chinese", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue({
+    ...data,
+    totals: { ...total, totalTokens: 999_960 },
+    kpiDisplay: { ...data.kpiDisplay, tokens: "99.996万" },
+  });
+  render(
+    <LanguageProvider language="zh">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  expect(
+    await screen.findByRole("button", { name: "Tokens 1M" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /万/ })).toBeNull();
 });
 
 it("does not treat actual zero-cost usage as an empty query", async () => {
@@ -1178,10 +1200,12 @@ it("uses the dashboard shell for first-load skeletons while controls remain usab
     ).disabled,
   ).toBe(false);
   fireEvent.click(screen.getByRole("tab", { name: "Models" }));
-  fireEvent.click(screen.getByRole("button", { name: "Hide chart" }));
-  expect(
-    view.container.querySelector('[data-slot="dashboard-chart-region"]'),
-  ).toBeNull();
+  expect(screen.queryByRole("button", { name: "Hide chart" })).toBeNull();
+  const chartRegion = view.container.querySelector(
+    '[data-slot="dashboard-chart-region"]',
+  );
+  expect(chartRegion).not.toBeNull();
+  expect(chartRegion?.className).toContain("border-t");
   await act(async () => {
     finish(data);
   });
@@ -1193,7 +1217,10 @@ it("uses the dashboard shell for first-load skeletons while controls remain usab
   expect(
     screen.getByRole("tab", { name: "Models 0" }).getAttribute("aria-selected"),
   ).toBe("true");
-  expect(screen.getByRole("button", { name: "Show chart" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Show chart" })).toBeNull();
+  expect(
+    view.container.querySelector('[data-slot="dashboard-chart-region"]'),
+  ).not.toBeNull();
   expect(
     view.container.querySelector('[data-slot="table-skeleton"]'),
   ).toBeNull();
