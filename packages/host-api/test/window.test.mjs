@@ -70,15 +70,21 @@ test('dashboard routes validate DTOs and forward filters', async () => {
   const status = fixtures['usage.refresh'];
   const coverage = { precision: 'day', incomplete: true, refreshing: true, unlocatedTotals: totals, message: null };
   const sample = { key: '2026-01-01T00:00:00Z', start: '2026-01-01T00:00:00Z', totals, value: 0, label: '0', normalizedValue: 0, segments: [{ service: 'codex', totals, value: 0, label: '0', share: 0 }] };
-  const dashboard = { kpiDisplay: { cost: '$0', requests: '0', tokens: '0', cacheHitRate: '0%' }, revision: '1', resolvedRange: { from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z', timeZone: 'UTC', granularity: 'hour', asOf: '2026-01-02T00:00:00Z' }, coverage, totals, facets: { services: [], sources: [], models: [] }, providerRows: [], modelRows: [], samples: [sample], axisTicks: [], status };
-  const results = { 'window.usage.dashboard': dashboard, 'window.usage.requests': { revision: '1', resolvedRange: dashboard.resolvedRange, totalCount: 0, rows: [], nextCursor: null, coverage, status }, 'window.usage.heatmap': { fromDay: '2025-01-01', toDay: '2026-01-01', timeZone: 'UTC', days: [], totals, nextBeforeDay: null, coverage, status } };
+  const dashboard = { requestLogCount: null, kpiDisplay: { cost: '$0', requests: '0', tokens: '0', cacheHitRate: '0%' }, revision: '1', resolvedRange: { from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z', timeZone: 'UTC', granularity: 'hour', asOf: '2026-01-02T00:00:00Z' }, coverage, totals, facets: { services: [], sources: [], models: [] }, providerRows: [], modelRows: [], samples: [sample], axisTicks: [], status };
+  const results = { 'window.usage.dashboard': dashboard, 'window.usage.requests': { revision: '1', resolvedRange: dashboard.resolvedRange, totalCount: 0, page: 1, pageSize: 12, rows: [], nextCursor: null, coverage, status }, 'window.usage.heatmap': { fromDay: '2025-01-01', toDay: '2026-01-01', timeZone: 'UTC', days: [], totals, nextBeforeDay: null, coverage, status } };
   const { api, host, calls } = client(results);
   try {
     const query = { range: 'today', metric: 'cost', service: 'codex' };
     assert.deepEqual(await api.usageDashboard(query), dashboard);
-    await api.usageRequests({ ...query, limit: 20 });
+    await api.usageRequests({ ...query, page: 3, pageSize: 24 });
     await api.usageHeatmap(query);
-    assert.equal(calls[1].params.limit, 20);
+    assert.equal(calls[1].params.page, 3);
+    assert.equal(calls[1].params.pageSize, 24);
+    assert.equal(windowDTOValidators.usageDashboard.parse({ ...dashboard, requestLogCount: 7 }).requestLogCount, 7);
+    const { requestLogCount, ...missingCount } = dashboard;
+    assert.throws(() => windowDTOValidators.usageDashboard.parse(missingCount), { code: 'invalid_response' });
+    const { pageSize, ...missingPageSize } = results['window.usage.requests'];
+    assert.throws(() => windowDTOValidators.usageRequests.parse(missingPageSize), { code: 'invalid_response' });
     assert.throws(() => windowDTOValidators.usageDashboard.parse({ ...dashboard, credential: 'secret' }), { code: 'invalid_response' });
     const { segments, ...missingSegments } = sample;
     assert.throws(() => windowDTOValidators.usageDashboard.parse({ ...dashboard, samples: [missingSegments] }), { code: 'invalid_response' });

@@ -62,8 +62,8 @@
 | WindowAPI | RPC | 行为 |
 |---|---|---|
 | `usageOverview(query)` | `window.usage.overview` | `StatsOverviewModel` + 对话概览；总 KPI、每服务 KPI/环比、图表上下文、速度、构成、模型和排行。 |
-| `usageDashboard(query)` | `window.usage.dashboard` | 四项 KPI、来源/模型级联选项、聚合表、小时/日/月趋势与覆盖信息。 |
-| `usageRequests(query)` | `window.usage.requests` | 已核验请求索引；按时间/费用/Tokens 全局排序后以游标分页，默认 100、最多 500。 |
+| `usageDashboard(query)` | `window.usage.dashboard` | 四项 KPI、可展示日志条数 `requestLogCount`、来源/模型级联选项、聚合表、小时/日/月趋势与覆盖信息。 |
+| `usageRequests(query)` | `window.usage.requests` | 已核验请求索引；按时间/费用/Tokens 全局排序后以页码分页，默认每页 12、最多 500。 |
 | `usageHeatmap(query)` | `window.usage.heatmap` | 周一对齐的 53 周日热力图、区间汇总及 `nextBeforeDay` 更早入口。 |
 | `usageRefresh()` | `usage.refresh` | 原扫描链和状态。 |
 | `conversationsList(query)` | `conversations.list` | 搜索、项目、服务、日期、排序和宿主分页；默认 200、最大 500。 |
@@ -78,14 +78,17 @@
 
 ### 仪表盘范围与覆盖
 
-上述 offset 列表规则适用于原有对话/项目；仪表盘请求使用独立游标。`DashboardQuery` 包含 `range`（today / last24h / last7 / last14 / last30 / all / custom）、`metric`（cost / requests / tokens / cacheHitRate）及可选 service / sourceID / modelID。自定义 `customFrom/customTo` 为 ISO 绝对时间，范围为 `[from,to)`；`followNow` 为 true 时终点由宿主当前时刻确定。响应 `resolvedRange` 返回 from / to / timeZone / asOf / granularity。
+上述 offset 列表规则适用于原有对话/项目；仪表盘请求使用独立的 `page/pageSize` 页码参数。`DashboardQuery` 包含 `range`（today / last24h / last7 / last14 / last30 / all / custom）、`metric`（cost / requests / tokens / cacheHitRate）及可选 service / sourceID / modelID。自定义 `customFrom/customTo` 为 ISO 绝对时间，范围为 `[from,to)`；`followNow` 为 true 时终点由宿主当前时刻确定。响应 `resolvedRange` 返回 from / to / timeZone / asOf / granularity。
 
 - 自然日预设保留权威日汇总（含今天已接纳用量）；近 24 小时为实际 86400 秒。自定义部分日与小时趋势只用可核验事件，不能把没有时间戳的日汇总平均分摊。超过 730 天的非小时趋势按月分桶。
 - 趋势 `samples[].segments` 必填，逐应用返回 `service / totals / value / label / share`，按可见服务顺序排列，遵循与整柱相同的筛选和分桶。费用、请求、Tokens 的 value 为应用实际指标，share 为该值占整柱值的比例。缓存命中率的 value 为应用缓存读取量除以整柱总输入量，label 标示百分点贡献，share 为应用缓存读取量占整柱缓存读取量的比例；各段 value 之和等于总体命中率，不累加各应用独立命中率。零分母的 share 为 0。热力图 DTO 不增加 segments。
 - `facets.services` 固定返回全部已启用用量应用，按设置顺序排列，所选范围没有用量的应用 `requestCount` 为 0；前端应用按钮直接读取 bootstrap 的 `visibleUsageServices`，加载或失败时也保持稳定。来源/模型候选仍由范围内实际用量生成。确认空用量的 `kpiDisplay` 返回 `—`，趋势保留范围内零样本和有效基准轴刻度。
 - `sourceID` 表示应用的会话日志或远端计量来源，不代表当前供应商配置或 API Key 的历史归属。来源与模型级联选项含请求数量；聚合表的 `successRate` 缺少失败分母时为 null，请求 `status` 为 unknown。
 - `coverage` 含 event / day / mixed 精度、incomplete、refreshing、unlocatedTotals 和 message；它描述请求时间与来源覆盖。`refreshing` 为必填布尔值，表示宿主正在准备请求明细；期间保留已有统计并显示更新提示，完成后再提示仍存在的覆盖缺口。金额缺价/不完整使用 `UsageTotals` 中的独立标记，不能混为时间戳缺失。
-- 请求游标绑定数据版本、筛选、排序、可见应用与宿主时区，冻结 from / to / asOf。过期返回 `invalid_cursor`，前端回到第一页；请求数为 0 的附属用量保留在汇总但不冒充独立请求。
+- 概览 `requestLogCount: number | null` 为当前日期、应用、来源、模型筛选下可展示的日志行数，与明细 COUNT 使用同一 SQL 条件：仅已核验分区、范围内且请求数大于 0 的行。它不等于权威汇总 `totals.requestCount`，不计入只有汇总的历史请求和请求数为 0 的附属用量。概览只执行 COUNT，不读取明细行；索引尚未就绪返回 null，确认没有可展示日志返回 0。即使覆盖不完整也显示实际可展示条数。
+- 明细只在请求日志页签打开后查询。`page` 从 1 开始（最大 10,000,000），`pageSize` 默认 12（1～500）；响应返回 `page / pageSize / totalCount / rows`，SQL COUNT 与当前页查询在同一事务内完成。页码超出末页自动收敛到最后一个有效页，空结果为第 1 页。每次页码查询读取当前快照，滚动范围按当前时刻重新解析；不冻结跨页快照，因此新增/删除记录后页边界可能变化。相同排序值按请求 ID、应用稳定排序。
+- 前端每页条数提供 12 / 24 / 48 / 96，切换筛选、排序或每页条数回到第 1 页；页码可输入跳转。筛选、排序、page、pageSize 共同组成请求缓存键，旧请求不能覆盖新查询。失败保留已有行与重试入口。
+- 保留 `cursor/limit` 供旧客户端兼容（limit 默认 100、最多 500），不能与 `page/pageSize` 混用；`nextCursor` 仍在响应中返回。旧游标绑定数据版本、筛选、排序、可见应用与时区并冻结 from / to / asOf，过期返回 `invalid_cursor`。新前端不使用游标。
 - 热力图每块 371 天，`toDay` 不含当天，`beforeDay` 使用上一块 fromDay；未来日期仅作网格占位。Cursor 的全部时间汇总仅包含已加载远端历史，每次翻页触发有限区间补拉，沿用账号/区间去重与退避。
 - DSH、Cursor、被删除日志及日级补录可能只有日桶。持久化旧日桶没有原时区元数据，切换系统时区不能完整重映射旧历史；接口不为此重写用户数据。
 

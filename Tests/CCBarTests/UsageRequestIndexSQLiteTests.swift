@@ -294,6 +294,25 @@ final class UsageRequestIndexSQLiteTests: XCTestCase {
         XCTAssertEqual(try store.query(next, canonical: canonical(rows)).totalCount, 0)
     }
 
+    func testCountOnlyQueryUsesPageFiltersWithoutMaterializingRows() throws {
+        let rows = [queryRow("a"), queryRow("b"), queryRow("other-model", model: "other"),
+            queryRow("other-app", app: .claude), queryRow("at-end", offset: 200)]
+        try store.save(payload(rows))
+        var q = query(apps: [.codex], model: "gpt-test", from: 100, to: 200)
+        q.includeRequestCount = true
+        let count = try store.query(q, canonical: canonical(rows))
+        XCTAssertEqual(count.totalCount, 2)
+        XCTAssertTrue(count.rows.isEmpty)
+        q.page = .init(offset: 0, limit: 1)
+        XCTAssertEqual(try store.query(q, canonical: canonical(rows)).totalCount, count.totalCount)
+        q.page = .init(offset: 100, limit: 1, clampToLastPage: true)
+        XCTAssertEqual(try store.query(q, canonical: canonical(rows)).rows.map(\.id), ["b"])
+        q.model = "missing"
+        let empty = try store.query(q, canonical: canonical(rows))
+        XCTAssertEqual(empty.totalCount, 0)
+        XCTAssertTrue(empty.rows.isEmpty)
+    }
+
     func testSQLAggregatesTimingAndRetainsFullPartitionCoverageForPartialRange() throws {
         let rows = [queryRow("a", offset: 100, timing: RequestTiming(firstTokenMs: 50, generationMs: 1000)),
             queryRow("b", offset: 3700, cost: nil, timing: RequestTiming(firstTokenMs: nil, generationMs: 2000, isEstimated: true)),

@@ -81,12 +81,13 @@ extension HostWindowUsageService {
     }
     private func sqlQuery(_ q: DashboardQuery, from: Date, to: Date, applyModel: Bool = true,
                           applySource: Bool = true, hourly: Bool = false,
-                          page: UsageRequestIndexStore.Page? = nil) -> UsageRequestIndexStore.Query {
+                          page: UsageRequestIndexStore.Page? = nil, includeRequestCount: Bool = false) -> UsageRequestIndexStore.Query {
         let apps = Set(settings.visibleUsageApps.filter { app in
             (q.service == nil || q.service == app) && (!applySource || q.source == nil || q.source == dashboardSource(app))
         })
         return UsageRequestIndexStore.Query(apps: from < to ? apps : [], model: applyModel ? q.model : nil,
-            from: from, to: from < to ? to : from.addingTimeInterval(1), calendar: .current, hourly: hourly, page: page)
+            from: from, to: from < to ? to : from.addingTimeInterval(1), calendar: .current, hourly: hourly, page: page,
+            includeRequestCount: includeRequestCount)
     }
     private func queryDetails(_ queries: [UsageRequestIndexStore.Query]) async throws -> DashboardData {
         let status = dashboardStatusProvider?() ?? state.usageService.requestIndexStatusForDisplay()
@@ -250,7 +251,7 @@ extension HostWindowUsageService {
         allServicesQuery.service = nil
         allServicesQuery.source = nil
         allServicesQuery.model = nil
-        var queries = [sqlQuery(q, from: q.from, to: q.to),
+        var queries = [sqlQuery(q, from: q.from, to: q.to, includeRequestCount: true),
             sqlQuery(allServicesQuery, from: q.from, to: q.to),
             sqlQuery(q, from: q.from, to: q.to, applyModel: false, applySource: false)]
         if q.hourly { queries.append(sqlQuery(q, from: q.from, to: q.to, hourly: true)) }
@@ -334,7 +335,8 @@ extension HostWindowUsageService {
             "tokens": .string(confirmedEmpty ? "—" : StatsFormatter.compactToken(total.totalTokens)),
             "cacheHitRate": .string(confirmedEmpty ? "—" : String(format: "%.1f%%", total.cacheHitRate * 100)),
         ])
-        return .object(["kpiDisplay": kpiDisplay, "revision": .string(data.revision), "resolvedRange": dashboardRange(q), "coverage": coverage.json, "totals": totalsJSON(total), "facets": .object(["services": .array(apps.map { app in dashboardFacet(app.rawValue, title: app.rawValue, buckets: allFacetBuckets.filter { $0.app == app }) }), "sources": .array(sourceFacets), "models": .array(models.map { m in dashboardFacet(m, title: m, buckets: sourceBuckets.filter { $0.model == m }) })]), "providerRows": .array(providerRows), "modelRows": .array(modelRows), "samples": .array(samples), "axisTicks": .array(axisTicks), "status": statusJSON()])
+        let requestLogCount: HostJSON = data.result().map { .number(Decimal($0.totalCount)) } ?? .null
+        return .object(["requestLogCount": requestLogCount, "kpiDisplay": kpiDisplay, "revision": .string(data.revision), "resolvedRange": dashboardRange(q), "coverage": coverage.json, "totals": totalsJSON(total), "facets": .object(["services": .array(apps.map { app in dashboardFacet(app.rawValue, title: app.rawValue, buckets: allFacetBuckets.filter { $0.app == app }) }), "sources": .array(sourceFacets), "models": .array(models.map { m in dashboardFacet(m, title: m, buckets: sourceBuckets.filter { $0.model == m }) })]), "providerRows": .array(providerRows), "modelRows": .array(modelRows), "samples": .array(samples), "axisTicks": .array(axisTicks), "status": statusJSON()])
     }
 
     private struct RequestCursor: Codable {
@@ -351,16 +353,20 @@ extension HostWindowUsageService {
         return SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
     }
     func dashboardRequests(_ params: [String: HostJSON]) async throws -> HostJSON {
-        var q = try dashboardQuery(params, extra: ["cursor", "limit", "sort", "direction"])
-        var limit = 100
-        if let raw = params["limit"] {
-            guard case .number(let value) = raw, let n = Int(exactly: NSDecimalNumber(decimal: value)), (1...500).contains(n) else { throw invalidParams() }
-            limit = n
+        var q = try dashboardQuery(params, extra: ["page", "pageSize", "cursor", "limit", "sort", "direction"])
+        let numbered = params["cursor"] == nil && params["limit"] == nil
+        guard numbered || (params["page"] == nil && params["pageSize"] == nil) else { throw invalidParams() }
+        func integer(_ key: String, fallback: Int, maximum: Int) throws -> Int {
+            guard let raw = params[key] else { return fallback }
+            guard case .number(let value) = raw, let n = Int(exactly: NSDecimalNumber(decimal: value)), (1...maximum).contains(n) else { throw invalidParams() }
+            return n
         }
+        let limit = try integer(numbered ? "pageSize" : "limit", fallback: numbered ? 12 : 100, maximum: 500)
+        let requestedPage = try integer("page", fallback: 1, maximum: 10_000_000)
         dashboardPrepareCursor(q, from: max(q.from, q.to.addingTimeInterval(-371 * 86400)), to: q.to)
         let fingerprint = requestFingerprint(params)
         var cursorRevision: String?
-        var offset = 0
+        var offset = numbered ? (requestedPage - 1) * limit : 0
         if let raw = params["cursor"] {
             guard case .string(let encoded) = raw, encoded.count <= 4096, let data = Data(base64Encoded: encoded),
                   let cursor = try? JSONDecoder().decode(RequestCursor.self, from: data),
@@ -379,7 +385,7 @@ extension HostWindowUsageService {
         }
         let sort = try option("sort", fallback: "time", allowed: ["time", "cost", "tokens"])
         let descending = try option("direction", fallback: "desc", allowed: ["asc", "desc"]) == "desc"
-        let page = UsageRequestIndexStore.Page(offset: offset, limit: limit, sort: sort, descending: descending)
+        let page = UsageRequestIndexStore.Page(offset: offset, limit: limit, sort: sort, descending: descending, clampToLastPage: numbered)
         let data = try await queryDetails([sqlQuery(q, from: q.from, to: q.to, page: page)])
         let revision = data.revision
         guard cursorRevision == nil || cursorRevision == revision else {
@@ -387,7 +393,11 @@ extension HostWindowUsageService {
         }
         let result = data.result()
         let totalCount = result?.totalCount ?? 0
-        guard offset <= totalCount else { throw HostError(code: "invalid_cursor", message: "Invalid request cursor") }
+        if numbered {
+            if result != nil { offset = page.resolvedOffset(totalCount: totalCount) }
+        } else if offset > totalCount {
+            throw HostError(code: "invalid_cursor", message: "Invalid request cursor")
+        }
         let records = result?.rows ?? []
         let requestedHashes = Set(records.map(\.conversationHash))
         let conversations = state.usageService.conversationAggregator.snapshot().infos
@@ -418,7 +428,7 @@ extension HostWindowUsageService {
             let state = RequestCursor(revision: revision, fingerprint: fingerprint, from: q.from, to: q.to, asOf: q.asOf, offset: nextOffset)
             cursor = .string(try JSONEncoder().encode(state).base64EncodedString())
         } else { cursor = .null }
-        return .object(["revision": .string(revision), "resolvedRange": dashboardRange(q), "totalCount": .number(Decimal(totalCount)), "rows": .array(rows), "nextCursor": cursor, "coverage": dashboardCoverage(q, data: data, result: data.result(), from: q.from, to: q.to, includeCompleteDays: true).json, "status": statusJSON()])
+        return .object(["revision": .string(revision), "resolvedRange": dashboardRange(q), "totalCount": .number(Decimal(totalCount)), "page": .number(Decimal(offset / limit + 1)), "pageSize": .number(Decimal(limit)), "rows": .array(rows), "nextCursor": cursor, "coverage": dashboardCoverage(q, data: data, result: data.result(), from: q.from, to: q.to, includeCompleteDays: true).json, "status": statusJSON()])
     }
 
     func dashboardHeatmap(_ params: [String: HostJSON]) async throws -> HostJSON {

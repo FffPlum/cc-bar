@@ -16,6 +16,7 @@ const status = usage["window.usage.overview"].status;
 const coverage = {
   precision: "event",
   incomplete: false,
+  refreshing: false,
   unlocatedTotals: total,
   message: null,
 };
@@ -27,6 +28,7 @@ const resolvedRange = {
   granularity: "day",
 };
 const data = {
+  requestLogCount: 24,
   revision: "1",
   resolvedRange,
   coverage,
@@ -52,6 +54,8 @@ const api = {
     revision: "1",
     resolvedRange,
     totalCount: 0,
+    page: 1,
+    pageSize: 12,
     rows: [],
     nextCursor: null,
     coverage,
@@ -97,8 +101,13 @@ it("queries dashboard immediately and loads request and heatmap only when opened
   expect(api.usageDashboard).toHaveBeenCalled();
   expect(api.usageRequests).not.toHaveBeenCalled();
   expect(api.usageHeatmap).not.toHaveBeenCalled();
+  expect(screen.getByRole("tab", { name: "Request logs 24" })).toBeTruthy();
   fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
-  await waitFor(() => expect(api.usageRequests).toHaveBeenCalled());
+  await waitFor(() =>
+    expect(api.usageRequests).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 1, pageSize: 12 }),
+    ),
+  );
   fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
   fireEvent.click(
     within(screen.getByRole("dialog")).getByRole("button", {
@@ -158,39 +167,34 @@ it("discards a deferred heatmap when the filter changes", async () => {
   );
   expect(screen.queryByText(/1990-01-01/)).toBeNull();
 });
-it("recovers the first page when a cursor expires", async () => {
-  const { HostError } = await import("@ccbar/host-api");
-  api.usageRequests.mockReset();
-  api.usageRequests.mockImplementation(async (q: any) => {
-    if (q.cursor) throw new HostError("invalid_cursor", "expired");
-    return {
-      revision: "1",
-      resolvedRange,
-      totalCount: 2,
-      rows: [],
-      nextCursor: "old",
-      coverage,
-      status,
-    };
+it("shows the available log count before opening incomplete request history", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue({
+    ...data,
+    requestLogCount: 13,
+    coverage: { ...coverage, incomplete: true },
   });
-  render(
-    <LanguageProvider language="en">
-      <TooltipProvider>
-        <DashboardPage onService={() => {}} />
-      </TooltipProvider>
-    </LanguageProvider>,
+  api.usageRequests.mockReset().mockImplementation(
+    async (query: any) =>
+      ({
+        ...requestPage("available-model", query.page),
+        totalCount: 13,
+        coverage: { ...coverage, incomplete: true },
+      }) as never,
   );
-  await screen.findByText("$1");
+  renderDashboard();
+  await screen.findByRole("tab", { name: "Request logs 13" });
+  expect(api.usageRequests).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
-  fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+  await screen.findByText("available-model");
+  expect(screen.getByText("13 records")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Next" })).toBeTruthy(),
+    expect(api.usageRequests.mock.lastCall?.[0]).toMatchObject({
+      page: 2,
+      pageSize: 12,
+    }),
   );
-  expect(
-    api.usageRequests.mock.calls.some(
-      (call: any[]) => call[0].cursor === "old",
-    ),
-  ).toBe(true);
+  api.usageDashboard.mockReset().mockResolvedValue(data);
 });
 it("appends older heatmap windows", async () => {
   api.usageHeatmap.mockReset();
@@ -332,22 +336,24 @@ it("keeps existing heatmap blocks and retries a failed refresh", async () => {
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   expect(screen.getByText(/2025-01-06/)).toBeTruthy();
 });
-it("ignores an expired cursor from an earlier filter after another page is open", async () => {
-  const { HostError } = await import("@ccbar/host-api");
+it("ignores a failed request from an earlier filter after another page is open", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue(data);
   const { act } = await import("@testing-library/react");
   let rejectOld!: (error: unknown) => void;
   api.usageRequests.mockReset();
   api.usageRequests.mockImplementation(async (q: any) => {
-    if (q.range === "last7" && q.cursor)
+    if (q.range === "last7" && q.page === 2)
       return new Promise((_, reject) => {
         rejectOld = reject;
       });
     return {
       revision: "1",
       resolvedRange,
-      totalCount: 2,
+      totalCount: 24,
+      page: q.page,
+      pageSize: q.pageSize,
       rows: [],
-      nextCursor: q.cursor ? null : q.range,
+      nextCursor: null,
       coverage,
       status,
     };
@@ -361,7 +367,13 @@ it("ignores an expired cursor from an earlier filter after another page is open"
   );
   await screen.findByText("$1");
   fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
-  fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
   await waitFor(() => expect(rejectOld).toBeTypeOf("function"));
   fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
   fireEvent.click(
@@ -374,16 +386,22 @@ it("ignores an expired cursor from an earlier filter after another page is open"
       range: "last30",
     }),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
   await waitFor(() =>
     expect(api.usageRequests.mock.lastCall?.[0]).toMatchObject({
       range: "last30",
-      cursor: "last30",
+      page: 2,
     }),
   );
   const count = api.usageRequests.mock.calls.length;
   await act(async () => {
-    rejectOld(new HostError("invalid_cursor", "expired"));
+    rejectOld(new Error("previous filter failed"));
     await Promise.resolve();
   });
   expect(api.usageRequests.mock.calls.length).toBe(count);
@@ -676,10 +694,17 @@ const renderDashboard = () =>
       </TooltipProvider>
     </LanguageProvider>,
   );
-const requestPage = (modelID: string, nextCursor: string | null = null) => ({
+const requestPage = (
+  modelID: string,
+  page = 1,
+  pageSize = 12,
+  totalCount = 24,
+) => ({
   revision: "1",
   resolvedRange,
-  totalCount: 2,
+  totalCount,
+  page,
+  pageSize,
   rows: [
     {
       id: modelID,
@@ -690,7 +715,7 @@ const requestPage = (modelID: string, nextCursor: string | null = null) => ({
       totals: total,
     },
   ],
-  nextCursor,
+  nextCursor: null,
   coverage,
   status,
 });
@@ -700,11 +725,11 @@ it("keeps request rows while paging and immediately reuses a cached page", async
   let finish!: (value: any) => void;
   api.usageDashboard.mockReset().mockResolvedValue(data);
   api.usageRequests.mockReset().mockImplementation((query: any) =>
-    query.cursor
+    query.page === 2
       ? new Promise((resolve) => {
           finish = resolve;
         })
-      : (Promise.resolve(requestPage("first-page-model", "page-2")) as never),
+      : (Promise.resolve(requestPage("first-page-model")) as never),
   );
   renderDashboard();
   await screen.findByText("$1");
@@ -722,7 +747,7 @@ it("keeps request rows while paging and immediately reuses a cached page", async
       .disabled,
   ).toBe(true);
   await act(async () => {
-    finish(requestPage("second-page-model"));
+    finish(requestPage("second-page-model", 2));
   });
   await screen.findByText("second-page-model");
   fireEvent.click(screen.getByRole("button", { name: "Previous" }));
@@ -734,9 +759,9 @@ it("retains the last request page when the next page fails and supports retry", 
   api.usageDashboard.mockReset().mockResolvedValue(data);
   api.usageRequests
     .mockReset()
-    .mockResolvedValueOnce(requestPage("retained-model", "page-2") as never)
+    .mockResolvedValueOnce(requestPage("retained-model") as never)
     .mockRejectedValueOnce(new Error("database temporarily busy"))
-    .mockResolvedValueOnce(requestPage("retried-model") as never);
+    .mockResolvedValueOnce(requestPage("retried-model", 2) as never);
   renderDashboard();
   await screen.findByText("$1");
   fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
@@ -822,30 +847,106 @@ it.each(["usage", "pricing"])(
   },
 );
 
-it("revalidates the cached first page when a database change expires its pagination cursor", async () => {
-  const { HostError } = await import("@ccbar/host-api");
+it("adopts the host-clamped page after records shrink without fetching it twice", async () => {
   api.usageDashboard.mockReset().mockResolvedValue(data);
   api.usageRequests
     .mockReset()
-    .mockResolvedValueOnce(
-      requestPage("outdated-page", "expired-cursor") as never,
-    )
-    .mockRejectedValueOnce(new HostError("invalid_cursor", "expired"))
-    .mockResolvedValueOnce(requestPage("current-page", "fresh-cursor") as never)
-    .mockResolvedValueOnce(requestPage("current-next-page") as never);
+    .mockResolvedValueOnce(requestPage("outdated-page") as never)
+    .mockResolvedValueOnce(requestPage("remaining-page", 1, 12, 1) as never);
   renderDashboard();
   await screen.findByText("$1");
   fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
   await screen.findByText("outdated-page");
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  await screen.findByText("current-page");
-  expect(api.usageRequests).toHaveBeenCalledTimes(3);
-  expect(api.usageRequests.mock.lastCall?.[0].cursor).toBeUndefined();
+  await screen.findByText("remaining-page");
+  expect(api.usageRequests).toHaveBeenCalledTimes(2);
+  expect(
+    (screen.getByRole("textbox", { name: "Current page" }) as HTMLInputElement)
+      .value,
+  ).toBe("1");
+  expect(screen.getByText("1 records")).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+});
+
+it("jumps directly, resets sorting and filters to page one, and retains the selected page size", async () => {
+  api.usageDashboard
+    .mockReset()
+    .mockResolvedValue({ ...data, requestLogCount: 80 });
+  api.usageRequests
+    .mockReset()
+    .mockImplementation(
+      async (query: any) =>
+        requestPage(
+          `page-${query.page}-${query.pageSize}`,
+          query.page,
+          query.pageSize,
+          80,
+        ) as never,
+    );
+  renderDashboard();
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  await screen.findByText("page-1-12");
+  const input = screen.getByRole("textbox", { name: "Current page" });
+  input.focus();
+  fireEvent.change(input, { target: { value: "5" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await screen.findByText("page-5-12");
+  expect(api.usageRequests).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("combobox", { name: "Rows per page" }));
+  const pageSizeOption = await screen.findByRole("option", { name: "24 / page" });
+  fireEvent.pointerDown(pageSizeOption, { pointerType: "mouse", button: 0 });
+  fireEvent.click(pageSizeOption, { detail: 1 });
+  await screen.findByText("page-1-24");
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  await screen.findByText("current-next-page");
+  await screen.findByText("page-2-24");
+  fireEvent.click(
+    within(screen.getByRole("table")).getByRole("button", { name: "Cost" }),
+  );
+  await screen.findByText("page-1-24");
   expect(api.usageRequests.mock.lastCall?.[0]).toMatchObject({
-    cursor: "fresh-cursor",
+    page: 1,
+    pageSize: 24,
+    sort: "cost",
   });
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByText("page-2-24");
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 30 days",
+    }),
+  );
+  await waitFor(() =>
+    expect(api.usageRequests.mock.lastCall?.[0]).toMatchObject({
+      range: "last30",
+      page: 1,
+      pageSize: 24,
+    }),
+  );
+  expect(
+    api.usageRequests.mock.calls
+      .filter((call: any[]) => call[0].range === "last30")
+      .every((call: any[]) => call[0].page === 1),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: /Last 30 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 7 days",
+    }),
+  );
+  await waitFor(() =>
+    expect(
+      (
+        screen.getByRole("textbox", {
+          name: "Current page",
+        }) as HTMLInputElement
+      ).value,
+    ).toBe("1"),
+  );
 });
 
 const emptyTotal = {
@@ -860,6 +961,7 @@ const emptyTotal = {
 };
 const emptyDashboard = {
   ...data,
+  requestLogCount: 0,
   totals: emptyTotal,
   coverage: { ...coverage, refreshing: false, unlocatedTotals: emptyTotal },
   kpiDisplay: { cost: "—", requests: "—", tokens: "—", cacheHitRate: "—" },
@@ -969,6 +1071,8 @@ it("keeps KPI, chart axes and all table columns when a successful query is empty
     revision: "1",
     resolvedRange,
     totalCount: 0,
+    page: 1,
+    pageSize: 12,
     rows: [],
     nextCursor: null,
     coverage: emptyDashboard.coverage,
@@ -1025,6 +1129,7 @@ it("keeps application filters but does not display empty success on initial quer
 it("does not claim empty data while request details are still being prepared", async () => {
   api.usageDashboard.mockReset().mockResolvedValue({
     ...emptyDashboard,
+    requestLogCount: null,
     coverage: { ...emptyDashboard.coverage, refreshing: true },
     kpiDisplay: { cost: "$0", requests: "0", tokens: "0", cacheHitRate: "0%" },
   } as never);
@@ -1131,7 +1236,8 @@ it("keeps fresh-filter results readable without unmounting panels and skips load
   expect(kpi.className).not.toContain("invisible");
   expect(kpi.getAttribute("aria-hidden")).not.toBe("true");
   expect(
-    view.container.querySelector('[data-slot="dashboard-chart-region"]')
+    view.container
+      .querySelector('[data-slot="dashboard-chart-region"]')
       ?.getAttribute("aria-busy"),
   ).toBe("true");
   expect(
@@ -1181,9 +1287,14 @@ it("keeps the request table and paging area while first-page and next-page queri
   const pager = view.container.querySelector(
     '[data-slot="dashboard-table"] .min-h-14',
   );
-  expect(pager?.className).toContain("invisible");
+  expect(pager?.className).not.toContain("invisible");
+  expect(screen.getByText("24 records")).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
   await act(async () => {
-    finish(requestPage("loaded-row", "next"));
+    finish(requestPage("loaded-row"));
   });
   await screen.findByText("loaded-row");
   expect(screen.getByRole("table")).toBe(table);
@@ -1192,14 +1303,17 @@ it("keeps the request table and paging area while first-page and next-page queri
   expect(screen.getByText("loaded-row")).toBeTruthy();
   expect(body.querySelector('[data-slot="table-skeleton"]')).toBeNull();
   expect(
-    screen.getByText("loaded-row").closest("tbody")?.getAttribute("aria-hidden"),
+    screen
+      .getByText("loaded-row")
+      .closest("tbody")
+      ?.getAttribute("aria-hidden"),
   ).not.toBe("true");
   expect(
     (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
   await act(async () => {
-    finish(requestPage("next-row"));
+    finish(requestPage("next-row", 2));
   });
   await screen.findByText("next-row");
   expect(screen.getByRole("table")).toBe(table);

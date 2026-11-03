@@ -8,6 +8,7 @@ import { useHost } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
 import { serviceDisplayName } from "@/lib/display";
 import { Button } from "@/components/ui/button";
+import { RequestPagination } from "./request-pagination";
 import {
   BackgroundLoadingBar,
   LoadingBlock,
@@ -36,10 +37,10 @@ export function DashboardTable({
   previousData = false,
   empty = false,
   retry,
-  cursor,
-  next,
-  previous,
-  reset,
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
   requestSort,
   onRequestSort,
 }: {
@@ -54,10 +55,10 @@ export function DashboardTable({
   previousData?: boolean;
   empty?: boolean;
   retry?: () => void;
-  cursor?: string;
-  next: (cursor: string) => void;
-  previous: () => void;
-  reset: () => void;
+  page: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
   requestSort: { sort: "time" | "cost" | "tokens"; direction: "asc" | "desc" };
   onRequestSort: (value: {
     sort: "time" | "cost" | "tokens";
@@ -109,7 +110,6 @@ export function DashboardTable({
   const requestWaiting = tab === "requests" && loading && !requests;
   const showSkeleton = dashboardLoading || requestWaiting;
   const oldResults = dashboardPreviousData || previousData;
-  const hasPagination = Boolean(!empty && (cursor || requests?.nextCursor));
   const requestHeading = (label: string, sort: "time" | "cost" | "tokens") => (
     <button
       type="button"
@@ -173,13 +173,7 @@ export function DashboardTable({
               {!data ? (
                 <LoadingBlock className="inline-block h-3 w-3" />
               ) : item === "requests" ? (
-                empty ? (
-                  0
-                ) : requests?.coverage.incomplete ? (
-                  "—"
-                ) : (
-                  (requests?.totalCount ?? "—")
-                )
+                (data.requestLogCount ?? "—")
               ) : item === "providers" ? (
                 (data?.providerRows.length ?? 0)
               ) : (
@@ -199,8 +193,12 @@ export function DashboardTable({
                   {t("Retry", "重试")}
                 </Button>
               )}
-              {cursor && (
-                <Button size="sm" variant="outline" onClick={reset}>
+              {page > 1 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onPageChange(1)}
+                >
                   {t("Return to first page", "返回首页")}
                 </Button>
               )}
@@ -300,28 +298,26 @@ export function DashboardTable({
               </tbody>
             </table>
           </div>
-          <div
-            aria-hidden={!hasPagination}
-            inert={!hasPagination}
-            className={`flex min-h-14 items-center gap-2 p-3 ${hasPagination ? "" : "invisible"}`}
-          >
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!cursor || oldResults || showSkeleton}
-              onClick={previous}
-            >
-              {t("Previous", "上一页")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!requests?.nextCursor || oldResults || showSkeleton}
-              onClick={() => requests?.nextCursor && next(requests.nextCursor)}
-            >
-              {t("Next", "下一页")}
-            </Button>
-          </div>
+          <RequestPagination
+            totalCount={
+              empty
+                ? 0
+                : requests && !requests.coverage.refreshing
+                  ? requests.totalCount
+                  : (data?.requestLogCount ?? null)
+            }
+            page={page}
+            pageSize={pageSize}
+            disabled={
+              loading ||
+              oldResults ||
+              showSkeleton ||
+              Boolean(error) ||
+              Boolean(requests?.coverage.refreshing)
+            }
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+          />
         </div>
       ) : (
         <div className="relative min-h-[196px]">

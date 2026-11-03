@@ -184,6 +184,7 @@ final class HostWindowUsageTests: XCTestCase {
         let service = fixture.service()
         let initial = try object(await service.handle("window.usage.dashboard", params: ["range": .string("today"), "metric": .string("tokens")]))
         XCTAssertEqual(try object(initial["totals"])["totalTokens"], .number(7))
+        XCTAssertEqual(initial["requestLogCount"], .null)
         XCTAssertEqual(try object(initial["coverage"])["refreshing"], .bool(true))
         XCTAssertEqual(try object(initial["coverage"])["incomplete"], .bool(true))
         try fixture.index(service, records: [UsageRequestRecord(id: "cached", entry: entry)], revision: "ready")
@@ -538,11 +539,13 @@ final class HostWindowUsageTests: XCTestCase {
         let query: [String: HostJSON] = ["range": .string("last24h"), "metric": .string("tokens")]
         let dashboard = try object(await service.handle("window.usage.dashboard", params: query))
         XCTAssertEqual(try object(dashboard["totals"])["totalTokens"], .number(10))
+        XCTAssertEqual(dashboard["requestLogCount"], .number(1))
         let coverage = try object(dashboard["coverage"])
         XCTAssertEqual(coverage["incomplete"], .bool(true))
         XCTAssertEqual(try object(coverage["unlocatedTotals"])["totalTokens"], .number(5))
         let today = try object(await service.handle("window.usage.dashboard", params: ["range": .string("today"), "metric": .string("tokens")]))
         XCTAssertEqual(try object(today["totals"])["totalTokens"], .number(15))
+        XCTAssertEqual(today["requestLogCount"], .number(1), "Historical aggregate requests are not displayable log rows")
         XCTAssertEqual(try object(today["coverage"])["incomplete"], .bool(true))
         let requests = try object(await service.handle("window.usage.requests", params: query))
         XCTAssertEqual(requests["totalCount"], .number(1))
@@ -594,6 +597,7 @@ final class HostWindowUsageTests: XCTestCase {
         try fixture.index(service, records: [UsageRequestRecord(id: "one", entry: entry), UsageRequestRecord(id: "advisor", entry: advisor)], revision: "advisor")
         let advisorDashboard = try object(await service.handle("window.usage.dashboard", params: query))
         XCTAssertEqual(try object(advisorDashboard["totals"])["totalTokens"], .number(13))
+        XCTAssertEqual(advisorDashboard["requestLogCount"], .number(1))
         let advisorRequests = try object(await service.handle("window.usage.requests", params: query))
         XCTAssertEqual(advisorRequests["totalCount"], .number(1))
         fixture.state.usageService.aggregator.load(from: [])
@@ -605,6 +609,68 @@ final class HostWindowUsageTests: XCTestCase {
         XCTAssertEqual(try object(unpricedDashboard["coverage"])["incomplete"], .bool(false))
         XCTAssertEqual(try object(unpricedDashboard["coverage"])["precision"], .string("event"))
         XCTAssertEqual(try object(unpricedDashboard["totals"])["hasUnpricedUsage"], .bool(true))
+    }
+
+    func testNumberedRequestPagesDefaultToTwelveAndClampAfterHistoryShrinks() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex])
+        let day = Calendar.current.startOfDay(for: fixture.now)
+        let entries = (1...31).map { n in
+            UsageEntry(app: n == 31 ? .claude : .codex, conversationKey: "private", model: n <= 20 ? "first" : "second", speed: .standard,
+                day: day, timestamp: fixture.now.addingTimeInterval(Double(-n * 60)), inputTokens: n, outputTokens: 0,
+                cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: Decimal(n), costBreakdown: nil)
+        }
+        fixture.state.usageService.aggregator.ingestLocal(entries)
+        let records = entries.enumerated().map { UsageRequestRecord(id: String($0.offset + 1), entry: $0.element) }
+        let service = fixture.service()
+        try fixture.index(service, records: records, revision: "full")
+        let query: [String: HostJSON] = ["range": .string("last24h"), "metric": .string("tokens")]
+        let dashboard = try object(await service.handle("window.usage.dashboard", params: query))
+        XCTAssertEqual(dashboard["requestLogCount"], .number(30), "Hidden applications must not contribute")
+        let first = try object(await service.handle("window.usage.requests", params: query))
+        XCTAssertEqual(first["page"], .number(1))
+        XCTAssertEqual(first["pageSize"], .number(12))
+        XCTAssertEqual(first["totalCount"], dashboard["requestLogCount"])
+        XCTAssertEqual(try array(first["rows"]).count, 12)
+        var pageQuery = query
+        pageQuery["page"] = .number(3)
+        let third = try object(await service.handle("window.usage.requests", params: pageQuery))
+        XCTAssertEqual(third["page"], .number(3))
+        XCTAssertEqual(try array(third["rows"]).count, 6)
+        XCTAssertEqual(try object(XCTUnwrap(array(third["rows"]).first))["id"], .string("25"))
+        pageQuery["pageSize"] = .number(24)
+        let resized = try object(await service.handle("window.usage.requests", params: pageQuery))
+        XCTAssertEqual(resized["page"], .number(2))
+        XCTAssertEqual(resized["pageSize"], .number(24))
+        XCTAssertEqual(try array(resized["rows"]).count, 6)
+        var filtered = query
+        filtered["modelID"] = .string("first")
+        let filteredDashboard = try object(await service.handle("window.usage.dashboard", params: filtered))
+        XCTAssertEqual(filteredDashboard["requestLogCount"], .number(20))
+        let filteredPage = try object(await service.handle("window.usage.requests", params: filtered))
+        XCTAssertEqual(filteredPage["totalCount"], filteredDashboard["requestLogCount"])
+        let invalidQueries: [[String: HostJSON]] = [
+            ["page": .number(0)], ["page": .number(Decimal(string: "1.5")!)], ["page": .number(10_000_001)],
+            ["pageSize": .number(0)], ["pageSize": .number(501)], ["pageSize": .string("12")],
+            ["page": .number(1), "limit": .number(12)], ["pageSize": .number(12), "cursor": .string("old")],
+        ]
+        for invalid in invalidQueries {
+            await assertError("invalid_params") {
+                try await service.handle("window.usage.requests", params: query.merging(invalid) { _, value in value })
+            }
+        }
+        try fixture.index(service, records: Array(records.prefix(3)), revision: "smaller")
+        let clamped = try object(await service.handle("window.usage.requests", params: pageQuery))
+        XCTAssertEqual(clamped["page"], .number(1))
+        XCTAssertEqual(clamped["totalCount"], .number(3))
+        XCTAssertEqual(try array(clamped["rows"]).count, 3)
+        filtered["modelID"] = .string("missing")
+        filtered["page"] = .number(3)
+        let empty = try object(await service.handle("window.usage.requests", params: filtered))
+        XCTAssertEqual(empty["page"], .number(1))
+        XCTAssertEqual(empty["totalCount"], .number(0))
+        XCTAssertTrue(try array(empty["rows"]).isEmpty)
     }
 
     func testSQLRequestPagesSurviveNewHostAndReadErrorsDoNotReturnEmptySuccess() async throws {

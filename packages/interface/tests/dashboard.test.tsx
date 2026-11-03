@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { DashboardHeatmap, UsageDashboard } from "@ccbar/host-api/window";
 import usage from "../../host-api/fixtures/window-usage.json";
@@ -20,6 +26,7 @@ vi.mock("@/host/host-context", async () => {
 });
 const total = usage["window.usage.overview"].totals;
 const data = {
+  requestLogCount: 2,
   revision: "1",
   resolvedRange: {
     from: "2026-10-01T00:00:00Z",
@@ -208,25 +215,147 @@ it("slides the application selection indicator and honors reduced motion", async
     fixtures.bootstrap.visibleUsageServices = visibleServices;
   }
 });
-it("selects provider and model", () => {
+const openSourceFilter = (
+  selection: { sourceID?: string; modelID?: string } = {},
+) => {
   const source = vi.fn(),
     model = vi.fn();
   wrap(
     <DashboardFilters
       data={data}
       range="last7"
+      {...selection}
       onRange={() => {}}
       onService={() => {}}
       onSource={source}
       onModel={model}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: /Provider \/ model/ }));
-  fireEvent.click(screen.getByRole("button", { name: /Source/ }));
-  fireEvent.click(screen.getByRole("button", { name: /Model2/ }));
-  expect(source).toHaveBeenCalledWith("source");
-  expect(model).toHaveBeenCalledWith("model");
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: selection.sourceID ? /Source/ : /Provider \/ model/,
+    }),
+  );
+  return { source, model };
+};
+const hoverSource = async (name: string) => {
+  const item = screen.getByRole("menuitem", { name, exact: true });
+  fireEvent.mouseMove(item);
+  fireEvent.mouseEnter(item);
+  return screen.findByRole("menu", { name: `${name} models`, exact: true });
+};
+
+it("opens provider models on hover without filtering and selects a child model", async () => {
+  const { source, model } = openSourceFilter();
+  expect(screen.queryByRole("menu", { name: "Source models" })).toBeNull();
+  const submenu = await hoverSource("Source");
+  expect(source).not.toHaveBeenCalled();
+  expect(model).not.toHaveBeenCalled();
+  fireEvent.mouseEnter(submenu);
+  fireEvent.click(within(submenu).getByRole("menuitem", { name: /^Model/ }));
+  expect(source).toHaveBeenCalledExactlyOnceWith("source");
+  expect(model).toHaveBeenCalledExactlyOnceWith("model");
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("menu", { name: "Providers", exact: true }),
+    ).toBeNull(),
+  );
 });
+
+it("selects all models for a clicked provider and clears a prior model", async () => {
+  const { source, model } = openSourceFilter({
+    sourceID: "source",
+    modelID: "model",
+  });
+  fireEvent.click(
+    screen.getByRole("menuitem", { name: "Source", exact: true }),
+  );
+  expect(source).toHaveBeenCalledExactlyOnceWith("source");
+  expect(model).toHaveBeenCalledExactlyOnceWith(undefined);
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("menu", { name: "Providers", exact: true }),
+    ).toBeNull(),
+  );
+});
+
+it("clears both filters when All providers is clicked", async () => {
+  const { source, model } = openSourceFilter({
+    sourceID: "source",
+    modelID: "model",
+  });
+  fireEvent.click(
+    screen.getByRole("menuitem", { name: "All providers", exact: true }),
+  );
+  expect(source).toHaveBeenCalledExactlyOnceWith(undefined);
+  expect(model).toHaveBeenCalledExactlyOnceWith(undefined);
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("menu", { name: "Providers", exact: true }),
+    ).toBeNull(),
+  );
+});
+
+it("offers cross-provider models under All providers on hover", async () => {
+  const { source, model } = openSourceFilter({
+    sourceID: "source",
+    modelID: "model",
+  });
+  const submenu = await hoverSource("All providers");
+  fireEvent.click(within(submenu).getByRole("menuitem", { name: /^Model/ }));
+  expect(source).toHaveBeenCalledExactlyOnceWith(undefined);
+  expect(model).toHaveBeenCalledExactlyOnceWith("model");
+});
+
+it("can select All models from the provider submenu", async () => {
+  const { source, model } = openSourceFilter({
+    sourceID: "source",
+    modelID: "model",
+  });
+  const submenu = await hoverSource("Source");
+  fireEvent.click(
+    within(submenu).getByRole("menuitem", { name: "All models", exact: true }),
+  );
+  expect(source).toHaveBeenCalledExactlyOnceWith("source");
+  expect(model).toHaveBeenCalledExactlyOnceWith(undefined);
+});
+
+it("opens models with the Right Arrow and closes them with Escape without filtering", async () => {
+  const { source, model } = openSourceFilter();
+  const item = screen.getByRole("menuitem", { name: "Source", exact: true });
+  item.focus();
+  fireEvent.keyDown(item, { key: "ArrowRight" });
+  const submenu = await screen.findByRole("menu", {
+    name: "Source models",
+    exact: true,
+  });
+  fireEvent.keyDown(submenu, { key: "Escape" });
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("menu", { name: "Source models", exact: true }),
+    ).toBeNull(),
+  );
+  expect(source).not.toHaveBeenCalled();
+  expect(model).not.toHaveBeenCalled();
+});
+
+it.each(["Enter", " "])(
+  "selects all models on provider activation with %s",
+  async (key) => {
+    const { source, model } = openSourceFilter();
+    const item = screen.getByRole("menuitem", { name: "Source", exact: true });
+    item.focus();
+    fireEvent.keyDown(item, { key });
+    fireEvent.keyUp(item, { key });
+    expect(source).toHaveBeenCalledExactlyOnceWith("source");
+    expect(model).toHaveBeenCalledExactlyOnceWith(undefined);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("menu", { name: "Providers", exact: true }),
+      ).toBeNull(),
+    );
+  },
+);
 it("does not show false hourly zero bars", () => {
   wrap(
     <DashboardChart
@@ -250,9 +379,10 @@ it("sorts aggregate rows and displays unknown values", () => {
       loading={false}
       requestSort={{ sort: "time", direction: "desc" }}
       onRequestSort={() => {}}
-      next={() => {}}
-      previous={() => {}}
-      reset={() => {}}
+      page={1}
+      pageSize={12}
+      onPageChange={() => {}}
+      onPageSizeChange={() => {}}
     />,
   );
   const table = screen.getByRole("table");
@@ -292,6 +422,8 @@ it("requests global sorting from the host and uses host axis labels", () => {
     revision: "1",
     resolvedRange: data.resolvedRange,
     totalCount: 0,
+    page: 1,
+    pageSize: 12,
     rows: [],
     nextCursor: null,
     coverage: data.coverage,
@@ -307,9 +439,10 @@ it("requests global sorting from the host and uses host axis labels", () => {
       loading={false}
       requestSort={{ sort: "time", direction: "desc" }}
       onRequestSort={sort}
-      next={() => {}}
-      previous={() => {}}
-      reset={() => {}}
+      page={1}
+      pageSize={12}
+      onPageChange={() => {}}
+      onPageSizeChange={() => {}}
     />,
   );
   result.rerender(
@@ -324,9 +457,10 @@ it("requests global sorting from the host and uses host axis labels", () => {
           error={null}
           requestSort={{ sort: "time", direction: "desc" }}
           onRequestSort={sort}
-          next={() => {}}
-          previous={() => {}}
-          reset={() => {}}
+          page={1}
+          pageSize={12}
+          onPageChange={() => {}}
+          onPageSizeChange={() => {}}
         />
       </TooltipProvider>
     </LanguageProvider>,

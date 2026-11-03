@@ -210,3 +210,24 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ccb
 - 来源/模型名称完整显示并自然撑开控件，下拉箭头跟随内容末尾；切换日期或选择长模型名只改变自身宽度，不改变三组统一的高度与外观。
 - 新增三组高度、边框、底色、内容自适应宽度和内边距检查，以及指示器实际宽度、平移、5px 圆角、同一 DOM 节点与减少动态效果回归用例；Dashboard 定向 **10 项通过**，完整前端 **13 个文件、84 项测试通过**。`npm run build`（含 TypeScript 检查与 Vite 生产资源构建）通过。
 - 未运行 Swift 测试或完整 Xcode 构建，未启动或替换安装的 App；真实窗口中的三组视觉对齐仍需手动验收。
+
+### 请求日志概览计数与页码分页
+
+日期：2026-11-03。用户确认运行分页相关测试、前端类型检查和指定 Xcode Debug 构建。
+
+- 概览返回可展示日志行数 `requestLogCount`，与明细共用 SQL 筛选及核验条件，只做 COUNT、不读取明细行。页签打开前即可显示数量，明细仍按需查询；索引未就绪返回 null，覆盖不完整仍显示已有日志数，不把只有历史汇总的请求计入日志条数。
+- 明细使用 `page/pageSize` 直接查询，默认每页 12 条，可选 12 / 24 / 48 / 96。底部左侧显示总数与每页条数，右侧显示上一页、可输入页码/总页数和下一页，复用 shadcn/ui 控件。筛选、排序和页大小变化回到第一页，数据库记录减少时收敛到最后有效页；翻页等待或失败保留已有内容。
+- React 定向 **2 个文件、43 项测试通过**，覆盖点击前不加载明细、缺口计数、任意页跳转、每页条数切换、筛选/排序重置、缓存复用、旧响应隔离、失败重试、页码收敛及空态/非法输入。首轮有 1 项因测试未完整模拟 Base UI 选项点击而失败，补上与既有 Select 测试一致的 pointerDown 与带 detail 的 click 后复跑通过，未修改控件实现。
+- Swift 定向 **48 项通过**（Host 20、SQLite 19、请求索引生命周期 9）。覆盖 COUNT 不返回明细行、计数与分页筛选一致、隐藏应用与模型过滤、默认 12 条、直接查询第三页、切换大小、记录减少收敛、空结果、无效参数，以及旧游标兼容。
+- SDK 窗口契约 **7 项通过**；前端 TypeScript 检查通过。指定 Xcode Debug 构建 **BUILD SUCCEEDED**，同时完成 SDK、TypeScript 和 Vite 资源构建。系统默认工具目录为 CommandLineTools，构建按既有流程临时指定 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`，未修改系统设置。`git diff --check` 通过。
+- 日志：`/tmp/ccbar-request-pagination-ui-tests.log`、`/tmp/ccbar-request-pagination-swift-tests.log`、`/tmp/ccbar-request-pagination-sdk-tests.log`、`/tmp/ccbar-request-pagination-debug.log`。Swift 测试编译有其他文件中的既有并发/测试警告，Xcode 有 AppIntents 元数据跳过提示；本次修改的 Swift 文件未报告编译警告。
+- 本轮仅完成自动测试与 Debug 编译，未启动 App 做真实窗口视觉验收，未替换安装的 App、提交、推送或发布。实际宽度下分页栏的排列与交互仍由用户在 Debug 应用中验收。
+
+### 供应商/模型悬停级联选择
+
+日期：2026-11-03。按用户要求，将来源/模型选择器从点击切换双栏改为 shadcn/ui DropdownMenu 子菜单。
+
+- 悬停供应商项展开该来源的模型列表，不改变筛选；直接点击供应商项选择其全部模型、清除已有模型限制并关闭菜单。「全部供应商」点击清除来源与模型限制，悬停展开跨来源模型；模型子菜单保留「全部模型」入口。
+- 复用 Base UI 子菜单的鼠标移入路径与键盘导航，右箭头进入子菜单，Enter/空格激活供应商选择全部模型，Escape 关闭；当前供应商与模型继续显示勾选标记，筛选按钮沿用原有高度与内容自适应宽度。
+- TypeScript 类型检查通过，Dashboard 定向 **2 个文件、51 项测试通过**，覆盖悬停不提交筛选、移入子菜单选模型、父项直接选择全部、跨来源模型、清空筛选、子菜单全部模型及键盘进入/关闭/激活；同时回归仪表盘缓存、分页和错误保留。日志：`/tmp/ccbar-provider-hover-tests.log`。
+- 同步产品需求与界面布局，`git diff --check` 通过。本轮只修改前端交互、相关测试与文档，未重复 Swift 测试或完整 Debug 构建，未启动 App 做真实窗口视觉验收，未提交或推送。

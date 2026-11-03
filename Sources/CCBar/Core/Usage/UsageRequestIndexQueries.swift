@@ -21,6 +21,11 @@ nonisolated extension UsageRequestIndexStore {
         var limit: Int
         var sort: String = "time"
         var descending: Bool = true
+        var clampToLastPage: Bool = false
+
+        func resolvedOffset(totalCount: Int) -> Int {
+            clampToLastPage ? min(offset, max(0, totalCount - 1) / limit * limit) : offset
+        }
     }
     struct Query: Sendable {
         var apps: Set<UsageApp>
@@ -30,6 +35,7 @@ nonisolated extension UsageRequestIndexStore {
         var calendar: Calendar = .current
         var hourly: Bool = false
         var page: Page? = nil
+        var includeRequestCount: Bool = false
     }
     struct QueryResult: Sendable {
         let buckets: [UsageBucket]
@@ -221,12 +227,14 @@ nonisolated extension UsageRequestIndexStore {
         }
         var rows: [Row] = []
         var total = 0
-        if let page = q.page {
-            let pageSelection = "FROM requests r JOIN verified v ON \(Self.partitionJoin) WHERE v.accepted=1 AND r.timestamp>=? AND r.timestamp<? AND r.requests>0"
+        let pageSelection = "FROM requests r JOIN verified v ON \(Self.partitionJoin) WHERE v.accepted=1 AND r.timestamp>=? AND r.timestamp<? AND r.requests>0"
+        if q.includeRequestCount || q.page != nil {
             let count = try db.prepare("SELECT COUNT(*) \(pageSelection)")
             defer { sqlite3_finalize(count) }
             try db.bind(rangeValues, to: count)
             if try db.step(count) { total = Int(sqlite3_column_int64(count, 0)) }
+        }
+        if let page = q.page {
             let order = switch page.sort {
             case "cost": "COALESCE(r.cost,'0') COLLATE DECIMAL"
             case "tokens": "(r.input+r.output+r.cache_read+r.cache_creation)"
@@ -235,7 +243,7 @@ nonisolated extension UsageRequestIndexStore {
             let columns = "r.id,r.conversation_hash,r.app,r.model,r.speed,r.day,r.timestamp,r.input,r.output,r.cache_read,r.cache_creation,r.requests,r.cost,r.cost_input,r.cost_output,r.cost_read,r.cost_creation,r.timing"
             let statement = try db.prepare("SELECT \(columns) \(pageSelection) ORDER BY \(order) \(page.descending ? "DESC" : "ASC"),r.id ASC,r.app ASC LIMIT ? OFFSET ?")
             defer { sqlite3_finalize(statement) }
-            try db.bind(rangeValues + [.integer(Int64(page.limit)), .integer(Int64(page.offset))], to: statement)
+            try db.bind(rangeValues + [.integer(Int64(page.limit)), .integer(Int64(page.resolvedOffset(totalCount: total)))], to: statement)
             while try db.step(statement) { rows.append(try readRow(statement)) }
         }
         return QueryResult(buckets: buckets, partitions: partitions, pendingPartitions: pending,

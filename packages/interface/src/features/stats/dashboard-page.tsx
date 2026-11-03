@@ -4,7 +4,6 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { HostError } from "@ccbar/host-api";
 import type {
   DashboardHeatmap,
   DashboardMetric,
@@ -69,8 +68,11 @@ function DashboardContent({
   const [activeTab, setActiveTab] = useState<
     "requests" | "providers" | "models"
   >("providers");
-  const [cursors, setCursors] = useState<string[]>([]);
-  const cursor = cursors.at(-1);
+  const [pagination, setPagination] = useState({
+    key: "",
+    page: 1,
+    pageSize: 12,
+  });
   const [requestSort, setRequestSort] = useState<{
     sort: "time" | "cost" | "tokens";
     direction: "asc" | "desc";
@@ -91,22 +93,11 @@ function DashboardContent({
   const key = JSON.stringify(query);
   const requestQuery = { ...query, metric: "tokens" as const };
   const requestKey = JSON.stringify(requestQuery);
-  const requestIdentity = JSON.stringify([
-    requestKey,
-    activeTab,
-    cursor,
-    requestSort.sort,
-    requestSort.direction,
-  ]);
-  const currentRequestIdentity = useRef(requestIdentity);
-  currentRequestIdentity.current = requestIdentity;
-  const requestGeneration = useRef(0);
-  useEffect(
-    () => () => {
-      requestGeneration.current += 1;
-    },
-    [],
-  );
+  // Reset synchronously on filter changes, before issuing a request for the new key.
+  const page = pagination.key === requestKey ? pagination.page : 1;
+  const pageSize = pagination.pageSize;
+  const setPage = (value: number) =>
+    setPagination({ key: requestKey, page: value, pageSize });
   const dashboard = useQuery({
     queryKey: ["dashboard", key],
     queryFn: () => api.usageDashboard(query),
@@ -115,41 +106,12 @@ function DashboardContent({
     refetchIntervalInBackground: false,
   });
   const requests = useQuery({
-    queryKey: ["requests", requestKey, cursor, requestSort],
+    queryKey: ["requests", requestKey, page, pageSize, requestSort],
     enabled: activeTab === "requests",
     placeholderData: keepPreviousData,
-    queryFn: ({ signal }) => {
-      const generation = ++requestGeneration.current;
-      const identity = requestIdentity;
-      return api
-        .usageRequests({
-          ...requestQuery,
-          ...requestSort,
-          ...(cursor && { cursor }),
-        })
-        .catch((reason) => {
-          if (
-            cursor &&
-            !signal.aborted &&
-            reason instanceof HostError &&
-            reason.code === "invalid_cursor" &&
-            currentRequestIdentity.current === identity &&
-            requestGeneration.current === generation
-          ) {
-            // A database revision can invalidate the whole pagination chain.
-            // Returning to a fresh cached first page would reuse its old cursor.
-            void queryClient.invalidateQueries({
-              queryKey: ["requests", requestKey, undefined, requestSort],
-              exact: true,
-              refetchType: "none",
-            });
-            setCursors([]);
-          }
-          throw reason;
-        });
-    },
-    refetchInterval:
-      !cursor && (range !== "custom" || custom?.followNow) ? 60000 : false,
+    queryFn: () =>
+      api.usageRequests({ ...requestQuery, ...requestSort, page, pageSize }),
+    refetchInterval: range !== "custom" || custom?.followNow ? 60000 : false,
     refetchIntervalInBackground: false,
   });
   const dashboardResult = useRetainedResult(dashboard);
@@ -159,24 +121,30 @@ function DashboardContent({
     setModel(undefined);
   }, [service]);
   useEffect(() => {
-    setCursors([]);
+    setPagination((current) =>
+      current.key === requestKey
+        ? current
+        : { ...current, key: requestKey, page: 1 },
+    );
   }, [requestKey]);
   useEffect(() => {
-    if (
-      cursor &&
-      !requests.isPlaceholderData &&
-      !dashboard.isPlaceholderData &&
-      requests.data &&
-      dashboard.data &&
-      requests.data.revision !== dashboard.data.revision
-    )
-      setCursors([]);
+    const result = requests.data;
+    if (!requests.isPlaceholderData && result && result.page !== page) {
+      // The host clamps pages after records disappear. Reuse that exact response.
+      queryClient.setQueryData(
+        ["requests", requestKey, result.page, pageSize, requestSort],
+        result,
+      );
+      setPagination({ key: requestKey, page: result.page, pageSize });
+    }
   }, [
-    cursor,
+    page,
+    pageSize,
+    requestKey,
+    requestSort,
     requests.data,
     requests.isPlaceholderData,
-    dashboard.data,
-    dashboard.isPlaceholderData,
+    queryClient,
   ]);
   const labels = [
     t("Cost", "总成本"),
@@ -372,7 +340,7 @@ function DashboardContent({
               onTabChange={setActiveTab}
               requestSort={requestSort}
               onRequestSort={(value) => {
-                setCursors([]);
+                setPage(1);
                 setRequestSort(value);
               }}
               requests={requestResult.data ?? null}
@@ -381,10 +349,12 @@ function DashboardContent({
               previousData={requestResult.isPreviousData}
               error={requests.error ? errorMessage(requests.error) : null}
               retry={() => void requests.refetch()}
-              cursor={cursor}
-              next={(value) => setCursors((old) => [...old, value])}
-              previous={() => setCursors((old) => old.slice(0, -1))}
-              reset={() => setCursors([])}
+              page={page}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={(value) =>
+                setPagination({ key: requestKey, page: 1, pageSize: value })
+              }
             />
           </div>
         </div>

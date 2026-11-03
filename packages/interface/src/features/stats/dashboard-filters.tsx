@@ -5,6 +5,7 @@ import {
   ChevronRight,
   ChevronDown,
   ListFilter,
+  Check,
 } from "lucide-react";
 import type {
   DashboardQuery,
@@ -17,14 +18,21 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { HostIcon } from "@/components/host-icon";
 import { ServiceIcon } from "@/components/service-icon";
 import { useHost } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
 import { brandColor, serviceDisplayName } from "@/lib/display";
 
-const selectionLayer =
-  "relative isolate before:absolute before:inset-0 before:-z-10 before:rounded before:bg-muted before:opacity-0 motion-safe:before:transition-opacity motion-safe:before:duration-150 motion-safe:before:ease-[ease]";
 const filterControl =
   "h-8 rounded-md border border-border bg-background bg-clip-padding text-[13px] dark:border-input dark:bg-input/30";
 type Range = DashboardQuery["range"];
@@ -64,7 +72,6 @@ export function DashboardFilters({
   ];
   const [dateOpen, setDateOpen] = useState(false);
   const [cascadeOpen, setCascadeOpen] = useState(false);
-  const [focusedSource, setFocusedSource] = useState<string>();
   const now = civilInput(new Date(), bootstrap.timeZone);
   const [from, setFrom] = useState(now);
   const [to, setTo] = useState(now);
@@ -123,10 +130,20 @@ export function DashboardFilters({
         .slice(0, 7),
     );
   const selectedSource = data.facets.sources.find((x) => x.id === sourceID);
-  const chosenFacet = data.facets.sources.find((x) => x.id === focusedSource);
-  const models = focusedSource
-    ? (chosenFacet?.models ?? [])
-    : data.facets.models;
+  const sourceGroups = [
+    {
+      id: undefined,
+      title: t("All providers", "全部供应商"),
+      requestCount: undefined,
+      models: data.facets.models,
+    },
+    ...data.facets.sources,
+  ];
+  const selectSourceModel = (source?: string, model?: string) => {
+    onSource(source);
+    onModel(model);
+    setCascadeOpen(false);
+  };
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Popover
@@ -394,14 +411,8 @@ export function DashboardFilters({
           );
         })}
       </div>
-      <Popover
-        open={cascadeOpen}
-        onOpenChange={(open) => {
-          setCascadeOpen(open);
-          if (open) setFocusedSource(sourceID);
-        }}
-      >
-        <PopoverTrigger
+      <DropdownMenu open={cascadeOpen} onOpenChange={setCascadeOpen}>
+        <DropdownMenuTrigger
           render={
             <Button
               variant="outline"
@@ -416,72 +427,85 @@ export function DashboardFilters({
             {modelID ? ` · ${modelID}` : ""}
           </span>
           <ChevronDown className="ml-auto size-4" />
-        </PopoverTrigger>
-        <PopoverContent
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
           align="start"
-          className="w-[480px] max-w-[calc(100vw-40px)] p-1"
+          aria-label={t("Providers", "供应商")}
+          className="w-max min-w-56 max-w-[calc(100vw-24px)]"
         >
-          <div className="grid grid-cols-2 gap-1">
-            <div className="border-r pr-1">
-              <button
-                className={`w-full rounded px-2 py-2 text-left [@media(hover:hover)_and_(pointer:fine)]:hover:opacity-75 ${selectionLayer} ${!focusedSource ? "before:opacity-100" : ""}`}
-                aria-pressed={!focusedSource}
-                onClick={() => {
-                  setFocusedSource(undefined);
+          {sourceGroups.map((group) => (
+            <DropdownMenuSub key={group.id ?? "all"}>
+              <DropdownMenuSubTrigger
+                openOnHover
+                label={group.title}
+                aria-label={group.title}
+                className="text-[13px]"
+                onClick={(event) => {
+                  // A parent click selects its entire group; hover/Right Arrow opens it.
+                  event.preventBaseUIHandler();
+                  selectSourceModel(group.id);
                 }}
               >
-                {!sourceID && "✓ "} {t("All providers", "全部供应商")}{" "}
-                <span className="float-right">›</span>
-              </button>
-              {data.facets.sources.map((x) => (
-                <button
-                  key={x.id}
-                  className={`w-full rounded px-2 py-2 text-left [@media(hover:hover)_and_(pointer:fine)]:hover:opacity-75 ${selectionLayer} ${focusedSource === x.id ? "before:opacity-100" : ""}`}
-                  aria-pressed={focusedSource === x.id}
-                  onClick={() => {
-                    setFocusedSource(x.id);
-                  }}
-                >
-                  {sourceID === x.id && "✓ "}
-                  {x.title}
-                  <span className="float-right">
-                    {x.requestCount.toLocaleString()} ›
+                <Check
+                  aria-hidden="true"
+                  className={
+                    sourceID === group.id ? "size-3.5" : "invisible size-3.5"
+                  }
+                />
+                <span className="min-w-0 flex-1 break-words">
+                  {group.title}
+                </span>
+                {group.requestCount !== undefined && (
+                  <span className="pl-2 text-muted-foreground tabular-nums">
+                    {group.requestCount.toLocaleString()}
                   </span>
-                </button>
-              ))}
-            </div>
-            <div>
-              <button
-                className="w-full rounded px-2 py-2 text-left hover:bg-muted"
-                onClick={() => {
-                  onSource(focusedSource);
-                  onModel(undefined);
-                  setCascadeOpen(false);
-                }}
+                )}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent
+                aria-label={t(`${group.title} models`, `${group.title}的模型`)}
+                className="min-w-56 max-w-[calc(100vw-24px)]"
               >
-                {!modelID && "✓ "} {t("All models", "全部模型")}
-              </button>
-              {models.map((x) => (
-                <button
-                  key={x.id}
-                  className="w-full rounded px-2 py-2 text-left hover:bg-muted"
-                  onClick={() => {
-                    onSource(focusedSource);
-                    onModel(x.id);
-                    setCascadeOpen(false);
-                  }}
+                <DropdownMenuItem
+                  className="text-[13px]"
+                  onClick={() => selectSourceModel(group.id)}
                 >
-                  {modelID === x.id && "✓ "}
-                  {x.title}
-                  <span className="float-right">
-                    {x.requestCount.toLocaleString()}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </PopoverContent>
-      </Popover>
+                  <Check
+                    aria-hidden="true"
+                    className={
+                      sourceID === group.id && !modelID
+                        ? "size-3.5"
+                        : "invisible size-3.5"
+                    }
+                  />
+                  {t("All models", "全部模型")}
+                </DropdownMenuItem>
+                {group.models.map((model) => (
+                  <DropdownMenuItem
+                    key={model.id}
+                    className="text-[13px]"
+                    onClick={() => selectSourceModel(group.id, model.id)}
+                  >
+                    <Check
+                      aria-hidden="true"
+                      className={
+                        sourceID === group.id && modelID === model.id
+                          ? "size-3.5"
+                          : "invisible size-3.5"
+                      }
+                    />
+                    <span className="min-w-0 flex-1 break-words">
+                      {model.title}
+                    </span>
+                    <span className="pl-2 text-muted-foreground tabular-nums">
+                      {model.requestCount.toLocaleString()}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
