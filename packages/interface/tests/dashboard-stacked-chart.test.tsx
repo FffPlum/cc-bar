@@ -124,7 +124,7 @@ it("shares the heatmap card across date cells", async () => {
   render(
     <LanguageProvider language="en">
       <TooltipProvider>
-        <HeatmapBlocks blocks={[block]} onOlder={() => {}} loading={false} />
+        <HeatmapBlocks blocks={[block]} />
       </TooltipProvider>
     </LanguageProvider>,
   );
@@ -148,6 +148,34 @@ it("shares the heatmap card across date cells", async () => {
   expect(
     document.querySelectorAll('[data-slot="chart-data-tooltip"]'),
   ).toHaveLength(1);
+});
+
+it("keeps the old and new chart mounted together during a view crossfade", async () => {
+  const block = {
+    fromDay: "2026-11-02",
+    toDay: "2027-11-08",
+    days: [{ day: "2026-11-02", totals, value: 100, label: "100", normalizedValue: 1 }],
+    totals,
+    nextBeforeDay: null,
+  } as DashboardHeatmap;
+  const result = render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <HeatmapBlocks blocks={[block]} today="2026-11-02" />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  const daily = result.container.querySelector('[data-slot="daily-token-chart"]');
+  fireEvent.click(screen.getByRole("tab", { name: "Weekly" }));
+  expect(result.container.querySelector('[data-slot="daily-token-chart"]')).toBe(daily);
+  const weekly = result.container.querySelector('[data-slot="weekly-token-chart"]');
+  expect(weekly).toBeTruthy();
+  for (const chart of [daily, weekly]) {
+    expect(chart?.closest('.cc-chart-view-transition-content')?.hasAttribute("inert")).toBe(true);
+  }
+  await waitFor(() => expect(daily?.isConnected).toBe(false));
+  expect(result.container.querySelector('[data-slot="weekly-token-chart"]')).toBe(weekly);
+  expect(weekly?.closest('.cc-chart-view-transition-content')?.hasAttribute("inert")).toBe(false);
 });
 afterEach(() => {
   bootstrap.appearance = "light";

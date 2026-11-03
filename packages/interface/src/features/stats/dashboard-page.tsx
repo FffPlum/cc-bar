@@ -406,27 +406,13 @@ export function HeatmapResource({
   const { api } = useHost();
   const t = useTranslation();
   const [blocks, setBlocks] = useState<DashboardHeatmap[]>([]);
-  const [pageCount, setPageCount] = useState(1);
   const heatmap = useQuery({
-    queryKey: ["heatmap", query, pageCount, revision, today],
+    queryKey: ["heatmap", query, revision, today],
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }) => {
-      const results: DashboardHeatmap[] = [];
-      let before: string | undefined;
-      const seen = new Set<string>();
-      for (let i = 0; i < pageCount; i++) {
-        const result = await api.usageHeatmap({
-          ...query,
-          ...(before && { beforeDay: before }),
-        });
-        if (signal.aborted) throw signal.reason;
-        results.push(result);
-        const next = result.nextBeforeDay;
-        if (!next || seen.has(next)) break;
-        seen.add(next);
-        before = next;
-      }
-      return results;
+      const result = await api.usageHeatmap(query);
+      if (signal.aborted) throw signal.reason;
+      return [result];
     },
   });
   useEffect(() => {
@@ -458,12 +444,7 @@ export function HeatmapResource({
       )}
       <div aria-busy={heatmap.isFetching}>
         {visibleBlocks.length > 0 && (
-          <HeatmapBlocks
-            blocks={visibleBlocks}
-            onOlder={() => setPageCount((old) => old + 1)}
-            loading={heatmap.isFetching}
-            today={today}
-          />
+          <HeatmapBlocks blocks={visibleBlocks} today={today} />
         )}
         {heatmap.isLoading && visibleBlocks.length === 0 && (
           <ChartSkeleton heatmap />

@@ -20,6 +20,22 @@ const coverage = {
   unlocatedTotals: total,
   message: null,
 };
+function heatmapWindow(fromDay: string, toDay: string) {
+  return {
+    fromDay,
+    toDay,
+    timeZone: "UTC",
+    days: [
+      { day: fromDay, totals: total, value: 1, label: "1", normalizedValue: 1 },
+    ],
+    totals: total,
+    nextBeforeDay: fromDay,
+    coverage,
+    status,
+  };
+}
+const heatmapDayLabel = (day: string) =>
+  `${day}: ${total.totalTokens.toLocaleString("en")} Tokens`;
 const resolvedRange = {
   from: "2026-01-01T00:00:00Z",
   to: "2026-11-01T00:00:00Z",
@@ -196,18 +212,10 @@ it("shows the available log count before opening incomplete request history", as
   );
   api.usageDashboard.mockReset().mockResolvedValue(data);
 });
-it("appends older heatmap windows", async () => {
-  api.usageHeatmap.mockReset();
-  api.usageHeatmap.mockImplementation(async (q: any) => ({
-    ...{ timeZone: "UTC", days: [], totals: total, coverage, status },
-    ...(q.beforeDay
-      ? { fromDay: "2024-01-01", toDay: "2025-01-06", nextBeforeDay: null }
-      : {
-          fromDay: "2025-01-06",
-          toDay: "2026-01-12",
-          nextBeforeDay: "2025-01-06",
-        }),
-  }));
+it("shows only the latest 53-week window even when older history is available", async () => {
+  api.usageHeatmap
+    .mockReset()
+    .mockResolvedValue(heatmapWindow("2025-01-06", "2026-01-12") as never);
   render(
     <LanguageProvider language="en">
       <TooltipProvider>
@@ -223,30 +231,25 @@ it("appends older heatmap windows", async () => {
       exact: true,
     }),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
-  await screen.findByText(/2024-01-01/);
-  expect(screen.getByText(/2025-01-06/)).toBeTruthy();
-  expect(api.usageHeatmap.mock.lastCall?.[0]).toMatchObject({
-    beforeDay: "2025-01-06",
-  });
+  await screen.findByLabelText(heatmapDayLabel("2025-01-06"));
+  expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+  expect(api.usageHeatmap).toHaveBeenCalledTimes(1);
+  expect(api.usageHeatmap.mock.lastCall?.[0]).not.toHaveProperty("beforeDay");
 });
-it("keeps older windows and reloads them when revision changes", async () => {
+it("keeps the latest window visible and refreshes only that window when revision changes", async () => {
+  const { act } = await import("@testing-library/react");
   const { HeatmapResource } = await import("@/features/stats/dashboard-page");
-  api.usageHeatmap.mockReset();
-  api.usageHeatmap.mockImplementation(async (q: any) => ({
-    timeZone: "UTC",
-    days: [],
-    totals: total,
-    coverage,
-    status,
-    ...(q.beforeDay
-      ? { fromDay: "2024-01-01", toDay: "2025-01-06", nextBeforeDay: null }
-      : {
-          fromDay: "2025-01-06",
-          toDay: "2026-01-12",
-          nextBeforeDay: "2025-01-06",
+  const block = heatmapWindow("2025-01-06", "2026-01-12");
+  let finish!: (value: any) => void;
+  api.usageHeatmap
+    .mockReset()
+    .mockResolvedValueOnce(block as never)
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
         }),
-  }));
+    );
   const query = { range: "all", metric: "tokens" } as const;
   const element = (revision: string) => (
     <LanguageProvider language="en">
@@ -262,18 +265,18 @@ it("keeps older windows and reloads them when revision changes", async () => {
     </LanguageProvider>
   );
   const view = render(element("1"));
-  fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
-  await screen.findByText(/2024-01-01/);
+  const cell = await screen.findByLabelText(heatmapDayLabel("2025-01-06"));
   api.usageHeatmap.mockClear();
   view.rerender(element("2"));
-  expect(screen.getByText(/2024-01-01/)).toBeTruthy();
-  await waitFor(() => expect(api.usageHeatmap).toHaveBeenCalledTimes(2));
-  expect(screen.getByText(/2024-01-01/)).toBeTruthy();
-  expect(
-    api.usageHeatmap.mock.calls.some(
-      (args: any[]) => args[0].beforeDay === "2025-01-06",
-    ),
-  ).toBe(true);
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
+  await waitFor(() => expect(api.usageHeatmap).toHaveBeenCalledTimes(1));
+  expect(api.usageHeatmap.mock.lastCall?.[0]).toEqual(query);
+  await act(async () => {
+    finish(block);
+  });
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
+  expect(api.usageHeatmap).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
 });
 it("refreshes moving presets on the visible minute timer", async () => {
   const { act } = await import("@testing-library/react");
@@ -296,24 +299,15 @@ it("refreshes moving presets on the visible minute timer", async () => {
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
-it("keeps existing heatmap blocks and retries a failed refresh", async () => {
+it("keeps the latest heatmap window and retries a failed refresh", async () => {
   const { HeatmapResource } = await import("@/features/stats/dashboard-page");
   const query = { range: "all", metric: "tokens" } as const;
-  const block = {
-    fromDay: "2025-01-06",
-    toDay: "2026-01-12",
-    timeZone: "UTC",
-    days: [],
-    totals: total,
-    nextBeforeDay: null,
-    coverage,
-    status,
-  };
+  const block = heatmapWindow("2025-01-06", "2026-01-12");
   api.usageHeatmap.mockReset();
   api.usageHeatmap
-    .mockResolvedValueOnce(block)
+    .mockResolvedValueOnce(block as never)
     .mockRejectedValueOnce(new Error("offline"))
-    .mockResolvedValueOnce(block);
+    .mockResolvedValueOnce(block as never);
   const viewFor = (revision: string) => (
     <LanguageProvider language="en">
       <TooltipProvider>
@@ -328,13 +322,13 @@ it("keeps existing heatmap blocks and retries a failed refresh", async () => {
     </LanguageProvider>
   );
   const view = render(viewFor("1"));
-  await screen.findByText(/2025-01-06/);
+  const cell = await screen.findByLabelText(heatmapDayLabel("2025-01-06"));
   view.rerender(viewFor("2"));
   await screen.findByRole("alert");
-  expect(screen.getByText(/2025-01-06/)).toBeTruthy();
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-  expect(screen.getByText(/2025-01-06/)).toBeTruthy();
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
 });
 it("ignores a failed request from an earlier filter after another page is open", async () => {
   api.usageDashboard.mockReset().mockResolvedValue(data);
@@ -406,35 +400,16 @@ it("ignores a failed request from an earlier filter after another page is open",
   });
   expect(api.usageRequests.mock.calls.length).toBe(count);
 });
-it("follows the shifted pagination chain across Monday without losing a week", async () => {
+it("shifts only the latest 53-week window on Monday without following older pages", async () => {
   const { HeatmapResource } = await import("@/features/stats/dashboard-page");
   const query = { range: "all", metric: "tokens" } as const;
   let monday = false;
   api.usageHeatmap.mockReset();
-  api.usageHeatmap.mockImplementation(async (q: any) => ({
-    timeZone: "UTC",
-    days: [],
-    totals: total,
-    coverage,
-    status,
-    ...(!q.beforeDay
-      ? monday
-        ? {
-            fromDay: "2025-01-13",
-            toDay: "2026-01-19",
-            nextBeforeDay: "2025-01-13",
-          }
-        : {
-            fromDay: "2025-01-06",
-            toDay: "2026-01-12",
-            nextBeforeDay: "2025-01-06",
-          }
-      : {
-          fromDay: q.beforeDay === "2025-01-13" ? "2024-01-08" : "2024-01-01",
-          toDay: q.beforeDay,
-          nextBeforeDay: null,
-        }),
-  }));
+  api.usageHeatmap.mockImplementation(async () =>
+    (monday
+      ? heatmapWindow("2025-01-13", "2026-01-19")
+      : heatmapWindow("2025-01-06", "2026-01-12")) as never,
+  );
   const viewFor = (today: string) => (
     <LanguageProvider language="en">
       <TooltipProvider>
@@ -445,17 +420,16 @@ it("follows the shifted pagination chain across Monday without losing a week", a
     </LanguageProvider>
   );
   const view = render(viewFor("2026-01-11"));
-  fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
-  await screen.findByText(/2024-01-01/);
+  await screen.findByLabelText(heatmapDayLabel("2025-01-06"));
   monday = true;
   api.usageHeatmap.mockClear();
   view.rerender(viewFor("2026-01-12"));
-  expect(screen.getByText(/2024-01-01/)).toBeTruthy();
-  await screen.findByText(/2024-01-08/);
-  expect(api.usageHeatmap.mock.calls[1]?.[0]).toMatchObject({
-    beforeDay: "2025-01-13",
-  });
-  expect(screen.queryByText(/2024-01-01/)).toBeNull();
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBeTruthy();
+  await screen.findByLabelText(heatmapDayLabel("2025-01-13"));
+  expect(api.usageHeatmap).toHaveBeenCalledTimes(1);
+  expect(api.usageHeatmap.mock.lastCall?.[0]).toEqual(query);
+  expect(screen.queryByLabelText(heatmapDayLabel("2025-01-06"))).toBeNull();
+  expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
 });
 it("keeps filters mounted while switching, then serves a revisited key from cache", async () => {
   let finish!: (v: any) => void;
@@ -1347,20 +1321,11 @@ it("keeps the request table and paging area while first-page and next-page queri
   expect(body.querySelector('[data-slot="table-skeleton"]')).toBeNull();
 });
 
-it("uses a full heatmap skeleton on first load and retains expanded blocks for a background reload", async () => {
+it("uses a full heatmap skeleton on first load and retains the latest window during a background reload", async () => {
   const { act } = await import("@testing-library/react");
   const { HeatmapResource } = await import("@/features/stats/dashboard-page");
   let finish!: (value: any) => void;
-  const block = {
-    fromDay: "2025-01-06",
-    toDay: "2026-01-12",
-    timeZone: "UTC",
-    days: [],
-    totals: total,
-    nextBeforeDay: null,
-    coverage,
-    status,
-  };
+  const block = heatmapWindow("2025-01-06", "2026-01-12");
   api.usageHeatmap.mockReset().mockImplementation(
     () =>
       new Promise((resolve) => {
@@ -1389,13 +1354,12 @@ it("uses a full heatmap skeleton on first load and retains expanded blocks for a
   await act(async () => {
     finish(block);
   });
-  await screen.findByText(/2025-01-06/);
-  const title = screen.getByText(/2025-01-06/);
+  const cell = await screen.findByLabelText(heatmapDayLabel("2025-01-06"));
   expect(
     view.container.querySelector('[data-slot="heatmap-skeleton"]'),
   ).toBeNull();
   view.rerender(element("2"));
-  expect(screen.getByText(/2025-01-06/)).toBe(title);
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
   expect(
     view.container.querySelector('[data-slot="heatmap-skeleton"]'),
   ).toBeNull();
@@ -1405,30 +1369,21 @@ it("uses a full heatmap skeleton on first load and retains expanded blocks for a
   await act(async () => {
     finish(block);
   });
-  expect(screen.getByText(/2025-01-06/)).toBe(title);
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
 });
 
 it("keeps the rendered heatmap while a new application filter is pending", async () => {
   const React = await import("react");
   const { act } = await import("@testing-library/react");
   let finish!: (value: any) => void;
-  const block = {
-    fromDay: "2025-01-06",
-    toDay: "2026-01-12",
-    timeZone: "UTC",
-    days: [],
-    totals: total,
-    nextBeforeDay: null,
-    coverage,
-    status,
-  };
+  const block = heatmapWindow("2025-01-06", "2026-01-12");
   api.usageDashboard.mockReset().mockResolvedValue(data);
   api.usageHeatmap.mockReset().mockImplementation((query: any) =>
     query.service === "codex"
       ? new Promise((resolve) => {
           finish = resolve;
         })
-      : Promise.resolve(block),
+      : Promise.resolve(block as never),
   );
   function View() {
     const [service, setService] =
@@ -1450,19 +1405,20 @@ it("keeps the rendered heatmap while a new application filter is pending", async
       exact: true,
     }),
   );
-  const title = await screen.findByText(/2025-01-06/);
+  const cell = await screen.findByLabelText(heatmapDayLabel("2025-01-06"));
   fireEvent.click(screen.getByRole("button", { name: "Codex" }));
   await waitFor(() =>
     expect(api.usageHeatmap.mock.lastCall?.[0]).toMatchObject({
       service: "codex",
     }),
   );
-  expect(screen.getByText(/2025-01-06/)).toBe(title);
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
   expect(
     view.container.querySelector('[data-slot="heatmap-skeleton"]'),
   ).toBeNull();
   await act(async () => {
-    finish({ ...block, fromDay: "2024-01-01" });
+    finish(heatmapWindow("2025-01-13", "2026-01-19"));
   });
-  await screen.findByText(/2024-01-01/);
+  await screen.findByLabelText(heatmapDayLabel("2025-01-13"));
+  expect(screen.queryByLabelText(heatmapDayLabel("2025-01-06"))).toBeNull();
 });

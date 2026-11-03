@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import "./dashboard-heatmap.css";
 
 export function LoadingBlock({ className }: { className: string }) {
   return (
@@ -21,36 +22,30 @@ export function ChartSkeleton({ heatmap = false }: { heatmap?: boolean }) {
       <div
         aria-hidden="true"
         data-slot="heatmap-skeleton"
-        className="min-w-0 space-y-5 p-4"
+        className="min-w-0 space-y-3 p-4"
       >
-        <div>
-          <LoadingBlock className="h-5 w-32" />
-          <LoadingBlock className="h-5 w-56" />
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <LoadingBlock className="h-5 w-32" />
+            <LoadingBlock className="h-5 w-56" />
+          </div>
+          <LoadingBlock className="h-8 w-48 rounded-lg" />
         </div>
-        <div>
-          <div className="min-w-0">
-            <div className="w-full min-w-0 max-w-[1040px]">
-              <div className="ml-9 flex h-4 min-w-0 justify-between">
-                {[0, 1, 2, 3, 4, 5].map((index) => (
-                  <LoadingBlock key={index} className="h-2 w-5" />
-                ))}
-              </div>
-              <div className="flex gap-1">
-                <div className="flex w-8 shrink-0 flex-col justify-between">
-                  {[0, 1, 2, 3].map((index) => (
-                    <LoadingBlock key={index} className="h-2 w-5" />
-                  ))}
-                </div>
-                <div className="grid min-w-0 flex-1 grid-flow-col grid-rows-7 grid-cols-[repeat(53,minmax(0,1fr))] gap-[3px]">
-                  {Array.from({ length: 371 }, (_, index) => (
-                    <LoadingBlock
-                      key={index}
-                      className="aspect-square w-full min-w-0 max-h-4 rounded-[3px]"
-                    />
-                  ))}
-                </div>
-              </div>
+        <div className="cc-token-chart-window">
+          <div className="cc-token-chart-plot">
+            <div className="grid h-full w-full min-w-0 grid-flow-col grid-rows-7 grid-cols-[repeat(53,minmax(0,1fr))] gap-[3px]">
+              {Array.from({ length: 371 }, (_, index) => (
+                <LoadingBlock
+                  key={index}
+                  className="aspect-square w-full min-w-0 max-h-4 rounded-[3px]"
+                />
+              ))}
             </div>
+          </div>
+          <div className="mt-1 flex h-5 min-w-0 justify-between">
+            {[0, 1, 2, 3, 4, 5].map((index) => (
+              <LoadingBlock key={index} className="h-2 w-5" />
+            ))}
           </div>
         </div>
       </div>

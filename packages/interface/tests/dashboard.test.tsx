@@ -515,8 +515,7 @@ it("sorts aggregate rows and displays unknown values", () => {
   expect(within(table).getAllByRole("row")[1]?.textContent).toContain("A");
   expect(within(table).getAllByRole("row")[1]?.textContent).toContain("—");
 });
-it("loads an older heatmap window", () => {
-  const older = vi.fn();
+it("shows only the latest heatmap window without older pagination", () => {
   const block = {
     fromDay: "2025-01-06",
     toDay: "2026-01-12",
@@ -535,9 +534,15 @@ it("loads an older heatmap window", () => {
     coverage: data.coverage,
     status: data.status,
   } as DashboardHeatmap;
-  wrap(<HeatmapBlocks blocks={[block]} onOlder={older} loading={false} />);
-  fireEvent.click(screen.getByRole("button", { name: "Load older" }));
-  expect(older).toHaveBeenCalledWith("2025-01-06");
+  const older = {
+    ...block,
+    fromDay: "2024-01-01",
+    toDay: "2025-01-06",
+    days: [{ ...block.days[0]!, day: "2024-01-01" }],
+  };
+  wrap(<HeatmapBlocks blocks={[older, block]} />);
+  expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+  expect(screen.queryByLabelText(/^2024-01-01:/)).toBeNull();
   expect(
     screen.getByLabelText(`2025-01-06: ${total.totalTokens.toLocaleString("en")} Tokens`),
   ).toBeTruthy();
@@ -710,12 +715,10 @@ it("colors raw daily Tokens continuously and keeps future dates blank", () => {
     <HeatmapBlocks
       blocks={[block]}
       today="2026-11-02"
-      onOlder={() => {}}
-      loading={false}
     />,
   );
   expect(screen.getByText("Usage heatmap")).toBeTruthy();
-  expect(screen.getByText("Daily Tokens in 53-week windows")).toBeTruthy();
+  expect(screen.getByText("Daily Tokens over the last 53 weeks")).toBeTruthy();
   expect(screen.queryByText(/2026-10-26 –/)).toBeNull();
   expect(screen.queryByText("Less")).toBeNull();
   expect(screen.queryByText("More")).toBeNull();
