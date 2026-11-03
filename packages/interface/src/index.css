@@ -266,6 +266,13 @@
 }
 textarea[data-private] { -webkit-text-security: disc; }
 
+/* Chart cards retain the default ChartTooltip motion between pointer targets. */
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .cc-chart-tooltip-positioner[data-open][data-animated] {
+    transition: transform 400ms ease;
+  }
+}
+
 /* Composition hover is driven by the row, including rows without an action. */
 .cc-composition-segment {
   position: relative;

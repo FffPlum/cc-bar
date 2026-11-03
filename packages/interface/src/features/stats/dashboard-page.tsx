@@ -315,6 +315,7 @@ function DashboardContent({
                   ) : (
                     <DashboardChart
                       data={data}
+                      metric={metric}
                       title={labels[metrics.indexOf(metric)]!}
                       empty={empty}
                     />

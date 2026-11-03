@@ -16,9 +16,13 @@ export function formatTokens(
   }).format(value);
 }
 
-export function formatTokensCompact(value: number): string {
+export function formatTokensCompact(
+  value: number,
+  fractionDigits?: number,
+): string {
   const integer = new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
+    minimumFractionDigits: fractionDigits ?? 0,
+    maximumFractionDigits: fractionDigits ?? 0,
   });
   if (value < 10_000) return integer.format(value);
 
@@ -31,9 +35,11 @@ export function formatTokensCompact(value: number): string {
     unit += 1;
     rounded = Number((scaled / 1_000).toPrecision(3));
   }
+  // Keep the KPI's unit selection, but retain raw precision for tooltip values.
   const compact = new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 2,
-  }).format(rounded);
+    minimumFractionDigits: fractionDigits ?? 0,
+    maximumFractionDigits: fractionDigits ?? 2,
+  }).format(fractionDigits === undefined ? rounded : value / divisors[unit]!);
   return compact + suffixes[unit]!;
 }
 

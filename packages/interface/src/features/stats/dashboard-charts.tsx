@@ -1,26 +1,47 @@
-import type { DashboardHeatmap, UsageDashboard } from "@ccbar/host-api/window";
+import { useState } from "react";
+import type {
+  DashboardHeatmap,
+  DashboardMetric,
+  DashboardSample,
+  DashboardSampleSegment,
+  UsageDashboard,
+} from "@ccbar/host-api/window";
 import {
   ChartDataTooltip,
   ChartDataTooltipTrigger,
   ChartDataTooltipContent,
+  createChartDataTooltipHandle,
 } from "@/components/chart-data-tooltip";
 import { Button } from "@/components/ui/button";
 import { chartBarWidth } from "@/components/stacked-bar-chart";
-import { brandColor, serviceDisplayName } from "@/lib/display";
+import {
+  brandColor,
+  formatTokensCompact,
+  serviceDisplayName,
+} from "@/lib/display";
 import { useHost } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
 
 export function DashboardChart({
   data,
   title,
+  metric,
   empty = false,
 }: {
   data: UsageDashboard;
   title: string;
+  metric: DashboardMetric;
   empty?: boolean;
 }) {
+  const [tooltipHandle] = useState(() =>
+    createChartDataTooltipHandle<string>(),
+  );
   const { bootstrap, settings } = useHost();
   const t = useTranslation();
+  const valueLabel = (sample: DashboardSample | DashboardSampleSegment) =>
+    metric === "tokens"
+      ? formatTokensCompact(sample.totals.totalTokens, 2)
+      : sample.label;
   if (
     data.resolvedRange.granularity === "hour" &&
     data.coverage.precision === "day"
@@ -127,84 +148,93 @@ export function DashboardChart({
             <div className="pointer-events-none absolute inset-x-0 top-0 border-t" />
             <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t" />
             {(empty ? [] : samples).map((s) => (
-              <ChartDataTooltip key={s.key}>
-                <ChartDataTooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      className="z-0 flex h-full min-w-0 flex-1 items-end justify-center"
-                      aria-label={`${fmt.format(new Date(s.start))}: ${s.label}; ${s.segments
-                        .map(
-                          (segment) =>
-                            `${serviceDisplayName(segment.service)}: ${segment.label}, ${(segment.share * 100).toFixed(1)}%`,
-                        )
-                        .join("; ")}`}
-                    />
-                  }
+              <ChartDataTooltipTrigger
+                key={s.key}
+                handle={tooltipHandle}
+                payload={s.key}
+                render={
+                  <button
+                    type="button"
+                    className="z-0 flex h-full min-w-0 flex-1 items-end justify-center hover:bg-muted focus-visible:bg-muted"
+                    aria-label={`${fmt.format(new Date(s.start))}: ${valueLabel(s)}; ${s.segments
+                      .map(
+                        (segment) =>
+                          `${serviceDisplayName(segment.service)}: ${valueLabel(segment)}, ${(segment.share * 100).toFixed(1)}%`,
+                      )
+                      .join("; ")}`}
+                  />
+                }
+              >
+                <span
+                  data-slot="dashboard-bar"
+                  className="flex shrink-0 flex-col-reverse overflow-hidden rounded-t-[2px]"
+                  style={{
+                    width: chartBarWidth(samples.length),
+                    maxWidth: "100%",
+                    height: `${Math.max(0, Math.min(1, s.normalizedValue)) * 100}%`,
+                  }}
                 >
-                  <span
-                    data-slot="dashboard-bar"
-                    className="flex shrink-0 flex-col-reverse overflow-hidden rounded-t-[2px]"
-                    style={{
-                      width: chartBarWidth(samples.length),
-                      maxWidth: "100%",
-                      height: `${Math.max(0, Math.min(1, s.normalizedValue)) * 100}%`,
-                    }}
-                  >
-                    {s.segments
-                      .filter((segment) => segment.share > 0)
-                      .map((segment) => (
-                        <span
-                          key={segment.service}
-                          data-service={segment.service}
-                          style={{
-                            height: `${Math.max(0, Math.min(1, segment.share)) * 100}%`,
-                            backgroundColor: colorFor(segment.service),
-                            flexShrink: 0,
-                          }}
-                        />
-                      ))}
-                  </span>
-                </ChartDataTooltipTrigger>
-                <ChartDataTooltipContent className="w-[260px]">
-                  <strong>
-                    {new Date(s.start).toLocaleString(
-                      bootstrap.resolvedLanguage,
-                      { timeZone: bootstrap.timeZone },
-                    )}
-                  </strong>
-                  <span>
-                    {title}: {s.label}
-                  </span>
-                  {s.segments.map((segment) => (
-                    <span
-                      key={segment.service}
-                      className="flex items-center gap-1.5"
-                    >
+                  {s.segments
+                    .filter((segment) => segment.share > 0)
+                    .map((segment) => (
                       <span
-                        aria-hidden="true"
-                        className="size-2 shrink-0 rounded-sm"
-                        style={{ backgroundColor: colorFor(segment.service) }}
+                        key={segment.service}
+                        data-service={segment.service}
+                        style={{
+                          height: `${Math.max(0, Math.min(1, segment.share)) * 100}%`,
+                          backgroundColor: colorFor(segment.service),
+                          flexShrink: 0,
+                        }}
                       />
-                      <span className="min-w-0 flex-1">
-                        {serviceDisplayName(segment.service)}
-                      </span>
-                      <span className="max-w-[55%] break-words text-right">
-                        {segment.label} · {(segment.share * 100).toFixed(1)}%
-                      </span>
-                    </span>
-                  ))}
-                  <span>Tokens: {s.totals.totalTokens.toLocaleString()}</span>
-                  <span>
-                    {t("Requests", "请求")}:{" "}
-                    {s.totals.requestCount.toLocaleString()}
-                  </span>
-                  <span>
-                    {t("Cost", "成本")}: {s.totals.costDisplay}
-                  </span>
-                </ChartDataTooltipContent>
-              </ChartDataTooltip>
+                    ))}
+                </span>
+              </ChartDataTooltipTrigger>
             ))}
+            <ChartDataTooltip handle={tooltipHandle}>
+              {({ payload: key }) => {
+                const s = samples.find((sample) => sample.key === key);
+                if (!s || empty) return null;
+                return (
+                  <ChartDataTooltipContent className="w-[260px]">
+                    <strong>
+                      {new Date(s.start).toLocaleString(
+                        bootstrap.resolvedLanguage,
+                        { timeZone: bootstrap.timeZone },
+                      )}
+                    </strong>
+                    <span>
+                      {title}: {valueLabel(s)}
+                    </span>
+                    {s.segments.map((segment) => (
+                      <span
+                        key={segment.service}
+                        className="flex items-center gap-1.5"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="size-2 shrink-0 rounded-sm"
+                          style={{ backgroundColor: colorFor(segment.service) }}
+                        />
+                        <span className="min-w-0 flex-1">
+                          {serviceDisplayName(segment.service)}
+                        </span>
+                        <span className="max-w-[55%] break-words text-right">
+                          {valueLabel(segment)} ·{" "}
+                          {(segment.share * 100).toFixed(1)}%
+                        </span>
+                      </span>
+                    ))}
+                    <span>
+                      {t("Requests", "请求")}:{" "}
+                      {s.totals.requestCount.toLocaleString()}
+                    </span>
+                    <span>
+                      {t("Cost", "成本")}: {s.totals.costDisplay}
+                    </span>
+                  </ChartDataTooltipContent>
+                );
+              }}
+            </ChartDataTooltip>
           </div>
           <div className="relative h-5 text-[10px] text-muted-foreground">
             {samples.map(
@@ -236,6 +266,9 @@ export function HeatmapBlocks({
   loading: boolean;
   today?: string;
 }) {
+  const [tooltipHandle] = useState(() =>
+    createChartDataTooltipHandle<string>(),
+  );
   const { bootstrap } = useHost();
   const t = useTranslation();
   const last = blocks.at(-1);
@@ -305,36 +338,24 @@ export function HeatmapBlocks({
                         className="aspect-square max-h-4"
                       />
                     ) : (
-                      <ChartDataTooltip key={day.day} trackCursorAxis="none">
-                        <ChartDataTooltipTrigger
-                          render={
-                            <button
-                              type="button"
-                              aria-label={`${day.day}: ${day.label}`}
-                              className="aspect-square max-h-4 rounded-[3px]"
-                              style={{
-                                backgroundColor:
-                                  day.normalizedValue > 0
-                                    ? `rgba(8,145,178,${Math.max(0.2, Math.min(1, day.normalizedValue))})`
-                                    : "var(--muted)",
-                              }}
-                            />
-                          }
-                        />
-                        <ChartDataTooltipContent className="w-[200px]">
-                          <strong>{day.day}</strong>
-                          <span>
-                            Tokens: {day.totals.totalTokens.toLocaleString()}
-                          </span>
-                          <span>
-                            {t("Requests", "请求")}:{" "}
-                            {day.totals.requestCount.toLocaleString()}
-                          </span>
-                          <span>
-                            {t("Cost", "成本")}: {day.totals.costDisplay}
-                          </span>
-                        </ChartDataTooltipContent>
-                      </ChartDataTooltip>
+                      <ChartDataTooltipTrigger
+                        key={day.day}
+                        handle={tooltipHandle}
+                        payload={day.day}
+                        render={
+                          <button
+                            type="button"
+                            aria-label={`${day.day}: ${day.label}`}
+                            className="aspect-square max-h-4 rounded-[3px]"
+                            style={{
+                              backgroundColor:
+                                day.normalizedValue > 0
+                                  ? `rgba(8,145,178,${Math.max(0.2, Math.min(1, day.normalizedValue))})`
+                                  : "var(--muted)",
+                            }}
+                          />
+                        }
+                      />
                     ),
                   )}
                 </div>
@@ -343,6 +364,27 @@ export function HeatmapBlocks({
           </div>
         </div>
       ))}
+      <ChartDataTooltip handle={tooltipHandle} trackCursorAxis="none">
+        {({ payload: key }) => {
+          const day = blocks
+            .flatMap((block) => block.days)
+            .find((day) => day.day === key);
+          if (!day || (today && day.day > today)) return null;
+          return (
+            <ChartDataTooltipContent className="w-[200px]">
+              <strong>{day.day}</strong>
+              <span>Tokens: {day.totals.totalTokens.toLocaleString()}</span>
+              <span>
+                {t("Requests", "请求")}:{" "}
+                {day.totals.requestCount.toLocaleString()}
+              </span>
+              <span>
+                {t("Cost", "成本")}: {day.totals.costDisplay}
+              </span>
+            </ChartDataTooltipContent>
+          );
+        }}
+      </ChartDataTooltip>
       <div className="flex min-h-8 items-center justify-between">
         <div>
           {last?.nextBeforeDay && (

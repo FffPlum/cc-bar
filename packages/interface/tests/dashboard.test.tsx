@@ -368,6 +368,7 @@ it("does not show false hourly zero bars", () => {
         resolvedRange: { ...data.resolvedRange, granularity: "hour" },
       }}
       title="Tokens"
+      metric="tokens"
     />,
   );
   expect(screen.getByText(/Hourly data is unavailable/)).toBeTruthy();
@@ -539,11 +540,11 @@ it("loads an older heatmap window", () => {
   expect(older).toHaveBeenCalledWith("2025-01-06");
   expect(screen.getByLabelText("2025-01-06: 1")).toBeTruthy();
 });
-it("formats request log tokens with K/M/B in Chinese", () => {
+it("formats request log tokens and HH:mm:ss timestamps in Chinese", () => {
   const requestData = {
     revision: "1",
     resolvedRange: data.resolvedRange,
-    totalCount: 1,
+    totalCount: 2,
     page: 1,
     pageSize: 12,
     rows: [
@@ -554,6 +555,16 @@ it("formats request log tokens with K/M/B in Chinese", () => {
         sourceID: "source",
         modelID: "model",
         totals: { ...total, totalTokens: 48_210 },
+        status: "unknown" as const,
+        conversationID: null,
+      },
+      {
+        id: "midnight",
+        timestamp: "2026-10-31T16:00:00Z",
+        service: "codex" as const,
+        sourceID: "source",
+        modelID: "model",
+        totals: { ...total, totalTokens: 9_999 },
         status: "unknown" as const,
         conversationID: null,
       },
@@ -585,6 +596,9 @@ it("formats request log tokens with K/M/B in Chinese", () => {
   expect(screen.getByText("48.2K")).toBeTruthy();
   expect(screen.queryByText("48,210")).toBeNull();
   expect(screen.queryByText(/万/)).toBeNull();
+  expect(screen.getByText("08:00:00")).toBeTruthy();
+  expect(screen.getByText("00:00:00")).toBeTruthy();
+  expect(screen.queryByText(/2026\/11\/1/)).toBeNull();
 });
 it("requests global sorting from the host and uses host axis labels", () => {
   const sort = vi.fn();
@@ -648,6 +662,7 @@ it("requests global sorting from the host and uses host axis labels", () => {
         ],
       }}
       title="Cost"
+      metric="cost"
     />,
   );
   expect(

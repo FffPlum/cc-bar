@@ -29,7 +29,7 @@ it("sizes the y-axis to its labels and keeps their scale positions", () => {
   const { container } = render(
     <LanguageProvider language="en">
       <TooltipProvider>
-        <DashboardChart data={data} title="Tokens" />
+        <DashboardChart data={data} title="Tokens" metric="tokens" />
       </TooltipProvider>
     </LanguageProvider>,
   );

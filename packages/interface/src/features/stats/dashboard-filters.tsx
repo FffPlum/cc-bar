@@ -315,15 +315,15 @@ export function DashboardFilters({
                 ))}
                 {cells.map((day) => {
                   const value = day.toISOString().slice(0, 10);
+                  const selected =
+                    value === from.slice(0, 10) || value === to.slice(0, 10);
                   return (
                     <button
                       key={value}
                       type="button"
                       aria-label={value}
-                      aria-pressed={
-                        value === from.slice(0, 10) || value === to.slice(0, 10)
-                      }
-                      className={`rounded py-1.5 ${value.slice(0, 7) !== month ? "text-muted-foreground" : ""} ${value === from.slice(0, 10) || value === to.slice(0, 10) ? "bg-foreground text-background" : "hover:bg-background"}`}
+                      aria-pressed={selected}
+                      className={`group relative rounded py-1.5 ${selected ? "text-background" : value.slice(0, 7) !== month ? "text-muted-foreground" : ""}`}
                       onClick={() => {
                         const current = active === "from" ? from : to;
                         (active === "from" ? setFrom : setTo)(
@@ -332,7 +332,11 @@ export function DashboardFilters({
                         setMonth(value.slice(0, 7));
                       }}
                     >
-                      {day.getUTCDate()}
+                      <span
+                        aria-hidden="true"
+                        className={`pointer-events-none absolute inset-0.5 rounded ${selected ? "bg-foreground" : "group-hover:bg-background"}`}
+                      />
+                      <span className="relative">{day.getUTCDate()}</span>
                     </button>
                   );
                 })}

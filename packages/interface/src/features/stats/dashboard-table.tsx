@@ -304,10 +304,13 @@ export function DashboardTable({
                 {logs.map((row) => (
                   <tr key={row.id} className="border-t">
                     <td className="px-3 py-2">
-                      {new Date(row.timestamp).toLocaleString(
-                        bootstrap.resolvedLanguage,
-                        { timeZone: bootstrap.timeZone },
-                      )}
+                      {new Intl.DateTimeFormat("en-GB", {
+                        timeZone: bootstrap.timeZone,
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                        hour12: false,
+                      }).format(new Date(row.timestamp))}
                     </td>
                     <td className="px-3">{serviceDisplayName(row.service)}</td>
                     <td
