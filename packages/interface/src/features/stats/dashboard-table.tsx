@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { CircleHelp } from "lucide-react";
 import type {
   DashboardRequests,
   DashboardRow,
@@ -6,8 +7,17 @@ import type {
 } from "@ccbar/host-api/window";
 import { useHost } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
-import { formatTokensCompact, serviceDisplayName } from "@/lib/display";
+import {
+  formatTokensCompact,
+  modelDisplayName,
+  serviceDisplayName,
+} from "@/lib/display";
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { RequestPagination } from "./request-pagination";
 import {
   BackgroundLoadingBar,
@@ -19,10 +29,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-
-function modelDisplayName(model: string): string {
-  return model.replace(/^(?:kimi-code|deepseek)\//, "");
-}
 
 function DashboardNameLabel({ title }: { title: string }) {
   const labelRef = useRef<HTMLSpanElement>(null);
@@ -45,7 +51,7 @@ function DashboardNameLabel({ title }: { title: string }) {
             data-slot="dashboard-name-label"
             data-truncated={truncated}
             tabIndex={truncated ? 0 : undefined}
-            className="block max-w-full truncate rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="block w-0 min-w-full truncate rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {title}
           </span>
@@ -179,11 +185,72 @@ export function DashboardTable({
         : ""}
     </button>
   );
-  const heading = (label: string, key: Field) => (
-    <button type="button" onClick={() => setSort(key)}>
-      {label}
-      {field === key ? (ascending ? " ↑" : " ↓") : ""}
-    </button>
+  const timingHelp = {
+    speed: {
+      label: t("How aggregate speed is calculated", "汇总速度怎么算"),
+      paragraphs: [
+        t(
+          "Divide total output tokens by total generation time across eligible requests. Each request must have at least 100 output tokens and 0.5 seconds of generation time. Requests without timing are excluded.",
+          "用符合条件的请求的输出 Token 总数除以生成时间总和，不逐条平均。仅计输出不少于 100 Token、生成时长不少于 0.5 秒的请求；没有计时的请求不参与。",
+        ),
+        t(
+          "All speeds use ≈ as reference values. Codex, Claude Code and OpenCode timings are reconstructed from log events. Pi estimates use total request time, including the wait for the first token, so speed reads low. They join the aggregate alongside directly recorded timings only when enabled in Settings.",
+          "速度统一加 ≈，作为参考值展示。Codex、Claude Code 和 OpenCode 的计时由日志事件推算。Pi 估算使用含首字等待的请求总耗时，速度偏低；仅在设置中开启后，与直接记录的计时一起汇总。",
+        ),
+      ],
+    },
+    first: {
+      label: t("How first-token time is calculated", "首字时间怎么算"),
+      paragraphs: [
+        t(
+          "The arithmetic mean of the delay from request start to first output: total first-token delay divided by the number of timed requests; missing timings are excluded. Saved historical timings within the selected range also participate.",
+          "取请求开始到首个输出的平均延迟：首字延迟总和除以有首字计时的请求数，缺失计时的请求不参与。当前筛选范围内保留的历史计时也参与。",
+        ),
+        t(
+          "All first-token times use ≈ as reference values. Codex, Claude Code, OpenCode and DSH timings are inferred from log events and may include application processing or log-write delays. Kimi Code and the Pi timing plugin provide recorded first-token times; the Pi plugin's start may precede the actual send.",
+          "首字时间统一加 ≈，作为参考值展示。Codex、Claude Code、OpenCode 和 DSH 的计时由日志事件推算，可能包含应用处理或日志写入延迟。Kimi Code 与 Pi 计时插件提供直接记录的首字时间；Pi 插件的起点可能早于实际发送。",
+        ),
+      ],
+    },
+  };
+  const heading = (
+    label: string,
+    key: Field,
+    help?: { label: string; paragraphs: string[] },
+  ) => (
+    <span className="inline-flex items-center gap-1">
+      <button type="button" onClick={() => setSort(key)}>
+        {label}
+        {field === key ? (ascending ? " ↑" : " ↓") : ""}
+      </button>
+      {help && (
+        <Popover>
+          <PopoverTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={help.label}
+                className="size-4 shrink-0 text-muted-foreground hover:text-foreground"
+              />
+            }
+          >
+            <CircleHelp aria-hidden="true" className="size-3.5" />
+          </PopoverTrigger>
+          <PopoverContent
+            aria-label={help.label}
+            align="start"
+            className="w-80 max-w-[calc(100vw-24px)] whitespace-normal bg-white p-3 text-left text-foreground leading-relaxed dark:bg-black"
+          >
+            <div className="space-y-2">
+              {help.paragraphs.map((paragraph) => (
+                <p key={paragraph}>{paragraph}</p>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
+      )}
+    </span>
   );
   return (
     <section
@@ -374,13 +441,13 @@ export function DashboardTable({
           />
         </div>
       ) : (
-        <div className="relative min-h-[196px]">
+        <div className="relative min-h-[196px] overflow-x-auto">
           {showSkeleton && <TableSkeleton columns={7} />}
-          <table className="w-full table-fixed text-left">
+          <table className="w-full table-auto whitespace-nowrap text-left tabular-nums">
             <colgroup>
-              <col className="w-[28%]" />
+              <col className="w-[22%]" />
               {Array.from({ length: 6 }, (_, index) => (
-                <col key={index} className="w-[12%]" />
+                <col key={index} />
               ))}
             </colgroup>
             <thead className="bg-muted text-muted-foreground">
@@ -391,10 +458,13 @@ export function DashboardTable({
                   heading(t("Cost", "成本"), "cost"),
                   heading("Tokens", "tokens"),
                   heading(t("Success", "成功率"), "success"),
-                  heading(t("Speed", "速度"), "speed"),
-                  heading(t("First token", "首字"), "first"),
+                  heading(t("Speed", "速度"), "speed", timingHelp.speed),
+                  heading(t("First token", "首字"), "first", timingHelp.first),
                 ].map((label, i) => (
-                  <th key={i} className="px-3 py-2 font-medium">
+                  <th
+                    key={i}
+                    className="px-2 py-2 font-medium first:min-w-24 first:pl-3 last:pr-3"
+                  >
                     {label}
                   </th>
                 ))}
@@ -416,34 +486,34 @@ export function DashboardTable({
               )}
               {rows.map((row) => (
                 <tr key={row.id} className="border-t">
-                  <td className="px-3 py-3">
+                  <td className="px-2 py-3 pl-3">
                     <DashboardNameLabel
                       title={
                         tab === "models" ? modelDisplayName(row.title) : row.title
                       }
                     />
                   </td>
-                  <td className="px-3">
+                  <td className="px-2">
                     {row.totals.requestCount.toLocaleString()}
                   </td>
-                  <td className="px-3">{row.totals.costDisplay}</td>
-                  <td className="px-3">
+                  <td className="px-2">{row.totals.costDisplay}</td>
+                  <td className="px-2">
                     {formatTokensCompact(row.totals.totalTokens)}
                   </td>
-                  <td className="px-3">
+                  <td className="px-2">
                     {row.successRate == null
                       ? "—"
                       : `${(row.successRate * 100).toFixed(1)}%`}
                   </td>
-                  <td className="px-3">
+                  <td className="px-2">
                     {row.totals.outputTokensPerSecond == null
                       ? "—"
-                      : `${row.totals.usesEstimatedSpeed ? "≈" : ""}${row.totals.outputTokensPerSecond.toFixed(1)} tok/s`}
+                      : `≈${row.totals.outputTokensPerSecond.toFixed(1)} tok/s`}
                   </td>
-                  <td className="px-3">
+                  <td className="px-2 pr-3">
                     {row.totals.averageFirstTokenSeconds == null
                       ? "—"
-                      : `${row.totals.averageFirstTokenSeconds.toFixed(1)}s`}
+                      : `≈${row.totals.averageFirstTokenSeconds.toFixed(1)}s`}
                   </td>
                 </tr>
               ))}

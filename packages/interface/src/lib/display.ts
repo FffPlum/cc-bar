@@ -174,6 +174,10 @@ export function rankColor(rank: number | undefined, dark: boolean): string {
   );
 }
 
+export function modelDisplayName(model: string): string {
+  return model.replace(/^(?:kimi-code|deepseek)\//, "");
+}
+
 export function serviceDisplayName(service: string): string {
   const names: Record<string, string> = {
     codex: "Codex",

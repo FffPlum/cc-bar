@@ -174,7 +174,7 @@ export function StackedBarChart({
           if (!column) return null;
           return (
             <ChartDataTooltipContent
-              className="block w-[200px] rounded-md border border-border bg-popover p-3 text-left text-[11px] text-popover-foreground shadow-md"
+              className="block w-[200px] rounded-md border border-border p-3 text-left text-[11px] shadow-md"
             >
               <span className="mb-2 block font-semibold">
                 {column.tooltipTitle ?? column.label}

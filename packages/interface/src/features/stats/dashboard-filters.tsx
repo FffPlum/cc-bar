@@ -31,7 +31,7 @@ import { HostIcon } from "@/components/host-icon";
 import { ServiceIcon } from "@/components/service-icon";
 import { useHost } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
-import { brandColor, serviceDisplayName } from "@/lib/display";
+import { brandColor, modelDisplayName, serviceDisplayName } from "@/lib/display";
 
 const filterControl =
   "h-8 rounded-md border border-border bg-background bg-clip-padding text-[13px] dark:border-input dark:bg-input/30";
@@ -428,7 +428,7 @@ export function DashboardFilters({
           <ListFilter className="size-4" />
           <span className="text-left">
             {selectedSource?.title ?? t("Provider / model", "供应商 / 模型")}
-            {modelID ? ` · ${modelID}` : ""}
+            {modelID ? ` · ${modelDisplayName(modelID)}` : ""}
           </span>
           <ChevronDown className="ml-auto size-4" />
         </DropdownMenuTrigger>
@@ -498,7 +498,7 @@ export function DashboardFilters({
                       }
                     />
                     <span className="min-w-0 flex-1 break-words">
-                      {model.title}
+                      {modelDisplayName(model.title)}
                     </span>
                     <span className="pl-2 text-muted-foreground tabular-nums">
                       {model.requestCount.toLocaleString()}

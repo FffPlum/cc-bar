@@ -349,7 +349,8 @@ it("keeps the card available to keyboard users and dismisses it with Escape", as
   expect(details.parentElement!.textContent).toBe(
     "Existing headingExisting details",
   );
-  expect(details.parentElement!.className).toContain("bg-background");
+  expect(details.parentElement!.className).toContain("bg-white");
+  expect(details.parentElement!.className).toContain("dark:bg-black");
   expect(
     details.parentElement!.parentElement!.hasAttribute("data-animated"),
   ).toBe(false);

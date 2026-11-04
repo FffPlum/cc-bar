@@ -148,10 +148,10 @@ it("shows host cost and token totals in separate tooltip rows", async () => {
   fireEvent.focus(bar);
   await waitFor(() =>
     expect(
-      document.querySelector('[data-slot="tooltip-content"]'),
+      document.querySelector('[data-slot="chart-data-tooltip"]'),
     ).not.toBeNull(),
   );
-  const tooltip = document.querySelector('[data-slot="tooltip-content"]')!;
+  const tooltip = document.querySelector('[data-slot="chart-data-tooltip"]')!;
   const total = within(tooltip as HTMLElement).getByText(
     "Total",
   ).parentElement!;

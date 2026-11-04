@@ -302,7 +302,7 @@ export function ChartDataTooltipContent({
         <TooltipPrimitive.Popup
           data-slot="chart-data-tooltip"
           className={cn(
-            "pointer-events-none grid min-w-[8rem] max-w-[calc(100vw-16px)] items-start gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs text-foreground shadow-xl",
+            "pointer-events-none grid min-w-[8rem] max-w-[calc(100vw-16px)] items-start gap-1.5 rounded-lg border border-border/50 bg-white px-2.5 py-1.5 text-xs text-foreground shadow-xl dark:bg-black",
             followCursor &&
               placement !== "bar" &&
               "min-w-0 max-w-[min(calc(100vw-16px),var(--available-width))]",

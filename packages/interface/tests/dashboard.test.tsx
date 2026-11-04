@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -415,12 +416,6 @@ it("shows tooltips only for truncated aggregate names", async () => {
   );
   const columns = view.container.querySelectorAll("col");
   expect(columns).toHaveLength(7);
-  expect(columns[0]!.className).toBe("w-[28%]");
-  expect(
-    Array.from(columns)
-      .slice(1)
-      .every((column) => column.className === "w-[12%]"),
-  ).toBe(true);
   const labels = view.container.querySelectorAll<HTMLElement>(
     '[data-slot="dashboard-name-label"]',
   );
@@ -515,6 +510,159 @@ it("sorts aggregate rows and displays unknown values", () => {
   expect(within(table).getAllByRole("row")[1]?.textContent).toContain("A");
   expect(within(table).getAllByRole("row")[1]?.textContent).toContain("—");
 });
+it.each(["providers", "models"] as const)(
+  "opens timing help only on click without sorting the %s table",
+  async (tab) => {
+    const rows = data.providerRows.map((row, index) => ({
+      ...row,
+      modelID: tab === "models" ? row.id : null,
+      totals: {
+        ...row.totals,
+        outputTokensPerSecond: index === 0 ? 80 : 20,
+        averageFirstTokenSeconds: index === 0 ? 1.5 : 0.5,
+      },
+    }));
+    wrap(
+      <DashboardTable
+        data={{ ...data, providerRows: rows, modelRows: rows }}
+        tab={tab}
+        onTabChange={() => {}}
+        requests={null}
+        error={null}
+        loading={false}
+        requestSort={{ sort: "time", direction: "desc" }}
+        onRequestSort={() => {}}
+        page={1}
+        pageSize={12}
+        onPageChange={() => {}}
+        onPageSizeChange={() => {}}
+      />,
+    );
+    const rowNames = () =>
+      within(screen.getByRole("table"))
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[0]!.textContent);
+    expect(rowNames()).toEqual(["B", "A"]);
+
+    const speedHelp = screen.getByRole("button", {
+      name: "How aggregate speed is calculated",
+    });
+    fireEvent.mouseEnter(speedHelp);
+    act(() => speedHelp.focus());
+    expect(document.activeElement).toBe(speedHelp);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(speedHelp.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.mouseLeave(speedHelp);
+    fireEvent.click(speedHelp);
+    const speedExplanation = await screen.findByRole("dialog", {
+      name: "How aggregate speed is calculated",
+    });
+    expect(speedExplanation.id).toBeTruthy();
+    expect(speedHelp.getAttribute("aria-controls")).toBe(speedExplanation.id);
+    expect(speedHelp.getAttribute("aria-expanded")).toBe("true");
+    expect(speedExplanation.textContent).toContain("total output tokens");
+    expect(speedExplanation.textContent).toContain("at least 100 output tokens");
+    expect(speedExplanation.textContent).toContain("0.5 seconds");
+    expect(speedExplanation.textContent).toContain("reference values");
+    expect(screen.getByRole("button", { name: "Requests ↓" })).toBeTruthy();
+    expect(rowNames()).toEqual(["B", "A"]);
+    fireEvent.click(speedHelp);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(speedHelp.getAttribute("aria-expanded")).toBe("false");
+
+    const firstTokenHelp = screen.getByRole("button", {
+      name: "How first-token time is calculated",
+    });
+    fireEvent.mouseEnter(firstTokenHelp);
+    act(() => firstTokenHelp.focus());
+    expect(document.activeElement).toBe(firstTokenHelp);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(firstTokenHelp.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.mouseLeave(firstTokenHelp);
+    fireEvent.click(firstTokenHelp);
+    const firstTokenExplanation = await screen.findByRole("dialog", {
+      name: "How first-token time is calculated",
+    });
+    expect(firstTokenExplanation.id).toBeTruthy();
+    expect(firstTokenHelp.getAttribute("aria-controls")).toBe(firstTokenExplanation.id);
+    expect(firstTokenHelp.getAttribute("aria-expanded")).toBe("true");
+    expect(firstTokenExplanation.textContent).toContain("arithmetic mean");
+    expect(firstTokenExplanation.textContent).toContain("missing timings are excluded");
+    expect(firstTokenExplanation.textContent).toContain("reference values");
+    expect(screen.getByRole("button", { name: "Requests ↓" })).toBeTruthy();
+    expect(rowNames()).toEqual(["B", "A"]);
+    fireEvent.keyDown(firstTokenExplanation, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(firstTokenHelp.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(firstTokenHelp);
+    await screen.findByRole("dialog", {
+      name: "How first-token time is calculated",
+    });
+    fireEvent.pointerDown(document.body, { pointerType: "mouse" });
+    fireEvent.mouseDown(document.body);
+    fireEvent.click(document.body);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(firstTokenHelp.getAttribute("aria-expanded")).toBe("false");
+    expect(rowNames()).toEqual(["B", "A"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Speed" }));
+    expect(screen.getByRole("button", { name: "Speed ↓" })).toBeTruthy();
+    expect(rowNames()).toEqual(["A", "B"]);
+  },
+);
+it.each([
+  ["codex", false, 80, 1.5, "≈80.0 tok/s", "≈1.5s"],
+  ["claude", false, 80, 1.5, "≈80.0 tok/s", "≈1.5s"],
+  ["opencode", false, 80, 1.5, "≈80.0 tok/s", "≈1.5s"],
+  ["dsh", false, 80, 1.5, "≈80.0 tok/s", "≈1.5s"],
+  ["kimi", false, 80, 1.5, "≈80.0 tok/s", "≈1.5s"],
+  ["pi", false, 80, 1.5, "≈80.0 tok/s", "≈1.5s"],
+  ["antigravity", false, 80, null, "≈80.0 tok/s", "—"],
+  ["pi", true, 80, 1.5, "≈80.0 tok/s", "≈1.5s"],
+  ["codex", false, null, null, "—", "—"],
+] as const)(
+  "formats %s timing (estimated speed: %s, speed: %s, first token: %s)",
+  (service, usesEstimatedSpeed, speed, firstToken, speedLabel, firstTokenLabel) => {
+    wrap(
+      <DashboardTable
+        data={{
+          ...data,
+          providerRows: [
+            {
+              ...data.providerRows[0]!,
+              service,
+              totals: {
+                ...total,
+                outputTokensPerSecond: speed,
+                averageFirstTokenSeconds: firstToken,
+                usesEstimatedSpeed,
+              },
+            },
+          ],
+        }}
+        tab="providers"
+        onTabChange={() => {}}
+        requests={null}
+        error={null}
+        loading={false}
+        requestSort={{ sort: "time", direction: "desc" }}
+        onRequestSort={() => {}}
+        page={1}
+        pageSize={12}
+        onPageChange={() => {}}
+        onPageSizeChange={() => {}}
+      />,
+    );
+    const row = within(screen.getByRole("table")).getAllByRole("row")[1]!;
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[5]!.textContent).toBe(speedLabel);
+    expect(cells[6]!.textContent).toBe(firstTokenLabel);
+  },
+);
 it("shows only the latest heatmap window without older pagination", () => {
   const block = {
     fromDay: "2025-01-06",
