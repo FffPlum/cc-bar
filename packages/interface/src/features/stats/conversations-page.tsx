@@ -35,7 +35,7 @@ import {
   formatInteger,
   formatPercent,
   formatTime,
-  formatTokens,
+  formatTokensCompact,
   serviceDisplayName,
 } from "@/lib/display";
 import { SpeedBadge } from "@/features/stats/overview-page";
@@ -355,10 +355,7 @@ function ConversationRow({
           {bootstrap.resolvedLanguage === "zh" ? "次请求" : "requests"}
         </span>
         <span className="flex-1" />
-        <span>
-          {formatTokens(row.totals.totalTokens, bootstrap.resolvedLanguage)}{" "}
-          Tokens
-        </span>
+        <span>{formatTokensCompact(row.totals.totalTokens)} Tokens</span>
         <span className="text-[11.5px] font-semibold text-foreground">
           {row.costs.displayTotal}
         </span>
@@ -378,13 +375,13 @@ function ConversationDetailView({ detail }: { detail: ConversationDetail }) {
   const tokenSum =
     totals.inputTokens + totals.outputTokens + totals.cacheReadTokens;
   return (
-    <div className="@container flex flex-col gap-4 p-5">
+    <div className="@container flex flex-col p-5">
       {copyError && (
-        <p role="alert" className="text-xs text-red-600">
+        <p role="alert" className="mb-4 text-xs text-red-600">
           {copyError}
         </p>
       )}
-      <header className="space-y-3">
+      <header className="space-y-3 pb-3">
         <div className="flex flex-wrap items-center gap-2">
           <ServiceIcon
             name={serviceDisplayName(row.service)}
@@ -496,11 +493,11 @@ function ConversationDetailView({ detail }: { detail: ConversationDetail }) {
           </dd>
         </dl>
       </header>
-      <DetailSection title={t("Usage", "用量信息")}>
+      <DetailSection title={t("Usage", "用量信息")} className="border-y py-3">
         <dl className="grid grid-cols-2 @min-[640px]:grid-cols-4">
           <UsageValue
             label={t("Total tokens", "总 Token")}
-            value={formatTokens(totals.totalTokens, language)}
+            value={formatTokensCompact(totals.totalTokens)}
             className="pr-3 pb-3 @min-[640px]:pb-0"
           />
           <UsageValue
@@ -515,76 +512,81 @@ function ConversationDetailView({ detail }: { detail: ConversationDetail }) {
           />
           <UsageValue
             label={t("Cache hits (tokens)", "缓存命中数（Token）")}
-            value={formatTokens(totals.cacheReadTokens, language)}
+            value={formatTokensCompact(totals.cacheReadTokens)}
             className="border-t border-l pt-3 pl-3 @min-[640px]:border-t-0 @min-[640px]:pt-0"
           />
         </dl>
       </DetailSection>
-      <DetailSection title={t("Token composition", "Token 构成")}>
-        <div className="divide-y">
-          <DetailValue
-            label={t("Input", "输入")}
-            value={formatTokens(totals.inputTokens, language)}
-            share={tokenSum ? totals.inputTokens / tokenSum : 0}
-          />
-          <DetailValue
-            label={t("Output", "输出")}
-            value={formatTokens(totals.outputTokens, language)}
-            share={tokenSum ? totals.outputTokens / tokenSum : 0}
-          />
-          <DetailValue
-            label={t("Cache read", "缓存读取")}
-            value={formatTokens(totals.cacheReadTokens, language)}
-            share={tokenSum ? totals.cacheReadTokens / tokenSum : 0}
-          />
-          <DetailValue
-            label={t("Cache write", "缓存写入")}
-            value={
-              row.cacheCreationAvailable
-                ? formatTokens(totals.cacheCreationTokens, language)
-                : "N/A"
-            }
-          />
-        </div>
-      </DetailSection>
-      <DetailSection title={t("Estimated cost", "估算费用")}>
-        <div className="divide-y">
-          <DetailValue
-            label={t("Standard", "标准档位")}
-            value={row.speed.standard.costDisplay}
-          />
-          <DetailValue
-            label={t("Fast", "快速档位")}
-            value={row.speed.fast.costDisplay}
-          />
-          {row.speed.unknown.requestCount > 0 && (
+      <div className="flex flex-col gap-4">
+        <DetailSection
+          title={t("Token composition", "Token 构成")}
+          className="pt-3"
+        >
+          <div className="divide-y">
             <DetailValue
-              label={t("Unrecognized tier", "未识别档位")}
-              value={row.speed.unknown.costDisplay}
+              label={t("Input", "输入")}
+              value={formatTokensCompact(totals.inputTokens)}
+              share={tokenSum ? totals.inputTokens / tokenSum : 0}
             />
-          )}
-          <DetailValue
-            label={t("Input", "输入")}
-            value={row.costs.displayInput}
-          />
-          <DetailValue
-            label={t("Output", "输出")}
-            value={row.costs.displayOutput}
-          />
-          <DetailValue
-            label={t("Cache read", "缓存读取")}
-            value={row.costs.displayCacheRead}
-          />
-          <DetailValue
-            label={t("Cache write", "缓存写入")}
-            value={
-              row.cacheCreationAvailable
-                ? row.costs.displayCacheCreation
-                : "N/A"
-            }
-          />
-        </div>
-      </DetailSection>
+            <DetailValue
+              label={t("Output", "输出")}
+              value={formatTokensCompact(totals.outputTokens)}
+              share={tokenSum ? totals.outputTokens / tokenSum : 0}
+            />
+            <DetailValue
+              label={t("Cache read", "缓存读取")}
+              value={formatTokensCompact(totals.cacheReadTokens)}
+              share={tokenSum ? totals.cacheReadTokens / tokenSum : 0}
+            />
+            <DetailValue
+              label={t("Cache write", "缓存写入")}
+              value={
+                row.cacheCreationAvailable
+                  ? formatTokensCompact(totals.cacheCreationTokens)
+                  : "N/A"
+              }
+            />
+          </div>
+        </DetailSection>
+        <DetailSection title={t("Estimated cost", "估算费用")} className="pb-3">
+          <div className="divide-y">
+            <DetailValue
+              label={t("Standard", "标准档位")}
+              value={row.speed.standard.costDisplay}
+            />
+            <DetailValue
+              label={t("Fast", "快速档位")}
+              value={row.speed.fast.costDisplay}
+            />
+            {row.speed.unknown.requestCount > 0 && (
+              <DetailValue
+                label={t("Unrecognized tier", "未识别档位")}
+                value={row.speed.unknown.costDisplay}
+              />
+            )}
+            <DetailValue
+              label={t("Input", "输入")}
+              value={row.costs.displayInput}
+            />
+            <DetailValue
+              label={t("Output", "输出")}
+              value={row.costs.displayOutput}
+            />
+            <DetailValue
+              label={t("Cache read", "缓存读取")}
+              value={row.costs.displayCacheRead}
+            />
+            <DetailValue
+              label={t("Cache write", "缓存写入")}
+              value={
+                row.cacheCreationAvailable
+                  ? row.costs.displayCacheCreation
+                  : "N/A"
+              }
+            />
+          </div>
+        </DetailSection>
+      </div>
     </div>
   );
 }
@@ -592,13 +594,15 @@ function ConversationDetailView({ detail }: { detail: ConversationDetail }) {
 function DetailSection({
   title,
   children,
+  className,
 }: {
   title: string;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="py-3">
-      <h3 className="mb-3 text-[13px] font-semibold">{title}</h3>
+    <section className={cn("flex flex-col gap-3", className)}>
+      <h3 className="text-[13px] font-semibold">{title}</h3>
       {children}
     </section>
   );
