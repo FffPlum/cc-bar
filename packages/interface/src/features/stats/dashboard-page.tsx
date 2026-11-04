@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   keepPreviousData,
   useQuery,
@@ -17,7 +17,12 @@ import { DashboardQueryScope, useRetainedResult } from "./dashboard-query";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/lib/i18n";
 import { formatTokensCompact } from "@/lib/display";
-import { DashboardFilters, civilInput } from "./dashboard-filters";
+import {
+  DashboardFilters,
+  civilInput,
+  civilToISO,
+  nextCivilDay,
+} from "./dashboard-filters";
 import { DashboardChart, HeatmapBlocks } from "./dashboard-charts";
 import { DashboardTable } from "./dashboard-table";
 import {
@@ -32,12 +37,21 @@ const metrics: DashboardMetric[] = [
   "tokens",
   "cacheHitRate",
 ];
-export function DashboardPage(props: {
+interface DashboardPageProps {
   service?: UsageService;
   onService: (value?: UsageService) => void;
-}) {
+  title?: string;
+  filterMode?: "full" | "daily" | "quota";
+  renderView?: (
+    query: DashboardQuery,
+    data: UsageDashboard | undefined,
+    isPreviousData: boolean,
+  ) => ReactNode;
+}
+
+export function DashboardPage(props: DashboardPageProps) {
   const { bootstrap } = useHost();
-  const { service, onService } = props;
+  const { service, onService, title, renderView, filterMode } = props;
   const enabledService =
     service && bootstrap.visibleUsageServices.includes(service)
       ? service
@@ -47,24 +61,30 @@ export function DashboardPage(props: {
   }, [service, enabledService, onService]);
   return (
     <DashboardQueryScope>
-      <DashboardContent service={enabledService} onService={onService} />
+      <DashboardContent
+        service={enabledService}
+        onService={onService}
+        title={title}
+        renderView={renderView}
+        filterMode={filterMode}
+      />
     </DashboardQueryScope>
   );
 }
 function DashboardContent({
   service,
   onService,
-}: {
-  service?: UsageService;
-  onService: (value?: UsageService) => void;
-}) {
+  title,
+  renderView,
+  filterMode = "full",
+}: DashboardPageProps) {
   const { api, bootstrap } = useHost();
   const queryClient = useQueryClient();
   const t = useTranslation();
-  const [range, setRange] = useState<DashboardQuery["range"]>("last7");
+  const [selectedRange, setRange] = useState<DashboardQuery["range"]>("last7");
   const [metric, setMetric] = useState<DashboardMetric>("tokens");
-  const [sourceID, setSource] = useState<string>();
-  const [modelID, setModel] = useState<string>();
+  const [selectedSourceID, setSource] = useState<string>();
+  const [selectedModelID, setModel] = useState<string>();
   const [activeTab, setActiveTab] = useState<
     "requests" | "providers" | "models"
   >("providers");
@@ -77,11 +97,36 @@ function DashboardContent({
     sort: "time" | "cost" | "tokens";
     direction: "asc" | "desc";
   }>({ sort: "time", direction: "desc" });
-  const [custom, setCustom] = useState<{
+  const [selectedCustom, setCustom] = useState<{
     customFrom: string;
     customTo: string;
     followNow: boolean;
   }>();
+  // Keep the overview choices, but only apply filters supported by this view.
+  const range =
+    filterMode === "quota"
+      ? "all"
+      : filterMode === "daily" && selectedRange === "last24h"
+        ? "today"
+        : selectedRange;
+  const sourceID = filterMode === "full" ? selectedSourceID : undefined;
+  const modelID = filterMode === "full" ? selectedModelID : undefined;
+  let custom = selectedCustom;
+  if (filterMode === "daily" && selectedCustom) {
+    const fromDay = civilInput(
+      new Date(selectedCustom.customFrom),
+      bootstrap.timeZone,
+    ).slice(0, 10);
+    const end = selectedCustom.followNow
+      ? Date.now()
+      : Date.parse(selectedCustom.customTo) - 1;
+    const toDay = civilInput(new Date(end), bootstrap.timeZone).slice(0, 10);
+    custom = {
+      customFrom: civilToISO(`${fromDay}T00:00`, bootstrap.timeZone)!,
+      customTo: civilToISO(`${nextCivilDay(toDay)}T00:00`, bootstrap.timeZone)!,
+      followNow: false,
+    };
+  }
   const query: DashboardQuery = {
     range,
     metric,
@@ -101,13 +146,14 @@ function DashboardContent({
   const dashboard = useQuery({
     queryKey: ["dashboard", key],
     queryFn: () => api.usageDashboard(query),
+    enabled: filterMode !== "quota",
     placeholderData: keepPreviousData,
     refetchInterval: range === "custom" && !custom?.followNow ? false : 60000,
     refetchIntervalInBackground: false,
   });
   const requests = useQuery({
     queryKey: ["requests", requestKey, page, pageSize, requestSort],
-    enabled: activeTab === "requests",
+    enabled: !renderView && activeTab === "requests",
     placeholderData: keepPreviousData,
     queryFn: () =>
       api.usageRequests({ ...requestQuery, ...requestSort, page, pageSize }),
@@ -357,38 +403,54 @@ function DashboardContent({
     );
   };
   return (
-    <div className="h-full overflow-auto [scrollbar-gutter:stable] p-5 text-[13px] space-y-4">
-      <DashboardFilters
-        data={filterData}
-        range={range}
-        custom={custom}
-        service={service}
-        sourceID={sourceID}
-        modelID={modelID}
-        onRange={(next, value) => {
-          setCustom(value);
-          setRange(next);
-        }}
-        onService={(value) => {
-          onService(value);
-          setSource(undefined);
-          setModel(undefined);
-        }}
-        onSource={(value) => {
-          setSource(value);
-          setModel(undefined);
-        }}
-        onModel={setModel}
-      />
-      <ResourceFeedback
-        data={dashboardResult.data ?? null}
-        error={dashboard.error ? errorMessage(dashboard.error) : null}
-        loading={dashboard.isLoading}
-        loadingFallback={renderContent(undefined)}
-        onRetry={() => void dashboard.refetch()}
-      >
-        {(data) => renderContent(data)}
-      </ResourceFeedback>
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-4 p-5 text-[13px]">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+        {title && (
+          <h2 className="shrink-0 text-[15px] font-semibold">{title}</h2>
+        )}
+        <DashboardFilters
+          mode={filterMode}
+          data={filterData}
+          range={range}
+          custom={custom}
+          service={service}
+          sourceID={sourceID}
+          modelID={modelID}
+          onRange={(next, value) => {
+            setCustom(value);
+            setRange(next);
+          }}
+          onService={(value) => {
+            onService(value);
+            setSource(undefined);
+            setModel(undefined);
+          }}
+          onSource={(value) => {
+            setSource(value);
+            setModel(undefined);
+          }}
+          onModel={setModel}
+        />
+      </div>
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto [scrollbar-gutter:stable]">
+        {renderView ? (
+          renderView(
+            query,
+            dashboardResult.data,
+            dashboardResult.isPreviousData,
+          )
+        ) : (
+          <ResourceFeedback
+            data={dashboardResult.data ?? null}
+            error={dashboard.error ? errorMessage(dashboard.error) : null}
+            loading={dashboard.isLoading}
+            loadingFallback={renderContent(undefined)}
+            onRetry={() => void dashboard.refetch()}
+          >
+            {(data) => renderContent(data)}
+          </ResourceFeedback>
+        )}
+      </div>
     </div>
   );
 }

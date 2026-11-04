@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   CalendarDays,
   ChevronLeft,
@@ -48,6 +48,7 @@ export function DashboardFilters({
   onService,
   onSource,
   onModel,
+  mode = "full",
 }: {
   data: Pick<UsageDashboard, "facets" | "resolvedRange">;
   range: Range;
@@ -59,6 +60,7 @@ export function DashboardFilters({
   onService: (service?: UsageService) => void;
   onSource: (source?: string) => void;
   onModel: (model?: string) => void;
+  mode?: "full" | "daily" | "quota";
 }) {
   const { bootstrap, settings } = useHost();
   const t = useTranslation();
@@ -79,6 +81,35 @@ export function DashboardFilters({
   const [active, setActive] = useState<"from" | "to">("from");
   const [month, setMonth] = useState(now.slice(0, 7));
   const [error, setError] = useState(false);
+  const daily = mode === "daily";
+  const dateDisabledReason =
+    mode === "quota"
+      ? t(
+          "Quota is shown by account cycle, not by a date range.",
+          "额度按账号周期展示，不支持日期范围筛选。",
+        )
+      : undefined;
+  const providerDisabledReason =
+    mode === "full"
+      ? undefined
+      : daily
+        ? t(
+            "This view supports whole-day and application filters only.",
+            "当前视图仅支持按天和应用筛选。",
+          )
+        : t(
+            "Quota is shown by account cycle and cannot be filtered by provider or model.",
+            "额度按账号周期展示，不支持供应商或模型筛选。",
+          );
+  const dailyRangeReason = t(
+    "This view uses whole days and does not support a rolling 24-hour range.",
+    "当前视图按自然日统计，不支持滚动的近 24 小时范围。",
+  );
+  useEffect(() => {
+    setDateOpen(false);
+    setCascadeOpen(false);
+    setError(false);
+  }, [mode]);
   const applicationGroup = useRef<HTMLDivElement>(null);
   const applicationOptions = useRef(new Map<string, HTMLButtonElement>());
   const selectedApplication = service ?? "all";
@@ -115,6 +146,7 @@ export function DashboardFilters({
     selectedApplication,
     bootstrap.visibleUsageServices,
     bootstrap.resolvedLanguage,
+    mode,
   ]);
   const [year, monthIndex] = month.split("-").map(Number);
   const first = new Date(Date.UTC(year!, monthIndex! - 1, 1));
@@ -147,8 +179,9 @@ export function DashboardFilters({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Popover
-        open={dateOpen}
+        open={mode !== "quota" && dateOpen}
         onOpenChange={(open) => {
+          if (open && mode === "quota") return;
           setDateOpen(open);
           if (open) {
             const start = custom
@@ -157,62 +190,84 @@ export function DashboardFilters({
                   new Date(data.resolvedRange.from),
                   bootstrap.timeZone,
                 );
-            const end =
+            const endDate =
               custom && !custom.followNow
-                ? civilInput(new Date(custom.customTo), bootstrap.timeZone)
-                : civilInput(
-                    new Date(data.resolvedRange.to),
-                    bootstrap.timeZone,
-                  );
-            setFrom(start);
-            setTo(end);
+                ? new Date(custom.customTo)
+                : new Date(data.resolvedRange.to);
+            const end = civilInput(
+              daily ? new Date(endDate.getTime() - 1) : endDate,
+              bootstrap.timeZone,
+            );
+            setFrom(daily ? start.slice(0, 10) : start);
+            setTo(daily ? end.slice(0, 10) : end);
             setMonth(start.slice(0, 7));
-            setFollowNow(custom?.followNow ?? false);
+            setFollowNow(!daily && (custom?.followNow ?? false));
             setError(false);
           }
         }}
       >
-        <PopoverTrigger
-          render={
-            <Button
-              variant="outline"
-              size="sm"
-              className={`${filterControl} justify-start`}
-            />
-          }
-        >
-          <CalendarDays className="size-4" />{" "}
-          {presets.find((x) => x[0] === range)?.[1] ?? t("Custom", "自定义")}{" "}
-          <ChevronDown className="ml-auto size-4" />
-        </PopoverTrigger>
+        <span className="inline-flex" title={dateDisabledReason}>
+          <PopoverTrigger
+            disabled={mode === "quota"}
+            title={dateDisabledReason}
+            render={
+              <Button
+                variant="outline"
+                size="sm"
+                className={`${filterControl} justify-start`}
+              />
+            }
+          >
+            <CalendarDays className="size-4" />{" "}
+            {mode === "quota"
+              ? t("Account cycle", "账号周期")
+              : presets.find((x) => x[0] === range)?.[1] ?? t("Custom", "自定义")}
+            {daily && ` · ${t("Daily", "按天")}`}{" "}
+            <ChevronDown className="ml-auto size-4" />
+          </PopoverTrigger>
+        </span>
         <PopoverContent
           align="start"
           className="w-[650px] max-w-[calc(100vw-40px)] p-4"
         >
           <div className="flex flex-wrap gap-1 border-b pb-3">
             {presets.map(([id, label]) => (
-              <Button
+              <span
                 key={id}
-                size="sm"
-                variant={range === id ? "secondary" : "outline"}
-                onClick={() => {
-                  onRange(id);
-                  setDateOpen(false);
-                }}
+                title={daily && id === "last24h" ? dailyRangeReason : undefined}
               >
-                {label}
-              </Button>
+                <Button
+                  size="sm"
+                  variant={range === id ? "secondary" : "outline"}
+                  disabled={daily && id === "last24h"}
+                  title={daily && id === "last24h" ? dailyRangeReason : undefined}
+                  onClick={() => {
+                    onRange(id);
+                    setDateOpen(false);
+                  }}
+                >
+                  {label}
+                </Button>
+              </span>
             ))}
           </div>
           <div className="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1">
             <div className="space-y-2">
               <p className="text-muted-foreground">
-                {t("Choose date and time", "支持日期与时间")}
+                {daily
+                  ? t("Choose whole days", "按自然日选择日期")
+                  : t("Choose date and time", "支持日期与时间")}
               </p>
               {(
                 [
-                  ["from", from, setFrom, t("Start", "开始时间")],
-                  ["to", to, setTo, t("End", "结束时间")],
+                  [
+                    "from", from, setFrom,
+                    daily ? t("Start date", "开始日期") : t("Start", "开始时间"),
+                  ],
+                  [
+                    "to", to, setTo,
+                    daily ? t("End date", "结束日期") : t("End", "结束时间"),
+                  ],
                 ] as const
               ).map(([id, value, set, label]) => (
                 <label
@@ -221,8 +276,8 @@ export function DashboardFilters({
                 >
                   <span className="block text-muted-foreground">{label}</span>
                   <input
-                    type="datetime-local"
-                    disabled={id === "to" && followNow}
+                    type={daily ? "date" : "datetime-local"}
+                    disabled={!daily && id === "to" && followNow}
                     aria-label={label}
                     value={value}
                     onFocus={() => {
@@ -234,17 +289,21 @@ export function DashboardFilters({
                   />
                 </label>
               ))}
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={followNow}
-                  onChange={(e) => setFollowNow(e.target.checked)}
-                />
-                {t("End follows now", "结束时间跟随当前时刻")}
-              </label>
+              {!daily && (
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={followNow}
+                    onChange={(e) => setFollowNow(e.target.checked)}
+                  />
+                  {t("End follows now", "结束时间跟随当前时刻")}
+                </label>
+              )}
               {error && (
                 <p role="alert" className="text-destructive">
-                  {t("Check the dates and times.", "请检查日期和时间。")}
+                  {daily
+                    ? t("Check the start and end dates.", "请检查开始与结束日期。")
+                    : t("Check the dates and times.", "请检查日期和时间。")}
                 </p>
               )}
               <div className="flex justify-end gap-2">
@@ -258,10 +317,15 @@ export function DashboardFilters({
                 <Button
                   size="sm"
                   onClick={() => {
-                    const start = civilToISO(from, bootstrap.timeZone);
-                    const end = followNow
-                      ? new Date().toISOString()
-                      : civilToISO(to, bootstrap.timeZone);
+                    const start = civilToISO(
+                      daily ? `${from}T00:00` : from,
+                      bootstrap.timeZone,
+                    );
+                    const end = daily
+                      ? civilToISO(`${nextCivilDay(to)}T00:00`, bootstrap.timeZone)
+                      : followNow
+                        ? new Date().toISOString()
+                        : civilToISO(to, bootstrap.timeZone);
                     if (!start || !end || start >= end) {
                       setError(true);
                       return;
@@ -269,7 +333,7 @@ export function DashboardFilters({
                     onRange("custom", {
                       customFrom: start,
                       customTo: end,
-                      followNow,
+                      followNow: !daily && followNow,
                     });
                     setDateOpen(false);
                   }}
@@ -327,7 +391,7 @@ export function DashboardFilters({
                       onClick={() => {
                         const current = active === "from" ? from : to;
                         (active === "from" ? setFrom : setTo)(
-                          `${value}T${current.slice(11) || "00:00"}`,
+                          daily ? value : `${value}T${current.slice(11) || "00:00"}`,
                         );
                         setMonth(value.slice(0, 7));
                       }}
@@ -374,7 +438,9 @@ export function DashboardFilters({
         >
           {t("All", "全部")}
         </button>
-        {bootstrap.visibleUsageServices.map((item) => {
+        {bootstrap.visibleUsageServices
+          .filter((item) => mode !== "daily" || item !== "cursor")
+          .map((item) => {
           const app = bootstrap.sidebarApplications.find(
             (x) => x.usageService === item,
           );
@@ -415,25 +481,34 @@ export function DashboardFilters({
           );
         })}
       </div>
-      <DropdownMenu open={cascadeOpen} onOpenChange={setCascadeOpen}>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="outline"
-              size="sm"
-              className={`${filterControl} justify-start`}
-            />
-          }
-        >
-          <ListFilter className="size-4" />
-          <span className="text-left">
-            {selectedSource?.title ?? t("Provider / model", "供应商 / 模型")}
-            {modelID ? ` · ${modelDisplayName(modelID)}` : ""}
-          </span>
-          <ChevronDown className="ml-auto size-4" />
-        </DropdownMenuTrigger>
+      <DropdownMenu
+        open={mode === "full" && cascadeOpen}
+        onOpenChange={(open) => setCascadeOpen(mode === "full" && open)}
+      >
+        <span className="inline-flex" title={providerDisabledReason}>
+          <DropdownMenuTrigger
+            disabled={mode !== "full"}
+            title={providerDisabledReason}
+            render={
+              <Button
+                variant="outline"
+                size="sm"
+                className={`${filterControl} justify-start`}
+              />
+            }
+          >
+            <ListFilter className="size-4" />
+            <span className="text-left">
+              {mode === "full"
+                ? selectedSource?.title ?? t("Provider / model", "供应商 / 模型")
+                : t("Provider / model", "供应商 / 模型")}
+              {mode === "full" && modelID ? ` · ${modelDisplayName(modelID)}` : ""}
+            </span>
+            <ChevronDown className="ml-auto size-4" />
+          </DropdownMenuTrigger>
+        </span>
         <DropdownMenuContent
-          align="start"
+          align="end"
           aria-label={t("Providers", "供应商")}
           className="w-max min-w-56 max-w-[calc(100vw-24px)]"
         >
@@ -441,6 +516,7 @@ export function DashboardFilters({
             <DropdownMenuSub key={group.id ?? "all"}>
               <DropdownMenuSubTrigger
                 openOnHover
+                side="left"
                 label={group.title}
                 aria-label={group.title}
                 className="text-[13px]"
@@ -466,6 +542,7 @@ export function DashboardFilters({
                 )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent
+                side="left"
                 aria-label={t(`${group.title} models`, `${group.title}的模型`)}
                 className="min-w-56 max-w-[calc(100vw-24px)]"
               >
@@ -512,6 +589,14 @@ export function DashboardFilters({
       </DropdownMenu>
     </div>
   );
+}
+export function nextCivilDay(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return "";
+  const date = new Date(`${value}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value)
+    return "";
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
 }
 export function civilInput(date: Date, timeZone: string): string {
   const parts = Object.fromEntries(

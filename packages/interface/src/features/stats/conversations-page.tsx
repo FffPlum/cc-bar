@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Copy, Folder } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChevronDown, CircleHelp, Copy, Folder } from "lucide-react";
 import type {
   ConversationDetail,
   ConversationListResult,
@@ -18,14 +18,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { EmptyState, KpiCard, Panel } from "@/components/workspace";
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { EmptyState } from "@/components/workspace";
 import { ResourceFeedback } from "@/components/resource-feedback";
 import { SearchInput } from "@/components/search-input";
 import { SelectField } from "@/components/select-field";
@@ -131,7 +128,7 @@ export function ConversationsPage({
   );
   const privacy = settings.appearance.privacyMode;
   return (
-    <div className="grid h-full min-h-0 min-w-0 grid-cols-[400px_minmax(480px,1fr)] max-[1100px]:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+    <div className="grid h-full min-h-0 min-w-0 grid-cols-[440px_minmax(0,1fr)] max-[1100px]:grid-cols-[minmax(0,9fr)_minmax(0,11fr)]">
       <section
         className="flex min-h-0 min-w-0 flex-col border-r"
         onKeyDown={keyboard}
@@ -218,11 +215,13 @@ export function ConversationsPage({
           </ResourceFeedback>
         </div>
       </section>
-      <section className="cc-scrollbar min-h-0">
+      <section className="cc-scrollbar min-h-0 min-w-0">
         {selection ? (
           <ResourceFeedback {...detail} onRetry={() => void detail.reload()}>
             {(value) =>
-              value ? <ConversationDetailView detail={value} /> : null
+              value ? (
+                <ConversationDetailView key={value.summary.id} detail={value} />
+              ) : null
             }
           </ResourceFeedback>
         ) : (
@@ -379,14 +378,14 @@ function ConversationDetailView({ detail }: { detail: ConversationDetail }) {
   const tokenSum =
     totals.inputTokens + totals.outputTokens + totals.cacheReadTokens;
   return (
-    <div className="space-y-3.5 p-5">
+    <div className="@container flex flex-col gap-4 p-5">
       {copyError && (
         <p role="alert" className="text-xs text-red-600">
           {copyError}
         </p>
       )}
-      <header className="space-y-1.5">
-        <div className="flex items-center gap-2">
+      <header className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
           <ServiceIcon
             name={serviceDisplayName(row.service)}
             color={brandColor(
@@ -410,31 +409,70 @@ function ConversationDetailView({ detail }: { detail: ConversationDetail }) {
           </span>
           <SpeedBadge summary={row.speed.summary} />
         </div>
-        <h2 className="text-[18px] font-semibold">{row.title}</h2>
-        <p
-          className="truncate font-mono text-[11px] text-muted-foreground"
-          title={row.project.path}
-        >
-          {row.project.path || row.project.name}
-        </p>
-        <div className="cc-number flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-          <span>{row.gitBranch}</span>
-          <span>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <h2 className="min-w-0 break-words text-[18px] font-semibold">
+            {row.title ?? t("Untitled conversation", "未命名对话")}
+          </h2>
+          {row.includesSubtasks && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+              {t("Includes subtask usage", "包含子任务用量")}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      className="inline-flex size-5 items-center justify-center rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={t("About subtask usage", "子任务用量说明")}
+                    />
+                  }
+                >
+                  <CircleHelp className="size-3.5" aria-hidden="true" />
+                </TooltipTrigger>
+                <TooltipContent>
+                  {t(
+                    "Tokens, estimated costs and requests include usage from subtasks belonging to this conversation.",
+                    "此处的 Token、估算费用和请求数已包含归属于该对话的子任务用量。",
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            </span>
+          )}
+        </div>
+        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
+          <dt>{t("Working directory", "工作目录")}</dt>
+          <dd
+            className="break-all font-mono"
+            title={t(
+              "Project directory recorded for this conversation. Git worktrees are grouped under the main repository.",
+              "此对话归属的项目目录；Git worktree 会归到主仓库。",
+            )}
+          >
+            {row.project.path || row.project.name}
+          </dd>
+          <dt>{t("Git branch", "Git 分支")}</dt>
+          <dd className="break-all font-mono">
+            {row.gitBranch ||
+              (settings.appearance.privacyMode
+                ? t("Hidden", "已隐藏")
+                : t("Not recorded", "未记录"))}
+          </dd>
+          <dt>{t("Time", "时间")}</dt>
+          <dd className="cc-number">
             {formatDate(row.firstAt, language, bootstrap.timeZone)}{" "}
             {formatTime(row.firstAt, bootstrap.timeZone)} –{" "}
             {formatDate(row.lastAt, language, bootstrap.timeZone)}{" "}
             {formatTime(row.lastAt, bootstrap.timeZone)}
-          </span>
-          {row.includesSubtasks && (
-            <span>{t("Includes subtask usage", "包含子任务用量")}</span>
-          )}
-          <span className="flex items-center gap-1">
-            {t("Conversation ID", "对话 ID")}{" "}
-            <span className="font-mono">{row.conversationID}</span>
+          </dd>
+          <dt>{t("Conversation ID", "对话 ID")}</dt>
+          <dd className="flex min-w-0 items-center gap-1">
+            <span className="min-w-0 break-all font-mono">
+              {row.conversationID}
+            </span>
             {!settings.appearance.privacyMode && (
               <Button
                 variant="ghost"
                 size="icon-xs"
+                className="shrink-0"
                 aria-label={
                   copied
                     ? t("Copied", "已复制")
@@ -455,29 +493,35 @@ function ConversationDetailView({ detail }: { detail: ConversationDetail }) {
                 <Copy />
               </Button>
             )}
-          </span>
-        </div>
+          </dd>
+        </dl>
       </header>
-      <div className="flex gap-3">
-        <KpiCard
-          label={t("Total tokens", "总 Tokens")}
-          value={formatTokens(totals.totalTokens, language)}
-        />
-        <KpiCard
-          label={t("Estimated cost", "估算费用")}
-          value={row.costs.displayTotal}
-        />
-        <KpiCard
-          label={t("Requests", "请求数")}
-          value={formatInteger(totals.requestCount, language)}
-        />
-        <KpiCard
-          label={t("Cache hit rate", "缓存命中率")}
-          value={formatPercent(totals.cacheHitRate)}
-        />
-      </div>
-      <div className="grid gap-3 min-[760px]:grid-cols-2">
-        <Panel title={t("Token composition", "Token 构成")}>
+      <DetailSection title={t("Usage", "用量信息")}>
+        <dl className="grid grid-cols-2 @min-[640px]:grid-cols-4">
+          <UsageValue
+            label={t("Total tokens", "总 Token")}
+            value={formatTokens(totals.totalTokens, language)}
+            className="pr-3 pb-3 @min-[640px]:pb-0"
+          />
+          <UsageValue
+            label={t("Estimated cost", "估算费用")}
+            value={row.costs.displayTotal}
+            className="border-l pb-3 pl-3 @min-[640px]:pr-3 @min-[640px]:pb-0"
+          />
+          <UsageValue
+            label={t("Requests", "请求数")}
+            value={formatInteger(totals.requestCount, language)}
+            className="border-t pt-3 pr-3 @min-[640px]:border-t-0 @min-[640px]:border-l @min-[640px]:pt-0 @min-[640px]:pl-3"
+          />
+          <UsageValue
+            label={t("Cache hits (tokens)", "缓存命中数（Token）")}
+            value={formatTokens(totals.cacheReadTokens, language)}
+            className="border-t border-l pt-3 pl-3 @min-[640px]:border-t-0 @min-[640px]:pt-0"
+          />
+        </dl>
+      </DetailSection>
+      <DetailSection title={t("Token composition", "Token 构成")}>
+        <div className="divide-y">
           <DetailValue
             label={t("Input", "输入")}
             value={formatTokens(totals.inputTokens, language)}
@@ -501,14 +545,24 @@ function ConversationDetailView({ detail }: { detail: ConversationDetail }) {
                 : "N/A"
             }
           />
-        </Panel>
-        <Panel title={t("Estimated cost breakdown", "估算费用构成")}>
+        </div>
+      </DetailSection>
+      <DetailSection title={t("Estimated cost", "估算费用")}>
+        <div className="divide-y">
           <DetailValue
-            label="Standard"
+            label={t("Standard", "标准档位")}
             value={row.speed.standard.costDisplay}
           />
-          <DetailValue label="Fast" value={row.speed.fast.costDisplay} />
-          <div className="my-1 border-t" />
+          <DetailValue
+            label={t("Fast", "快速档位")}
+            value={row.speed.fast.costDisplay}
+          />
+          {row.speed.unknown.requestCount > 0 && (
+            <DetailValue
+              label={t("Unrecognized tier", "未识别档位")}
+              value={row.speed.unknown.costDisplay}
+            />
+          )}
           <DetailValue
             label={t("Input", "输入")}
             value={row.costs.displayInput}
@@ -529,86 +583,42 @@ function ConversationDetailView({ detail }: { detail: ConversationDetail }) {
                 : "N/A"
             }
           />
-        </Panel>
-      </div>
-      <div className="grid items-start gap-3 min-[760px]:grid-cols-[58fr_42fr]">
-        <Panel title={t("By model", "按模型")} contentClassName="p-3">
-          {detail.models.map((model) => (
-            <div
-              key={`${model.service}:${model.model}`}
-              className="border-b py-2 last:border-0"
-            >
-              <div className="flex items-center gap-1.5">
-                <span className="truncate font-mono text-[11.5px]">
-                  {model.model}
-                </span>
-                <SpeedBadge summary={model.speed.summary} />
-                <span className="flex-1" />
-                <span className="cc-number text-[10.5px] text-muted-foreground">
-                  {formatTokens(model.totals.totalTokens, language)}
-                </span>
-                <span className="cc-number w-[76px] text-right text-[11.5px] font-semibold">
-                  {model.costs.displayTotal}
-                </span>
-              </div>
-              <p className="cc-number mt-1 text-[10.5px] text-muted-foreground">
-                in {formatTokens(model.totals.inputTokens, language)} · out{" "}
-                {formatTokens(model.totals.outputTokens, language)} · cache{" "}
-                {formatTokens(model.totals.cacheReadTokens, language)}
-              </p>
-              <p className="cc-number mt-1 text-[10.5px] text-muted-foreground">
-                {model.totals.averageFirstTokenSeconds !== null
-                  ? `${t("First token", "首字")} ${model.totals.averageFirstTokenSeconds.toFixed(1)}s · `
-                  : ""}
-                {t("Output speed", "输出速度")}{" "}
-                {model.totals.outputTokensPerSecond === null
-                  ? "—"
-                  : `${model.totals.usesEstimatedSpeed ? "≈" : ""}${formatInteger(model.totals.outputTokensPerSecond, language)} t/s`}
-              </p>
-            </div>
-          ))}
-        </Panel>
-        <Panel title={t("Speed tiers", "速度档位")} contentClassName="p-3">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("Tier", "档位")}</TableHead>
-                <TableHead className="text-right">Tokens</TableHead>
-                <TableHead className="text-right">
-                  {t("Requests", "请求")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(
-                [
-                  ["Standard", row.speed.standard],
-                  ["Fast", row.speed.fast],
-                  [t("Unrecognized", "未识别"), row.speed.unknown],
-                ] as const
-              ).map(([label, value]) => (
-                <TableRow key={label}>
-                  <TableCell>{label}</TableCell>
-                  <TableCell className="cc-number text-right">
-                    {formatTokens(value.totalTokens, language)}
-                  </TableCell>
-                  <TableCell className="cc-number text-right">
-                    {formatInteger(value.requestCount, language)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <p className="cc-number mt-2 text-[11px] text-muted-foreground">
-            {t("Billing equivalent", "计费等效")}{" "}
-            {formatTokens(
-              Number(row.speed.fastBillingEquivalentTokens),
-              language,
-            )}{" "}
-            Tokens
-          </p>
-        </Panel>
-      </div>
+        </div>
+      </DetailSection>
+    </div>
+  );
+}
+
+function DetailSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="py-3">
+      <h3 className="mb-3 text-[13px] font-semibold">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function UsageValue({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn("min-w-0", className)}>
+      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+      <dd className="cc-number mt-1 break-all text-[22px] leading-tight font-semibold">
+        {value}
+      </dd>
     </div>
   );
 }
@@ -623,7 +633,7 @@ function DetailValue({
   share?: number;
 }) {
   return (
-    <div className="flex items-center border-b py-[7px] text-[12px] last:border-0">
+    <div className="flex items-center py-2 text-[12px] first:pt-0 last:pb-0">
       <span>{label}</span>
       <span className="flex-1" />
       <span className="cc-number font-semibold">{value}</span>

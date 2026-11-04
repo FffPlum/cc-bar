@@ -13,6 +13,7 @@ export function SelectField<T extends string>({
   onChange,
   ariaLabel,
   className,
+  contentAlign = "start",
   disabled = false,
 }: {
   value: T;
@@ -20,6 +21,7 @@ export function SelectField<T extends string>({
   onChange: (value: T) => void;
   ariaLabel: string;
   className?: string;
+  contentAlign?: "start" | "end";
   disabled?: boolean;
 }) {
   return (
@@ -34,16 +36,16 @@ export function SelectField<T extends string>({
       <SelectTrigger
         size="sm"
         aria-label={ariaLabel}
-        className={cn("max-w-56 text-[12px]", className)}
+        className={cn("max-w-56 text-[13px]", className)}
       >
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent align={contentAlign}>
         {options.map((option) => (
           <SelectItem
             key={option.value}
             value={option.value}
-            className="text-[12px]"
+            className="text-[13px]"
           >
             {option.label}
           </SelectItem>

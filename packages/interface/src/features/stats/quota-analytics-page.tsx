@@ -53,7 +53,7 @@ function AnalyticsCollection({ accounts }: { accounts: QuotaAccount[] }) {
   })), domains, [api, ids]);
   return <ResourceFeedback {...resource} onRetry={() => void resource.reload()}>{(analytics) => {
     const timelines = analytics.map((item) => item[kind]).filter((item) => item.window !== null);
-    return <div className="cc-scrollbar h-full"><div className="space-y-4 px-5 pb-5">
+    return <div className="cc-scrollbar h-full"><div className="space-y-4">
       <CycleCards analytics={analytics} />
       <section><div className="mb-3 flex items-center"><h2 className="text-[13px] font-semibold">{kind === "fiveHour" ? t("Quota changes today", "今日额度变化") : t("Weekly quota changes", "每周额度变化")}</h2><span className="flex-1" /><Segmented value={kind} options={[{ value: "fiveHour", label: "5H" }, { value: "weekly", label: "WK" }]} onChange={setKind} ariaLabel={t("Quota window", "额度窗口")} /><span className="cc-number ml-3 text-[11px] text-muted-foreground">{formatDate(new Date().toISOString(), bootstrap.resolvedLanguage, bootstrap.timeZone)}</span></div>
         {timelines.length ? <div className="grid items-start gap-3 min-[880px]:grid-cols-2">{timelines.map((item) => <TimelineAccount key={item.account.id + ":" + kind} value={item} kind={kind} />)}</div> : <EmptyState title={t("No data for this window", "该窗口暂无数据")} />}

@@ -1,7 +1,7 @@
 import * as React from "react"
 import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 import { cn } from "cn"
-import { ChevronRightIcon, CheckIcon } from "lucide-react"
+import { ChevronLeftIcon, ChevronRightIcon, CheckIcon } from "lucide-react"
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
   return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />
@@ -101,9 +101,11 @@ function DropdownMenuSubTrigger({
   className,
   inset,
   children,
+  side = "right",
   ...props
 }: MenuPrimitive.SubmenuTrigger.Props & {
   inset?: boolean
+  side?: "left" | "right"
 }) {
   return (
     <MenuPrimitive.SubmenuTrigger
@@ -115,8 +117,9 @@ function DropdownMenuSubTrigger({
       )}
       {...props}
     >
+      {side === "left" && <ChevronLeftIcon aria-hidden="true" />}
       {children}
-      <ChevronRightIcon className="ml-auto" />
+      {side === "right" && <ChevronRightIcon className="ml-auto" aria-hidden="true" />}
     </MenuPrimitive.SubmenuTrigger>
   )
 }

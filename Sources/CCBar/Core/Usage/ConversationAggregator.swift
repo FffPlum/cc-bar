@@ -752,6 +752,7 @@ final class ConversationAggregator {
             bucketTotals.cacheCreationTokens = value.cacheCreationTokens
             bucketTotals.costUSD = value.costUSD
             bucketTotals.requestCount = value.requestCount
+            bucketTotals.timing = value.timing
             speed.add(
                 speed: value.speed,
                 totals: bucketTotals,
