@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type {
   DashboardMetric,
   DashboardSample,
@@ -34,6 +34,7 @@ export function DashboardChart({
   const [tooltipHandle] = useState(() =>
     createChartDataTooltipHandle<string>(),
   );
+  const plot = useRef<HTMLDivElement>(null);
   const { bootstrap, settings } = useHost();
   const t = useTranslation();
   const valueLabel = (sample: DashboardSample | DashboardSampleSegment) =>
@@ -142,7 +143,7 @@ export function DashboardChart({
           ))}
         </div>
         <div className="min-w-[5rem] flex-1">
-          <div className="relative flex h-40 items-end border-b">
+          <div ref={plot} className="relative flex h-40 items-end border-b">
             <div className="pointer-events-none absolute inset-x-0 top-0 border-t" />
             <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t" />
             {(empty ? [] : samples).map((s) => (
@@ -188,7 +189,11 @@ export function DashboardChart({
                 </span>
               </ChartDataTooltipTrigger>
             ))}
-            <ChartDataTooltip handle={tooltipHandle}>
+            <ChartDataTooltip
+              handle={tooltipHandle}
+              placement="bar"
+              plotRef={plot}
+            >
               {({ payload: key }) => {
                 const s = samples.find((sample) => sample.key === key);
                 if (!s || empty) return null;

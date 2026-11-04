@@ -274,9 +274,9 @@ textarea[data-private] { -webkit-text-security: disc; }
   background-color: var(--muted);
 }
 
-/* Chart cards retain the default ChartTooltip motion between pointer targets. */
+/* Bar cards use WAAPI for entry and retargeting; other cards retain CSS motion. */
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
-  .cc-chart-tooltip-positioner[data-open][data-animated] {
+  .cc-chart-tooltip-positioner[data-open][data-animated]:not([data-placement="bar"]) {
     transition: var(--cc-chart-tooltip-transition, transform 400ms ease);
   }
 }

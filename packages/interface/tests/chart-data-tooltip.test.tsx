@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   ChartDataTooltip,
@@ -8,12 +14,26 @@ import {
 } from "@/components/chart-data-tooltip";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
-afterEach(() => vi.restoreAllMocks());
+const animateDescriptor = Object.getOwnPropertyDescriptor(
+  HTMLElement.prototype,
+  "animate",
+);
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  if (animateDescriptor) {
+    Object.defineProperty(HTMLElement.prototype, "animate", animateDescriptor);
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, "animate");
+  }
+});
 
 const setup = (
   left = 100,
   top = 80,
-  placement: "cursor" | "cell" = "cursor",
+  placement: "cursor" | "cell" | "bar" = "cursor",
+  plot = { left: 50, top: 40, width: 800, height: 600 },
 ) => {
   const rectangle = (x: number, y: number, width: number, height: number) =>
     ({
@@ -33,6 +53,8 @@ const setup = (
       "chart-data-tooltip";
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
     function (this: HTMLElement) {
+      if (this.dataset.testid === "plot")
+        return rectangle(plot.left, plot.top, plot.width, plot.height);
       if (this.dataset.testid === "column")
         return rectangle(left, top, 100, 160);
       if (this.dataset.testid === "next-column")
@@ -57,30 +79,213 @@ const setup = (
     768,
   );
   const handle = createChartDataTooltipHandle<string>();
+  const plotRef = { current: null as HTMLDivElement | null };
   render(
     <TooltipProvider>
-      <ChartDataTooltipTrigger
-        handle={handle}
-        payload="Existing details"
-        render={<button data-testid="column">Column</button>}
-      />
-      <ChartDataTooltipTrigger
-        handle={handle}
-        payload="Next details"
-        render={<button data-testid="next-column">Next column</button>}
-      />
-      <ChartDataTooltip handle={handle} placement={placement}>
-        {({ payload }) => (
-          <ChartDataTooltipContent className="w-[260px]">
-            <strong>Existing heading</strong>
-            <span>{payload}</span>
-          </ChartDataTooltipContent>
-        )}
-      </ChartDataTooltip>
+      <div ref={plotRef} data-testid="plot">
+        <ChartDataTooltipTrigger
+          handle={handle}
+          payload="Existing details"
+          render={<button data-testid="column">Column</button>}
+        />
+        <ChartDataTooltipTrigger
+          handle={handle}
+          payload="Next details"
+          render={<button data-testid="next-column">Next column</button>}
+        />
+        <ChartDataTooltip
+          handle={handle}
+          placement={placement}
+          plotRef={plotRef}
+        >
+          {({ payload }) => (
+            <ChartDataTooltipContent className="w-[260px]">
+              <strong>Existing heading</strong>
+              <span>{payload}</span>
+            </ChartDataTooltipContent>
+          )}
+        </ChartDataTooltip>
+      </div>
     </TooltipProvider>,
   );
   return screen.getByRole("button", { name: "Column" });
 };
+
+it("flies into a measured bar position and remembers the interrupted position across portal mounts", async () => {
+  vi.stubGlobal("matchMedia", () => ({
+    matches: true,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+  const cancel = vi.fn();
+  const animate = vi.fn(() => ({ cancel }));
+  Object.defineProperty(HTMLElement.prototype, "animate", {
+    configurable: true,
+    value: animate,
+  });
+  const plot = { left: 50, top: 40, width: 800, height: 600 };
+  const trigger = setup(100, 80, "bar", plot);
+  fireEvent.mouseEnter(trigger, { clientX: 120, clientY: 140 });
+  const positioner = (await screen.findByText("Existing details"))
+    .parentElement!.parentElement!;
+  await waitFor(() => expect(animate).toHaveBeenCalled());
+  expect(animate).toHaveBeenLastCalledWith(
+    [
+      { transform: "translate(590px, 460px)" },
+      { transform: "translate(160px, 150px)" },
+    ],
+    { duration: 400, easing: "ease", fill: "both" },
+  );
+  // Close before reaching the destination, then move the chart before reopening.
+  positioner.getBoundingClientRect = () => new DOMRect(100, 90, 260, 180);
+  fireEvent.mouseLeave(trigger);
+  await waitFor(() => expect(screen.queryByText("Existing details")).toBeNull());
+  expect(cancel).toHaveBeenCalled();
+  plot.left += 30;
+  plot.top += 30;
+  animate.mockClear();
+  fireEvent.mouseEnter(trigger, { clientX: 120, clientY: 140 });
+  await screen.findByText("Existing details");
+  await waitFor(() => expect(animate).toHaveBeenCalled());
+  expect(animate).toHaveBeenLastCalledWith(
+    [
+      { transform: "translate(130px, 120px)" },
+      { transform: "translate(160px, 150px)" },
+    ],
+    { duration: 400, easing: "ease", fill: "both" },
+  );
+});
+
+it("snaps bar cards to the column centre and follows only pointer Y with a 10px gap", async () => {
+  const trigger = setup(100, 80, "bar");
+  fireEvent.mouseEnter(trigger, { clientX: 120, clientY: 140 });
+  const card = (await screen.findByText("Existing details")).parentElement!;
+  const positioner = card.parentElement!;
+  await waitFor(() =>
+    expect(positioner.style.transform).toBe("translate(160px, 150px)"),
+  );
+  fireEvent.mouseMove(trigger, { clientX: 180, clientY: 200 });
+  await waitFor(() =>
+    expect(positioner.style.transform).toBe("translate(160px, 210px)"),
+  );
+  expect(positioner.style.visibility).toBe("visible");
+  expect(positioner.hasAttribute("data-animated")).toBe(true);
+
+  const next = screen.getByRole("button", { name: "Next column" });
+  fireEvent.mouseLeave(trigger, { relatedTarget: next });
+  fireEvent.mouseEnter(next, {
+    relatedTarget: trigger,
+    clientX: 230,
+    clientY: 180,
+  });
+  expect((await screen.findByText("Next details")).parentElement).toBe(card);
+  await waitFor(() =>
+    expect(positioner.style.transform).toBe("translate(260px, 190px)"),
+  );
+});
+
+it.each([
+  { left: 600, pointerY: 140, x: 380, y: 150 },
+  { left: 100, pointerY: 500, x: 160, y: 310 },
+  { left: 600, pointerY: 500, x: 380, y: 310 },
+])(
+  "flips bar cards independently at the plot edges ($x, $y), even with viewport space",
+  async ({ left, pointerY, x, y }) => {
+    const trigger = setup(left, 80, "bar");
+    fireEvent.mouseEnter(trigger, { clientX: left + 20, clientY: pointerY });
+    const positioner = (await screen.findByText("Existing details"))
+      .parentElement!.parentElement!;
+    await waitFor(() =>
+      expect(positioner.style.transform).toBe(`translate(${x}px, ${y}px)`),
+    );
+  },
+);
+
+it("rechecks bar positions when the plot resizes without another pointer move", async () => {
+  const plot = { left: 50, top: 40, width: 800, height: 600 };
+  const trigger = setup(500, 80, "bar", plot);
+  fireEvent.mouseEnter(trigger, { clientX: 520, clientY: 140 });
+  const positioner = (await screen.findByText("Existing details"))
+    .parentElement!.parentElement!;
+  await waitFor(() =>
+    expect(positioner.style.transform).toBe("translate(560px, 150px)"),
+  );
+  plot.width = 600;
+  fireEvent.resize(window);
+  await waitFor(() =>
+    expect(positioner.style.transform).toBe("translate(280px, 150px)"),
+  );
+});
+
+it("keeps oversized bar cards readable at the plot's leading edges", async () => {
+  const trigger = setup(100, 80, "bar", {
+    left: 50,
+    top: 40,
+    width: 100,
+    height: 100,
+  });
+  fireEvent.mouseEnter(trigger, { clientX: 120, clientY: 100 });
+  const positioner = (await screen.findByText("Existing details"))
+    .parentElement!.parentElement!;
+  await waitFor(() =>
+    expect(positioner.style.transform).toBe("translate(50px, 40px)"),
+  );
+});
+
+it("repositions when only the plot resizes and releases its observer on close", async () => {
+  const observations = new Map<Element, () => void>();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      private targets = new Set<Element>();
+      constructor(private callback: () => void) {}
+      observe(target: Element) {
+        this.targets.add(target);
+        observations.set(target, this.callback);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+        observations.delete(target);
+      }
+      disconnect() {
+        this.targets.forEach((target) => observations.delete(target));
+        this.targets.clear();
+      }
+    },
+  );
+  const plot = { left: 50, top: 40, width: 800, height: 600 };
+  const trigger = setup(500, 80, "bar", plot);
+  fireEvent.mouseEnter(trigger, { clientX: 520, clientY: 140 });
+  const positioner = (await screen.findByText("Existing details"))
+    .parentElement!.parentElement!;
+  await waitFor(() =>
+    expect(positioner.style.transform).toBe("translate(560px, 150px)"),
+  );
+  const plotElement = screen.getByTestId("plot");
+  expect(observations.has(plotElement)).toBe(true);
+  plot.width = 600;
+  act(() => observations.get(plotElement)!());
+  await waitFor(() =>
+    expect(positioner.style.transform).toBe("translate(280px, 150px)"),
+  );
+  fireEvent.mouseLeave(trigger);
+  await waitFor(() => expect(observations.has(plotElement)).toBe(false));
+});
+
+it("positions a keyboard-opened bar card immediately and dismisses it with Escape", async () => {
+  const trigger = setup(100, 80, "bar");
+  fireEvent.focus(trigger);
+  const positioner = (await screen.findByText("Existing details"))
+    .parentElement!.parentElement!;
+  await waitFor(() =>
+    expect(positioner.style.transform).toBe("translate(160px, 90px)"),
+  );
+  expect(positioner.hasAttribute("data-animated")).toBe(false);
+  fireEvent.keyDown(document, { key: "Escape" });
+  await waitFor(() =>
+    expect(screen.queryByText("Existing details")).toBeNull(),
+  );
+});
 
 it.each([
   { top: 80, pointerY: 140, side: "bottom", cardTop: 252 },

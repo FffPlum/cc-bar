@@ -5,6 +5,7 @@ import usage from "../../host-api/fixtures/window-usage.json";
 import { HeatmapBlocks } from "@/features/stats/dashboard-heatmap";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LanguageProvider } from "@/lib/i18n";
+import type { TokenAxisMode } from "@/lib/token-axis-scale";
 
 vi.mock("@/host/host-context", async () => {
   const fixtures = await import("./fixtures");
@@ -39,14 +40,18 @@ const block = {
   nextBeforeDay: "2026-01-05",
 } as DashboardHeatmap;
 
-const setup = (input = block) =>
-  render(
-    <LanguageProvider language="en">
-      <TooltipProvider>
-        <HeatmapBlocks blocks={[input]} today="2026-01-18" />
-      </TooltipProvider>
-    </LanguageProvider>,
-  );
+const chartElement = (input = block, weeklyScale?: TokenAxisMode) => (
+  <LanguageProvider language="en">
+    <TooltipProvider>
+      <HeatmapBlocks
+        blocks={[input]}
+        today="2026-01-18"
+        weeklyScale={weeklyScale}
+      />
+    </TooltipProvider>
+  </LanguageProvider>
+);
+const setup = (input = block) => render(chartElement(input));
 
 it("puts months below daily cells and removes weekdays and older pagination", () => {
   const { container } = setup();
@@ -132,3 +137,92 @@ it.each([
     ).toEqual(labels);
   },
 );
+
+it("uses the weekly peak for both axis labels and linear bar heights", () => {
+  const { container } = setup({
+    ...block,
+    days: block.days.map((day, index) => ({
+      ...day,
+      totals: {
+        ...day.totals,
+        totalTokens: index === 0 ? 837_200_000 : index === 7 ? 425_000_000 : 0,
+      },
+    })),
+  });
+  fireEvent.click(screen.getByRole("tab", { name: "Weekly" }));
+  expect(
+    container
+      .querySelector('[data-slot="weekly-token-chart"]')
+      ?.getAttribute("data-scale"),
+  ).toBe("linear");
+  const ticks = Array.from(
+    container.querySelectorAll<HTMLElement>('[data-slot="token-value-tick"]'),
+  );
+  expect(ticks.map((tick) => tick.textContent)).toEqual(["0", "425M", "850M"]);
+  expect(ticks.map((tick) => tick.style.top)).toEqual(["97.5%", "50%", "2.5%"]);
+  const bars = Array.from(
+    container.querySelectorAll<HTMLElement>('[data-slot="weekly-token-bar"]'),
+  );
+  expect(parseFloat(bars[0]!.style.height)).toBeCloseTo(93.57, 2);
+  expect(parseFloat(bars[1]!.style.height)).toBe(47.5);
+});
+
+it("switches the weekly scale through props without adding controls or changing raw Tokens", () => {
+  const input = {
+    ...block,
+    days: block.days.map((day, index) => ({
+      ...day,
+      totals: {
+        ...day.totals,
+        totalTokens: index === 0 ? 1_000_000 : index === 7 ? 100_000_000 : 0,
+      },
+    })),
+  };
+  const { container, rerender } = setup(input);
+  fireEvent.click(screen.getByRole("tab", { name: "Weekly" }));
+  const chart = container.querySelector('[data-slot="weekly-token-chart"]');
+  const firstBar = container.querySelector<HTMLElement>(
+    '[data-slot="weekly-token-bar"]',
+  )!;
+  expect(parseFloat(firstBar.style.height)).toBeCloseTo(0.95);
+
+  rerender(chartElement(input, "log"));
+  expect(container.querySelector('[data-slot="weekly-token-chart"]')).toBe(
+    chart,
+  );
+  expect(chart?.getAttribute("data-scale")).toBe("log");
+  expect(parseFloat(firstBar.style.height)).toBeCloseTo(71.25, 4);
+  expect(
+    screen.getByRole("button", {
+      name: "2026-01-05 – 2026-01-11: 1.00M Tokens",
+    }),
+  ).toBeTruthy();
+  const ticks = Array.from(
+    container.querySelectorAll<HTMLElement>('[data-slot="token-value-tick"]'),
+  );
+  const gridlines = Array.from(
+    container.querySelectorAll<HTMLElement>(
+      '[data-slot="token-value-gridline"]',
+    ),
+  );
+  expect(ticks.map((tick) => tick.textContent)).toEqual(["0", "10K", "100M"]);
+  expect(ticks.map((tick) => tick.style.top)).toEqual(
+    gridlines.map((line) => line.style.top),
+  );
+  expect(screen.queryByRole("button", { name: /log|linear/i })).toBeNull();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Cumulative total" }));
+  expect(
+    container
+      .querySelector('[data-slot="rolling-token-chart"]')
+      ?.getAttribute("data-scale"),
+  ).toBe("linear");
+  fireEvent.click(screen.getByRole("tab", { name: "Weekly" }));
+  rerender(chartElement(input, "linear"));
+  expect(
+    parseFloat(
+      container.querySelector<HTMLElement>('[data-slot="weekly-token-bar"]')!
+        .style.height,
+    ),
+  ).toBeCloseTo(0.95);
+});

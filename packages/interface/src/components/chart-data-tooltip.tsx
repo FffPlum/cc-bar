@@ -4,10 +4,16 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
+  type RefObject,
 } from "react";
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 import { cn } from "@/lib/utils";
+import {
+  useBarTooltipMotion,
+  type BarTooltipMotion,
+} from "./use-bar-tooltip-motion";
 
 interface HoverAnchor {
   element: Element;
@@ -18,7 +24,10 @@ interface HoverAnchor {
 const ChartTooltipPositionContext = createContext<{
   animatePosition: boolean;
   followCursor: boolean;
-  placement: "cursor" | "cell";
+  placement: "cursor" | "cell" | "bar";
+  plotRef?: RefObject<HTMLElement | null>;
+  barMotion?: RefObject<BarTooltipMotion>;
+  barAnchor?: { getBoundingClientRect(): DOMRect };
   protectedElement?: Element;
   anchor?: TooltipPrimitive.Positioner.Props["anchor"];
 }>({ animatePosition: false, followCursor: true, placement: "cursor" });
@@ -29,9 +38,33 @@ export function ChartDataTooltip<Payload>({
   onOpenChange,
   trackCursorAxis = "both",
   placement = "cursor",
+  plotRef,
   ...props
-}: TooltipPrimitive.Root.Props<Payload> & { placement?: "cursor" | "cell" }) {
+}: TooltipPrimitive.Root.Props<Payload> & {
+  placement?: "cursor" | "cell" | "bar";
+  plotRef?: RefObject<HTMLElement | null>;
+}) {
   const [hover, setHover] = useState<HoverAnchor | null>(null);
+  const [activeTrigger, setActiveTrigger] = useState<Element | null>(null);
+  const [plotRevision, setPlotRevision] = useState(0);
+  const barMotion = useRef<BarTooltipMotion>({ position: null });
+  const barActive = placement === "bar" && activeTrigger !== null;
+  useLayoutEffect(() => {
+    const plot = plotRef?.current;
+    if (!barActive || !plot) return;
+    let { width, height } = plot.getBoundingClientRect();
+    const observer = new ResizeObserver(() => {
+      const rect = plot.getBoundingClientRect();
+      if (rect.width === width && rect.height === height) return;
+      width = rect.width;
+      height = rect.height;
+      // Base UI watches the trigger and popup, but not our separate plot bounds.
+      // Refresh the virtual anchor even when the pointer and column stay still.
+      setPlotRevision((revision) => revision + 1);
+    });
+    observer.observe(plot);
+    return () => observer.disconnect();
+  }, [barActive, plotRef]);
   const element = hover?.element;
   useEffect(() => {
     if (!element || trackCursorAxis === "none") return;
@@ -47,18 +80,38 @@ export function ChartDataTooltip<Payload>({
     return () => ownerWindow?.removeEventListener("mousemove", followPointer);
   }, [element, trackCursorAxis]);
 
-  const position = useMemo(
-    () => ({
+  const position = useMemo(() => {
+    const barAnchor =
+      placement === "bar" && activeTrigger
+        ? {
+            contextElement: activeTrigger,
+            getBoundingClientRect() {
+              const rect = activeTrigger.getBoundingClientRect();
+              // Match the chart's category centre, with only Y following the mouse.
+              return new DOMRect(
+                rect.left + rect.width / 2,
+                hover?.y ?? rect.top,
+                0,
+                0,
+              );
+            },
+          }
+        : undefined;
+    return {
       // Retarget the shared card's transition during hover, including side changes.
       // Keyboard focus continues to position immediately.
       animatePosition: hover !== null,
       followCursor: trackCursorAxis !== "none",
       placement,
+      plotRef,
+      barMotion,
+      barAnchor,
       protectedElement: placement === "cell" ? hover?.element : undefined,
       // Commit the new trigger and pointer together. Base UI's cursor tracker can
       // otherwise retain the previous column until the next mousemove.
       anchor:
-        hover && trackCursorAxis !== "none"
+        barAnchor ??
+        (hover && trackCursorAxis !== "none"
           ? {
               contextElement: hover.element,
               getBoundingClientRect() {
@@ -84,10 +137,9 @@ export function ChartDataTooltip<Payload>({
                 };
               },
             }
-          : undefined,
-    }),
-    [hover, trackCursorAxis, placement],
-  );
+          : undefined),
+    };
+  }, [hover, trackCursorAxis, placement, plotRef, activeTrigger, plotRevision]);
   return (
     <ChartTooltipPositionContext.Provider value={position}>
       <TooltipPrimitive.Root
@@ -97,6 +149,8 @@ export function ChartDataTooltip<Payload>({
         onOpenChange={(open, details) => {
           onOpenChange?.(open, details);
           if (!details.isCanceled) {
+            if (!open) barMotion.current.hide?.();
+            setActiveTrigger(open ? (details.trigger ?? null) : null);
             setHover(
               open && details.reason === "trigger-hover" && details.trigger
                 ? {
@@ -121,9 +175,48 @@ export function ChartDataTooltipContent({
   children,
   ...props
 }: TooltipPrimitive.Popup.Props) {
-  const { animatePosition, followCursor, placement, protectedElement, anchor } =
-    useContext(ChartTooltipPositionContext);
+  const {
+    animatePosition,
+    followCursor,
+    placement,
+    protectedElement,
+    anchor,
+    barAnchor,
+    plotRef,
+    barMotion,
+  } = useContext(ChartTooltipPositionContext);
   const [positioner, setPositioner] = useState<HTMLDivElement | null>(null);
+  useBarTooltipMotion(
+    positioner,
+    placement === "bar",
+    animatePosition,
+    plotRef,
+    barMotion,
+  );
+  const barOffsets = useMemo(() => {
+    const offset = (axis: "x" | "y", size: number) => {
+      const point = barAnchor?.getBoundingClientRect();
+      const plot = plotRef?.current?.getBoundingClientRect();
+      if (!point || !plot) return 10;
+      const start = axis === "x" ? plot.left : plot.top;
+      const end = axis === "x" ? plot.right : plot.bottom;
+      const positive = point[axis] + 10;
+      const negative = point[axis] - size - 10;
+      // Recharts evaluates the two axes independently. Oversized cards stay
+      // at the plot's leading edge rather than being squeezed to fit a side.
+      return (
+        Math.max(positive + size > end ? negative : positive, start) -
+        point[axis]
+      );
+    };
+    return {
+      sideOffset: ({ positioner }) => offset("y", positioner.height),
+      alignOffset: ({ positioner }) => offset("x", positioner.width),
+    } satisfies Pick<
+      TooltipPrimitive.Positioner.Props,
+      "sideOffset" | "alignOffset"
+    >;
+  }, [barAnchor, plotRef]);
   useLayoutEffect(() => {
     if (!positioner || !protectedElement) return;
     let previousTransform = "";
@@ -155,7 +248,10 @@ export function ChartDataTooltipContent({
     };
     avoidCellDuringMotion();
     const observer = new MutationObserver(avoidCellDuringMotion);
-    observer.observe(positioner, { attributes: true, attributeFilter: ["style"] });
+    observer.observe(positioner, {
+      attributes: true,
+      attributeFilter: ["style"],
+    });
     return () => {
       observer.disconnect();
       positioner.style.removeProperty("--cc-chart-tooltip-transition");
@@ -166,23 +262,40 @@ export function ChartDataTooltipContent({
       <TooltipPrimitive.Positioner
         ref={setPositioner}
         data-slot="chart-data-tooltip-positioner"
+        data-placement={placement}
         data-animated={animatePosition ? "" : undefined}
         anchor={anchor}
         positionMethod="fixed"
-        side={placement === "cell" ? "bottom" : "right"}
+        side={placement === "cell" || placement === "bar" ? "bottom" : "right"}
         align={placement === "cell" ? "center" : "start"}
+        alignOffset={placement === "bar" ? barOffsets.alignOffset : 0}
         sideOffset={
-          placement === "cell" || followCursor
-            ? 12
-            : ({ anchor }) => 10 - anchor.width / 2
+          placement === "bar"
+            ? barOffsets.sideOffset
+            : placement === "cell" || followCursor
+              ? 12
+              : ({ anchor }) => 10 - anchor.width / 2
         }
-        collisionPadding={8}
+        collisionPadding={placement === "bar" ? 0 : 8}
         // Cells retain their full height: flipping above/below cannot cover them.
-        collisionAvoidance={{
-          side: placement === "cell" || followCursor ? "flip" : "shift",
-          align: "shift",
-          fallbackAxisSide: "none",
-        }}
+        collisionAvoidance={
+          placement === "bar"
+            ? {
+                side: "none",
+                align: "none",
+                fallbackAxisSide: "none",
+              }
+            : {
+                side: placement === "cell" || followCursor ? "flip" : "shift",
+                align: "shift",
+                fallbackAxisSide: "none",
+              }
+        }
+        style={
+          placement === "bar"
+            ? ({ open }) => ({ visibility: open ? "visible" : "hidden" })
+            : undefined
+        }
         // One persistent wrapper preserves 400ms ease motion across data points.
         className="cc-chart-tooltip-positioner pointer-events-none isolate z-50"
       >
@@ -191,6 +304,7 @@ export function ChartDataTooltipContent({
           className={cn(
             "pointer-events-none grid min-w-[8rem] max-w-[calc(100vw-16px)] items-start gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs text-foreground shadow-xl",
             followCursor &&
+              placement !== "bar" &&
               "min-w-0 max-w-[min(calc(100vw-16px),var(--available-width))]",
             className,
           )}

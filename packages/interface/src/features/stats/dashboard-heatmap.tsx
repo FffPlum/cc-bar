@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useRef, useState, type CSSProperties } from "react";
 import type { DashboardHeatmap } from "@ccbar/host-api/window";
 import {
   ChartDataTooltip,
@@ -19,6 +19,7 @@ import {
   type HeatmapSeriesPoint,
 } from "@/lib/heatmap-series";
 import { useTranslation } from "@/lib/i18n";
+import { buildTokenAxisScale, type TokenAxisMode } from "@/lib/token-axis-scale";
 import "./dashboard-heatmap.css";
 
 type HeatmapView = "daily" | "weekly" | "rolling";
@@ -28,9 +29,11 @@ const chartColor = heatmapColorAtIntensity(0.5);
 export function HeatmapBlocks({
   blocks,
   today,
+  weeklyScale = "linear",
 }: {
   blocks: DashboardHeatmap[];
   today?: string;
+  weeklyScale?: TokenAxisMode;
 }) {
   const [view, setView] = useState<HeatmapView>("daily");
   const t = useTranslation();
@@ -105,6 +108,7 @@ export function HeatmapBlocks({
                 points={series[displayedView]}
                 view={displayedView}
                 interactive={interactive}
+                scale={displayedView === "weekly" ? weeklyScale : "linear"}
               />
             )
           }
@@ -200,14 +204,17 @@ function TokenSeriesChart({
   points,
   view,
   interactive,
+  scale,
 }: {
   block: DashboardHeatmap;
   points: HeatmapSeriesPoint[];
   view: "weekly" | "rolling";
   interactive: boolean;
+  scale: TokenAxisMode;
 }) {
   const [handle] = useState(() => createChartDataTooltipHandle<string>());
   const [activeDay, setActiveDay] = useState<string | null>(null);
+  const plot = useRef<HTMLDivElement>(null);
   const t = useTranslation();
   const start = Date.parse(`${block.fromDay}T00:00:00Z`);
   const span = Math.max(
@@ -218,14 +225,26 @@ function TokenSeriesChart({
   const x = (day: string) =>
     (Date.parse(`${day}T00:00:00Z`) - start + (step * dayMilliseconds) / 2) /
     span;
-  const maximum = Math.max(1, ...points.map((point) => point.tokens));
-  const magnitude = 10 ** Math.floor(Math.log10(maximum));
-  const ceiling =
-    maximum < 10
-      ? Math.max(2, Math.ceil(maximum / 2) * 2)
-      : Math.ceil(maximum / magnitude) * magnitude;
-  const ticks = [0, ceiling / 2, ceiling];
-  const y = (tokens: number) => 156 - (tokens / ceiling) * 152;
+  const axis = useMemo(() => {
+    if (view === "weekly") {
+      return buildTokenAxisScale(points.map((point) => point.tokens), scale);
+    }
+    const maximum = Math.max(1, ...points.map((point) => point.tokens));
+    const magnitude = 10 ** Math.floor(Math.log10(maximum));
+    const ceiling =
+      maximum < 10
+        ? Math.max(2, Math.ceil(maximum / 2) * 2)
+        : Math.ceil(maximum / magnitude) * magnitude;
+    return {
+      normalize: (tokens: number) => tokens / ceiling,
+      ticks: [0, ceiling / 2, ceiling].map((value) => ({
+        value,
+        label: formatTokensCompact(value),
+      })),
+    };
+  }, [points, scale, view]);
+  const { ticks, normalize } = axis;
+  const y = (tokens: number) => 156 - normalize(tokens) * 152;
   const active = interactive
     ? points.find((point) => point.day === activeDay)
     : undefined;
@@ -246,35 +265,38 @@ function TokenSeriesChart({
     <div
       className="flex w-full min-w-0 max-w-[1004px] gap-2"
       data-slot={`${view}-token-chart`}
+      data-scale={scale}
     >
       <div className="cc-token-chart-plot relative w-max shrink-0 whitespace-nowrap text-right text-[10px] tabular-nums text-muted-foreground">
         <div aria-hidden="true" className="invisible flex w-max flex-col">
           {ticks.map((tick) => (
-            <span key={tick}>{formatTokensCompact(tick)}</span>
+            <span key={tick.value}>{tick.label}</span>
           ))}
         </div>
         {ticks.map((tick) => (
           <span
             data-slot="token-value-tick"
-            key={tick}
+            key={tick.value}
             className="absolute right-0 -translate-y-1/2"
-            style={{ top: `${(y(tick) / 160) * 100}%` }}
+            style={{ top: `${(y(tick.value) / 160) * 100}%` }}
           >
-            {formatTokensCompact(tick)}
+            {tick.label}
           </span>
         ))}
       </div>
       <div className="min-w-0 flex-1">
         <div
+          ref={plot}
           className="cc-token-chart-plot relative"
           onMouseLeave={() => setActiveDay(null)}
           onBlur={() => setActiveDay(null)}
         >
           {ticks.map((tick) => (
             <div
-              key={tick}
+              key={tick.value}
+              data-slot="token-value-gridline"
               className="pointer-events-none absolute inset-x-0 border-t"
-              style={{ top: `${(y(tick) / 160) * 100}%` }}
+              style={{ top: `${(y(tick.value) / 160) * 100}%` }}
             />
           ))}
           {view === "rolling" && (
@@ -341,7 +363,7 @@ function TokenSeriesChart({
                   data-slot="weekly-token-bar"
                   className="pointer-events-none absolute bottom-[2.5%] w-2/3 max-w-[12px] rounded-t-[2px]"
                   style={{
-                    height: `${(point.tokens / ceiling) * 95}%`,
+                    height: `${normalize(point.tokens) * 95}%`,
                     backgroundColor: chartColor,
                   }}
                 />
@@ -361,7 +383,8 @@ function TokenSeriesChart({
           )}
           <ChartDataTooltip
             handle={handle}
-            placement="cell"
+            placement={view === "weekly" ? "bar" : "cell"}
+            plotRef={view === "weekly" ? plot : undefined}
             disabled={!interactive}
           >
             {({ payload: key }) => {
