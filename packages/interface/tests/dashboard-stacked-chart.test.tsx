@@ -5,6 +5,7 @@ import type {
   DashboardMetric,
   DashboardSample,
   UsageDashboard,
+  UsageService,
 } from "@ccbar/host-api/window";
 import usage from "../../host-api/fixtures/window-usage.json";
 import {
@@ -76,6 +77,7 @@ it("shares the trend card across columns and refreshes its content in place", as
   const card = (await screen.findByText("Tokens: 100.00")).closest(
     '[data-slot="chart-data-tooltip"]',
   );
+  expect(card!.textContent).not.toMatch(/Requests:|Cost:/);
   fireEvent.mouseLeave(first!, { relatedTarget: next });
   fireEvent.mouseEnter(next!, { relatedTarget: first });
   expect(
@@ -138,6 +140,7 @@ it("shares the heatmap card across date cells", async () => {
   const card = (
     await screen.findByText("2026-11-01", { selector: "strong" })
   ).closest('[data-slot="chart-data-tooltip"]');
+  expect(card!.textContent).not.toMatch(/Requests:|Cost:/);
   fireEvent.mouseLeave(first, { relatedTarget: next });
   fireEvent.mouseEnter(next, { relatedTarget: first });
   expect(
@@ -255,24 +258,90 @@ it("uses configured appearance colors and custom brand colors", () => {
       .style.backgroundColor,
   ).toBe("rgb(221, 221, 221)");
 });
-it("shows weighted cache-rate contribution labels and shares in the tooltip", async () => {
+it("uses an application color for cache-rate bars only when that application is selected", () => {
+  bootstrap.visibleUsageServices = ["codex"];
+  settings.appearance.brandColors = [
+    {
+      brand: "codex",
+      mode: "brand",
+      customHex: null,
+      defaultLightHex: "#111111",
+      defaultDarkHex: "#dddddd",
+    },
+  ];
   const cached = {
     ...sample,
     label: "50%",
-    segments: [
-      { ...sample.segments[0]!, label: "30.0 pp", share: 0.6 },
-      { ...sample.segments[1]!, label: "20.0 pp", share: 0.4 },
-    ],
+    totals: {
+      ...totals,
+      cacheReadTokens: 48_210,
+      inputWithCacheTokens: 96_420,
+      cacheHitRate: 0.5,
+    },
+    segments: [{ ...sample.segments[0]!, share: 1 }],
   };
-  renderChart([cached], "Cache hit rate", "cacheHitRate");
-  fireEvent.focus(screen.getByRole("button", { name: /Codex: 30.0 pp/ }));
-  const detail = await screen.findByText("30.0 pp · 60.0%");
-  const tooltip = detail.closest('[data-slot="chart-data-tooltip"]')!;
-  expect(screen.getByText("20.0 pp · 40.0%")).toBeTruthy();
-  expect(tooltip.textContent).toContain("Cache hit rate: 50%");
-  expect(tooltip.textContent).not.toContain("Tokens:");
-  expect(tooltip.textContent).toContain(
-    `Requests: ${totals.requestCount.toLocaleString()}`,
+  const chart = (service?: UsageService) => (
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardChart
+          data={make([cached])}
+          title="Cache hit rate"
+          metric="cacheHitRate"
+          service={service}
+        />
+      </TooltipProvider>
+    </LanguageProvider>
   );
-  expect(tooltip.textContent).toContain(`Cost: ${totals.costDisplay}`);
+  const view = render(chart());
+  const bar = () =>
+    view.container.querySelector('[data-slot="dashboard-bar"]') as HTMLElement;
+  expect(bar().style.backgroundColor).toBe("var(--foreground)");
+  view.rerender(chart("codex"));
+  expect(bar().style.backgroundColor).toBe("rgb(17, 17, 17)");
+  bootstrap.appearance = "dark";
+  view.rerender(chart("codex"));
+  expect(bar().style.backgroundColor).toBe("rgb(221, 221, 221)");
+  settings.appearance.brandColors[0]!.mode = "custom";
+  settings.appearance.brandColors[0]!.customHex = "#123456";
+  view.rerender(chart("codex"));
+  expect(bar().style.backgroundColor).toBe("rgb(18, 52, 86)");
+  view.rerender(chart());
+  expect(bar().style.backgroundColor).toBe("var(--foreground)");
 });
+it.each([
+  [48_210, "50%", 0.8, "48.21K"],
+  [0, "0%", 0, "0.00"],
+] as const)(
+  "shows one neutral cache-rate bar and aggregate details for %s cached tokens",
+  async (cacheReadTokens, label, normalizedValue, cacheTokensLabel) => {
+    const cached = {
+      ...sample,
+      label,
+      normalizedValue,
+      totals: {
+        ...totals,
+        cacheReadTokens,
+        inputWithCacheTokens: cacheReadTokens * 2,
+        cacheHitRate: cacheReadTokens ? 0.5 : 0,
+      },
+      segments: [
+        { ...sample.segments[0]!, label: "30.0 pp", share: 0.6 },
+        { ...sample.segments[1]!, label: "20.0 pp", share: 0.4 },
+      ],
+    };
+    const { container } = renderChart([cached], "Cache hit rate", "cacheHitRate");
+    const bar = container.querySelector('[data-slot="dashboard-bar"]') as HTMLElement;
+    expect(bar.style.backgroundColor).toBe("var(--foreground)");
+    expect(bar.style.height).toBe(`${normalizedValue * 100}%`);
+    expect(bar.querySelectorAll("[data-service]")).toHaveLength(0);
+    expect(screen.queryByLabelText("Applications")).toBeNull();
+    const trigger = screen.getByRole("button", { name: /Cache read tokens/ });
+    expect(trigger.getAttribute("aria-label")).not.toMatch(/Codex|Claude|pp|60\.0%|40\.0%/);
+    fireEvent.focus(trigger);
+    const detail = await screen.findByText(`Cache read tokens: ${cacheTokensLabel}`);
+    const tooltip = detail.closest('[data-slot="chart-data-tooltip"]')!;
+    expect(tooltip.textContent).toContain(`Cache hit rate: ${label}`);
+    expect(tooltip.textContent).not.toMatch(/Codex|Claude|Kimi|pp|60\.0%|40\.0%/);
+    expect(tooltip.textContent).not.toMatch(/Requests:|Cost:/);
+  },
+);

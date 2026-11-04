@@ -4,6 +4,7 @@ import type {
   DashboardSample,
   DashboardSampleSegment,
   UsageDashboard,
+  UsageService,
 } from "@ccbar/host-api/window";
 import {
   ChartDataTooltip,
@@ -25,11 +26,13 @@ export function DashboardChart({
   data,
   title,
   metric,
+  service,
   empty = false,
 }: {
   data: UsageDashboard;
   title: string;
   metric: DashboardMetric;
+  service?: UsageService;
   empty?: boolean;
 }) {
   const [tooltipHandle] = useState(() =>
@@ -38,6 +41,7 @@ export function DashboardChart({
   const plot = useRef<HTMLDivElement>(null);
   const { bootstrap, settings } = useHost();
   const t = useTranslation();
+  const isCacheHitRate = metric === "cacheHitRate";
   const valueLabel = (sample: DashboardSample | DashboardSampleSegment) =>
     metric === "tokens"
       ? formatTokensCompact(sample.totals.totalTokens, 2)
@@ -102,21 +106,23 @@ export function DashboardChart({
               ? t("Monthly", "按月")
               : t("Daily", "按天")}
         </h2>
-        <div
-          aria-label={t("Applications", "应用")}
-          className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
-        >
-          {services.map((service) => (
-            <span key={service} className="inline-flex items-center gap-1">
-              <span
-                aria-hidden="true"
-                className="size-2 rounded-sm"
-                style={{ backgroundColor: colorFor(service) }}
-              />
-              {serviceDisplayName(service)}
-            </span>
-          ))}
-        </div>
+        {!isCacheHitRate && (
+          <div
+            aria-label={t("Applications", "应用")}
+            className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+          >
+            {services.map((service) => (
+              <span key={service} className="inline-flex items-center gap-1">
+                <span
+                  aria-hidden="true"
+                  className="size-2 rounded-sm"
+                  style={{ backgroundColor: colorFor(service) }}
+                />
+                {serviceDisplayName(service)}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       <div className="mt-4 flex gap-2">
         <div
@@ -156,12 +162,16 @@ export function DashboardChart({
                   <button
                     type="button"
                     className="cc-chart-column-guide relative z-0 flex h-full min-w-0 flex-1 items-end justify-center"
-                    aria-label={`${fmt.format(new Date(s.start))}: ${valueLabel(s)}; ${s.segments
-                      .map(
-                        (segment) =>
-                          `${serviceDisplayName(segment.service)}: ${valueLabel(segment)}, ${(segment.share * 100).toFixed(1)}%`,
-                      )
-                      .join("; ")}`}
+                    aria-label={`${fmt.format(new Date(s.start))}: ${valueLabel(s)}; ${
+                      isCacheHitRate
+                        ? `${t("Cache read tokens", "命中 Tokens")}: ${formatTokensCompact(s.totals.cacheReadTokens, 2)}`
+                        : s.segments
+                            .map(
+                              (segment) =>
+                                `${serviceDisplayName(segment.service)}: ${valueLabel(segment)}, ${(segment.share * 100).toFixed(1)}%`,
+                            )
+                            .join("; ")
+                    }`}
                   />
                 }
               >
@@ -172,21 +182,27 @@ export function DashboardChart({
                     width: chartBarWidth(samples.length),
                     maxWidth: "100%",
                     height: `${Math.max(0, Math.min(1, s.normalizedValue)) * 100}%`,
+                    backgroundColor: isCacheHitRate
+                      ? service
+                        ? colorFor(service)
+                        : "var(--foreground)"
+                      : undefined,
                   }}
                 >
-                  {s.segments
-                    .filter((segment) => segment.share > 0)
-                    .map((segment) => (
-                      <span
-                        key={segment.service}
-                        data-service={segment.service}
-                        style={{
-                          height: `${Math.max(0, Math.min(1, segment.share)) * 100}%`,
-                          backgroundColor: colorFor(segment.service),
-                          flexShrink: 0,
-                        }}
-                      />
-                    ))}
+                  {!isCacheHitRate &&
+                    s.segments
+                      .filter((segment) => segment.share > 0)
+                      .map((segment) => (
+                        <span
+                          key={segment.service}
+                          data-service={segment.service}
+                          style={{
+                            height: `${Math.max(0, Math.min(1, segment.share)) * 100}%`,
+                            backgroundColor: colorFor(segment.service),
+                            flexShrink: 0,
+                          }}
+                        />
+                      ))}
                 </span>
               </ChartDataTooltipTrigger>
             ))}
@@ -211,32 +227,32 @@ export function DashboardChart({
                     <span>
                       {title}: {valueLabel(s)}
                     </span>
-                    {s.segments.map((segment) => (
-                      <span
-                        key={segment.service}
-                        className="flex items-center gap-1.5"
-                      >
-                        <span
-                          aria-hidden="true"
-                          className="size-2 shrink-0 rounded-sm"
-                          style={{ backgroundColor: colorFor(segment.service) }}
-                        />
-                        <span className="min-w-0 flex-1">
-                          {serviceDisplayName(segment.service)}
-                        </span>
-                        <span className="max-w-[55%] break-words text-right">
-                          {valueLabel(segment)} ·{" "}
-                          {(segment.share * 100).toFixed(1)}%
-                        </span>
+                    {isCacheHitRate ? (
+                      <span>
+                        {t("Cache read tokens", "命中 Tokens")}:{" "}
+                        {formatTokensCompact(s.totals.cacheReadTokens, 2)}
                       </span>
-                    ))}
-                    <span>
-                      {t("Requests", "请求")}:{" "}
-                      {s.totals.requestCount.toLocaleString()}
-                    </span>
-                    <span>
-                      {t("Cost", "成本")}: {s.totals.costDisplay}
-                    </span>
+                    ) : (
+                      s.segments.map((segment) => (
+                        <span
+                          key={segment.service}
+                          className="flex items-center gap-1.5"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="size-2 shrink-0 rounded-sm"
+                            style={{ backgroundColor: colorFor(segment.service) }}
+                          />
+                          <span className="min-w-0 flex-1">
+                            {serviceDisplayName(segment.service)}
+                          </span>
+                          <span className="max-w-[55%] break-words text-right">
+                            {valueLabel(segment)} ·{" "}
+                            {(segment.share * 100).toFixed(1)}%
+                          </span>
+                        </span>
+                      ))
+                    )}
                   </ChartDataTooltipContent>
                 );
               }}

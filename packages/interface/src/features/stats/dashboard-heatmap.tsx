@@ -129,7 +129,6 @@ function DailyHeatmap({
 }) {
   const [handle] = useState(() => createChartDataTooltipHandle<string>());
   const { bootstrap } = useHost();
-  const t = useTranslation();
   return (
     <div
       className="w-full min-w-0 max-w-[1004px]"
@@ -183,13 +182,6 @@ function DailyHeatmap({
               <strong>{day.day}</strong>
               <span>
                 Tokens: {formatTokensCompact(day.totals.totalTokens, 2)}
-              </span>
-              <span>
-                {t("Requests", "请求")}:{" "}
-                {day.totals.requestCount.toLocaleString()}
-              </span>
-              <span>
-                {t("Cost", "成本")}: {day.totals.costDisplay}
               </span>
             </ChartDataTooltipContent>
           );
