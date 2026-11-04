@@ -26,11 +26,14 @@ const totals = usage["window.usage.overview"].totals;
 const block = {
   fromDay: "2026-01-05",
   toDay: "2027-01-11",
+  cumulativeFromDay: "2025-01-01",
   days: Array.from({ length: 371 }, (_, index) => {
     const date = new Date("2026-01-05T00:00:00Z");
     date.setUTCDate(date.getUTCDate() + index);
     return {
       day: date.toISOString().slice(0, 10),
+      cumulativeTokens:
+        1_000_000_000 + (((index + 1) * (index + 2)) / 2) * 1_000_000,
       totals: { ...totals, totalTokens: (index + 1) * 1_000_000 },
       value: 1,
       label: "$1",
@@ -65,7 +68,7 @@ it("puts months below daily cells and removes weekdays and older pagination", ()
   expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
     "Daily",
     "Weekly",
-    "Cumulative total",
+    "Cumulative",
   ]);
   expect(screen.queryByLabelText(/^2026-01-19:/)).toBeNull();
 });
@@ -89,22 +92,24 @@ it("shows natural-week token sums as bars without counting future days", () => {
   expect(container.querySelector('[data-slot="daily-token-chart"]')).toBeNull();
 });
 
-it("shows rolling seven-day sums as a line and discloses partial windows", () => {
+it("shows full historical cumulative Tokens rather than a seven-day or display-window sum", () => {
   const { container } = setup();
-  fireEvent.click(screen.getByRole("tab", { name: "Cumulative total" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Cumulative" }));
   expect(
-    container.querySelector('[data-slot="rolling-token-line"]'),
+    container.querySelector('[data-slot="cumulative-token-line"]'),
   ).toBeTruthy();
   expect(
     screen.getByRole("button", {
-      name: "2026-01-06 – 2026-01-12: 35.00M Tokens",
+      name: "2025-01-01 – 2026-01-12: 1.04B Tokens",
     }),
   ).toBeTruthy();
   expect(
     screen.getByRole("button", {
-      name: "2025-12-30 – 2026-01-05: 1.00M Tokens · 1/7 days",
+      name: "2025-01-01 – 2026-01-05: 1.00B Tokens",
     }),
   ).toBeTruthy();
+  expect(screen.getByText("Cumulative Token Usage")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /\/7 days/ })).toBeNull();
   expect(
     container.querySelectorAll('[data-slot="weekly-token-bar"]'),
   ).toHaveLength(0);
@@ -112,6 +117,30 @@ it("shows rolling seven-day sums as a line and discloses partial windows", () =>
   expect(
     screen.getByRole("button", { name: "2026-01-05: 1,000,000 Tokens" }),
   ).toBeTruthy();
+});
+
+it("draws zero-usage days horizontally and rises when historical usage increases", () => {
+  const { container } = setup({
+    ...block,
+    days: block.days.map((day, index) => ({
+      ...day,
+      cumulativeTokens: index < 2 ? 100 : 1_000,
+      totals: {
+        ...day.totals,
+        totalTokens: index === 0 ? 10 : index === 2 ? 900 : 0,
+      },
+    })),
+  });
+  fireEvent.click(screen.getByRole("tab", { name: "Cumulative" }));
+  const points = container
+    .querySelector('[data-slot="cumulative-token-line"]')!
+    .getAttribute("points")!
+    .split(" ")
+    .map((point) => Number(point.split(",")[1]));
+  expect(points).toHaveLength(14);
+  expect(points[1]).toBe(points[0]);
+  expect(points[2]).toBeLessThan(points[1]!);
+  expect(points.slice(2).every((y) => y === points[2])).toBe(true);
 });
 
 it.each([
@@ -211,10 +240,10 @@ it("switches the weekly scale through props without adding controls or changing 
   );
   expect(screen.queryByRole("button", { name: /log|linear/i })).toBeNull();
 
-  fireEvent.click(screen.getByRole("tab", { name: "Cumulative total" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Cumulative" }));
   expect(
     container
-      .querySelector('[data-slot="rolling-token-chart"]')
+      .querySelector('[data-slot="cumulative-token-chart"]')
       ?.getAttribute("data-scale"),
   ).toBe("linear");
   fireEvent.click(screen.getByRole("tab", { name: "Weekly" }));

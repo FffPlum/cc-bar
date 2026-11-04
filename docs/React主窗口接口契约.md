@@ -64,7 +64,7 @@
 | `usageOverview(query)` | `window.usage.overview` | `StatsOverviewModel` + 对话概览；总 KPI、每服务 KPI/环比、图表上下文、速度、构成、模型和排行。 |
 | `usageDashboard(query)` | `window.usage.dashboard` | 四项 KPI、可展示日志条数 `requestLogCount`、来源/模型级联选项、聚合表、小时/日/月趋势与覆盖信息。 |
 | `usageRequests(query)` | `window.usage.requests` | 已核验请求索引；按时间/费用/Tokens 全局排序后以页码分页，默认每页 12、最多 500。 |
-| `usageHeatmap(query)` | `window.usage.heatmap` | 周一对齐的 53 周日热力图、区间汇总及 `nextBeforeDay` 更早入口。 |
+| `usageHeatmap(query)` | `window.usage.heatmap` | 周一对齐的 53 周日桶、区间汇总和全历史累计值；`nextBeforeDay` 保留供分页兼容，当前图表只展示最近 53 周。 |
 | `usageRefresh()` | `usage.refresh` | 原扫描链和状态。 |
 | `conversationsList(query)` | `conversations.list` | 搜索、项目、服务、日期、排序和宿主分页；默认 200、最大 500。 |
 | `conversationDetail(id,metric?)` | `conversations.detail` | 全生命周期、模型、费用和性能。 |
@@ -91,7 +91,8 @@
 - 明细只在请求日志页签打开后查询。`page` 从 1 开始（最大 10,000,000），`pageSize` 默认 12（1～500）；响应返回 `page / pageSize / totalCount / rows`，SQL COUNT 与当前页查询在同一事务内完成。页码超出末页自动收敛到最后一个有效页，空结果为第 1 页。每次页码查询读取当前快照，滚动范围按当前时刻重新解析；不冻结跨页快照，因此新增/删除记录后页边界可能变化。相同排序值按请求 ID、应用稳定排序。
 - 前端每页条数提供 12 / 24 / 48 / 96，切换筛选、排序或每页条数回到第 1 页；页码可输入跳转。筛选、排序、page、pageSize 共同组成请求缓存键，旧请求不能覆盖新查询。失败保留已有行与重试入口。
 - 保留 `cursor/limit` 供旧客户端兼容（limit 默认 100、最多 500），不能与 `page/pageSize` 混用；`nextCursor` 仍在响应中返回。旧游标绑定数据版本、筛选、排序、可见应用与时区并冻结 from / to / asOf，过期返回 `invalid_cursor`。新前端不使用游标。
-- 热力图每块 371 天，`toDay` 不含当天，`beforeDay` 使用上一块 fromDay；未来日期仅作网格占位。Cursor 的全部时间汇总仅包含已加载远端历史，每次翻页触发有限区间补拉，沿用账号/区间去重与退避。
+- 热力图每块 371 天，`toDay` 不含当天，`beforeDay` 使用上一块 fromDay；未来日期仅作网格占位。当前每天/每周/历史累计视图只查询并展示最近 53 周，分页接口保留兼容。Cursor 的全部时间汇总与历史累计仅包含已加载远端历史，图表查询沿用有限区间补拉、账号/区间去重与退避，不为累计曲线发起无界回溯。
+- `DashboardHeatmap.cumulativeFromDay: string | null` 为当前服务、来源、模型及可见性筛选下首次已记录用量的本地日期；没有历史记录时为 null。`days[].cumulativeTokens: number` 是从该历史起点至该日期的原始 Token 累计值，窗口起点已包含早于 `fromDay` 的记录。宿主从筛选后的 canonical 权威日桶计算前缀和，并遵循当前日、部分日的既有规则，不通过载入全部历史请求求和。零使用日累计值保持不变；它与仅表示当日用量的 `days[].totals.totalTokens` 不同，前端不得用 53 周窗口内从零求和替代，也不得计算为最近 7 天滚动和。累计字段必须显式返回并通过运行时 schema 校验，缺失字段不能默认补零；提示卡使用历史起始日至当前日期及累计值，不显示实际天数/7。
 - DSH、Cursor、被删除日志及日级补录可能只有日桶。持久化旧日桶没有原时区元数据，切换系统时区不能完整重映射旧历史；接口不为此重写用户数据。
 
 三个仪表盘查询立即读取可用索引快照，不等待日志重放。前端按完整查询缓存，60 秒内复用结果，非活动查询保留 10 分钟；宿主失效事件和可见页面的移动范围定时查询负责后台更新。切换到未缓存查询时标明暂显示上次结果，并禁用旧数据的分页等操作。隐私、语言、时区、可见服务或币种/汇率语义变化时隔离并清理旧查询上下文，不能复用敏感占位数据。

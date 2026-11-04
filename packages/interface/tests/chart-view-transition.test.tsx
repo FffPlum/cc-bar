@@ -2,7 +2,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ChartViewTransition } from "@/components/chart-view-transition";
 
-type View = "daily" | "weekly" | "rolling";
+type View = "daily" | "weekly" | "cumulative";
 const animationDescriptor = Object.getOwnPropertyDescriptor(
   HTMLElement.prototype,
   "animate",
@@ -126,18 +126,18 @@ it("coalesces rapid selections without activating the obsolete target or inserti
   result.rerender(chart("weekly"));
   const weekly = screen.getAllByTestId("chart")[1];
   result.rerender(chart("daily"));
-  result.rerender(chart("rolling"));
+  result.rerender(chart("cumulative"));
   expect(animations).toHaveLength(2);
   await finish(0, 1);
   expect(phase()).toBe("crossfade");
-  expect(renderedViews()).toEqual(["weekly", "rolling"]);
+  expect(renderedViews()).toEqual(["weekly", "cumulative"]);
   expect(screen.getAllByTestId("chart")[0]).toBe(weekly);
   expect(animations).toHaveLength(4);
   expect(screen.queryByRole("button")).toBeNull();
   expect(vi.getTimerCount()).toBe(0);
   await finish(2, 3);
-  expect(renderedViews()).toEqual(["rolling"]);
-  expect(screen.getByRole("button", { name: "rolling" })).toBeTruthy();
+  expect(renderedViews()).toEqual(["cumulative"]);
+  expect(screen.getByRole("button", { name: "cumulative" })).toBeTruthy();
 });
 
 it("retains distinct keyed layers when switching back to the outgoing view", async () => {

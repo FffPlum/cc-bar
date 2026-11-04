@@ -1,30 +1,33 @@
 import type { DashboardHeatmap } from "@ccbar/host-api/window";
 
 export interface HeatmapSeriesPoint {
-  /** Monday for weekly points; the window's last day for rolling points. */
+  /** Monday for weekly points; the observation date for cumulative points. */
   day: string;
   tokens: number;
   /** Calendar window bounds, both inclusive, even when some days are missing. */
   fromDay: string;
   toDay: string;
-  /** Loaded calendar days, including known zero-usage days. */
-  dayCount: number;
-  /** Describes missing days, independently of the host's usage coverage flag. */
-  partial: boolean;
+  /** Weekly coverage only; historical cumulative points have no seven-day window. */
+  dayCount?: number;
+  partial?: boolean;
 }
 
 export interface HeatmapSeries {
   weekly: HeatmapSeriesPoint[];
-  rolling: HeatmapSeriesPoint[];
+  cumulative: HeatmapSeriesPoint[];
 }
 
-type HeatmapSeriesBlock = Pick<DashboardHeatmap, "fromDay" | "toDay" | "days">;
+type HeatmapSeriesBlock = Pick<
+  DashboardHeatmap,
+  "fromDay" | "toDay" | "days" | "cumulativeFromDay"
+>;
 
 export function buildHeatmapSeries(
   blocks: readonly HeatmapSeriesBlock[],
   today: string,
 ): HeatmapSeries {
   const dailyTokens = new Map<string, number>();
+  const cumulative = new Map<string, HeatmapSeriesPoint>();
   for (const block of blocks) {
     for (const day of block.days) {
       if (
@@ -35,6 +38,16 @@ export function buildHeatmapSeries(
       ) {
         // Pages arrive newest first; an overlapping date is counted only once.
         dailyTokens.set(day.day, day.totals.totalTokens);
+        if (block.cumulativeFromDay && day.day >= block.cumulativeFromDay) {
+          // The host includes history before this display window. Never re-sum
+          // just the visible days or replace a missing history value with zero.
+          cumulative.set(day.day, {
+            day: day.day,
+            fromDay: block.cumulativeFromDay,
+            toDay: day.day,
+            tokens: day.cumulativeTokens,
+          });
+        }
       }
     }
   }
@@ -60,7 +73,10 @@ export function buildHeatmapSeries(
 
   return {
     weekly: weekStarts.map((day) => windowPoint(day, day, addDays(day, 6))),
-    rolling: days.map((day) => windowPoint(day, addDays(day, -6), day)),
+    cumulative: days.flatMap((day) => {
+      const point = cumulative.get(day);
+      return point ? [point] : [];
+    }),
   };
 }
 

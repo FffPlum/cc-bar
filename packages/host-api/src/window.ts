@@ -209,7 +209,26 @@ export interface DashboardSample { segments: DashboardSampleSegment[]; key: stri
 export interface UsageDashboard { requestLogCount: number | null; kpiDisplay: Record<DashboardMetric, string>; revision: string; resolvedRange: { from: ISODateTime; to: ISODateTime; timeZone: string; granularity: "hour" | "day" | "month"; asOf: ISODateTime }; coverage: DashboardCoverage; totals: UsageTotals; facets: { services: DashboardFacet[]; sources: DashboardSourceFacet[]; models: DashboardFacet[] }; providerRows: DashboardRow[]; modelRows: DashboardRow[]; samples: DashboardSample[]; axisTicks: { position: number; label: string }[]; status: UsageOperationStatus }
 export interface DashboardRequest { id: string; timestamp: ISODateTime; service: UsageService; sourceID: string; modelID: string; totals: UsageTotals; status: "unknown"; conversationID: string | null }
 export interface DashboardRequests { revision: string; resolvedRange: UsageDashboard["resolvedRange"]; totalCount: number; page: number; pageSize: number; rows: DashboardRequest[]; nextCursor: string | null; coverage: DashboardCoverage; status: UsageOperationStatus }
-export interface DashboardHeatmap { fromDay: LocalDate; toDay: LocalDate; timeZone: string; days: { day: LocalDate; totals: UsageTotals; value: number; label: string; normalizedValue: number }[]; totals: UsageTotals; nextBeforeDay: LocalDate | null; coverage: DashboardCoverage; status: UsageOperationStatus }
+export interface DashboardHeatmap {
+  fromDay: LocalDate;
+  toDay: LocalDate;
+  timeZone: string;
+  // First recorded day across the filtered history, including before this window.
+  cumulativeFromDay: LocalDate | null;
+  days: {
+    day: LocalDate;
+    totals: UsageTotals;
+    value: number;
+    label: string;
+    normalizedValue: number;
+    // Host-computed history total through this day; never a window-local sum.
+    cumulativeTokens: number;
+  }[];
+  totals: UsageTotals;
+  nextBeforeDay: LocalDate | null;
+  coverage: DashboardCoverage;
+  status: UsageOperationStatus;
+}
 export interface UsageSpeedBreakdown {
   summary: "standard" | "fast" | "mixed" | "unknown";
   standard: UsageTotals;
@@ -577,8 +596,14 @@ const nonEmpty = schema((value, path) => typeof value === "string" && value.leng
 const boolean = schema((value, path) => typeof value === "boolean" ? value : fail(path, "boolean"));
 const number = schema((value, path) => typeof value === "number" && Number.isFinite(value) ? value : fail(path, "finite number"));
 const integer = schema((value, path) => typeof value === "number" && Number.isSafeInteger(value) ? value : fail(path, "safe integer"));
+const nonNegativeInteger = schema((value, path) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : fail(path, "non-negative safe integer"));
 const decimal = schema((value, path) => typeof value === "string" && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value) ? value : fail(path, "decimal string"));
 const isoDate = schema((value, path) => typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : fail(path, "ISO date"));
+const localDate = schema((value, path) => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return fail(path, "local date (YYYY-MM-DD)");
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : fail(path, "valid local date");
+});
 const dataImage = schema((value, path) => typeof value === "string" && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value) ? value : fail(path, "PNG data URI"));
 const nullable = <T>(inner: Schema<T>) => schema<T | null>((value, path) => value === null ? null : inner.parse(value, path));
 const optional = <T>(inner: Schema<T>): OptionalSchema<T> => ({ optional: true, parse: (value, path) => value === undefined ? undefined : inner.parse(value, path) });
@@ -651,7 +676,7 @@ const dashboardRowSchema = object({ id: string, title: string, service: usageSer
 const dashboardSampleFields = { totals: totalsSchema, value: number, label: string, normalizedValue: number };
 const dashboardSchema = object({ requestLogCount: nullable(integer), kpiDisplay: object({ cost: string, requests: string, tokens: string, cacheHitRate: string }), revision: string, resolvedRange: object({ from: isoDate, to: isoDate, timeZone: string, granularity: enumeration(["hour", "day", "month"] as const), asOf: isoDate }), coverage: dashboardCoverageSchema, totals: totalsSchema, facets: object({ services: array(dashboardFacetSchema), sources: array(object({ id: string, title: string, service: usageService, requestCount: integer, models: array(dashboardFacetSchema) })), models: array(dashboardFacetSchema) }), providerRows: array(dashboardRowSchema), modelRows: array(dashboardRowSchema), samples: array(object({ key: string, start: isoDate, ...dashboardSampleFields, segments: array(object({ service: usageService, totals: totalsSchema, value: number, label: string, share: number })) })), axisTicks: array(object({ position: number, label: string })), status: usageStatusSchema });
 const dashboardRequestsSchema = object({ revision: string, resolvedRange: object({ from: isoDate, to: isoDate, timeZone: string, granularity: enumeration(["hour", "day", "month"] as const), asOf: isoDate }), totalCount: integer, page: integer, pageSize: integer, rows: array(object({ id: string, timestamp: isoDate, service: usageService, sourceID: string, modelID: string, totals: totalsSchema, status: literal("unknown"), conversationID: nullable(string) })), nextCursor: nullable(string), coverage: dashboardCoverageSchema, status: usageStatusSchema });
-const dashboardHeatmapSchema = object({ fromDay: string, toDay: string, timeZone: string, days: array(object({ day: string, ...dashboardSampleFields })), totals: totalsSchema, nextBeforeDay: nullable(string), coverage: dashboardCoverageSchema, status: usageStatusSchema });
+const dashboardHeatmapSchema = object({ fromDay: string, toDay: string, timeZone: string, cumulativeFromDay: nullable(localDate), days: array(object({ day: string, ...dashboardSampleFields, cumulativeTokens: nonNegativeInteger })), totals: totalsSchema, nextBeforeDay: nullable(string), coverage: dashboardCoverageSchema, status: usageStatusSchema });
 const modelUsageSchema = object({ model: string, service: usageService, totals: totalsSchema, speed: speedSchema });
 const usageServiceKeys = ["codex", "claude", "cursor", "pi", "opencode", "dsh", "antigravity", "kimi"] as const;
 const serviceTotalsSchema = keyedDictionary(usageServiceKeys, totalsSchema);

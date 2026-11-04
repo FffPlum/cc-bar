@@ -525,18 +525,40 @@ extension HostWindowUsageService {
         let pageFrom = q.allTime ? start : max(start, q.from)
         let pageTo = min(end, q.to)
         dashboardPrepareCursor(q, from: pageFrom, to: pageTo)
-        let data = try await queryDetails([sqlQuery(q, from: pageFrom, to: max(pageFrom, pageTo))])
+        let cumulativeTo = min(pageTo, q.asOf)
+        let cumulativeDay = calendar.startOfDay(for: cumulativeTo)
+        // A custom range can start partway through its final day or extend into the
+        // future. Its lifetime total needs that day's events up to the effective cutoff.
+        // Only this bounded partial day may need another query; historical days
+        // always come from the canonical snapshot, including deleted source logs.
+        let queryCumulativeDay = cumulativeDay < cumulativeTo
+            && !isCompleteDay(cumulativeDay, q, from: .distantPast, to: cumulativeTo)
+            && (pageFrom > cumulativeDay || pageTo > cumulativeTo)
+        var queries = [sqlQuery(q, from: pageFrom, to: max(pageFrom, pageTo))]
+        if queryCumulativeDay {
+            queries.append(sqlQuery(q, from: cumulativeDay, to: cumulativeTo))
+        }
+        let data = try await queryDetails(queries)
         let buckets = selectedBuckets(q, data: data, result: data.result(), from: pageFrom, to: pageTo)
-        var items: [(Date, UsageTotals)] = []
+        let cumulativeBuckets = selectedBuckets(q, data: data, result: data.result(queryCumulativeDay ? 1 : 0),
+            from: .distantPast, to: cumulativeTo).filter { $0.day < cumulativeTo }
+        let daily = Dictionary(grouping: buckets, by: \.day).mapValues { dashboardTotal($0) }
+        let cumulativeDaily = Dictionary(grouping: cumulativeBuckets, by: \.day).mapValues { dashboardTotal($0) }
+        let cumulativeFromDay = cumulativeDaily.filter { $0.value.hasUsage }.map(\.key).min()
+        var cumulativeTokens = cumulativeDaily.reduce(0) { total, item in
+            total + (item.key < start ? item.value.totalTokens : 0)
+        }
+        var items: [(Date, UsageTotals, Int)] = []
         var day = start
         while day < end, let next = calendar.date(byAdding: .day, value: 1, to: day) {
-            items.append((day, dashboardTotal(buckets.filter { $0.day == day })))
+            cumulativeTokens += cumulativeDaily[day]?.totalTokens ?? 0
+            items.append((day, daily[day] ?? .zero, cumulativeTokens))
             day = next
         }
         let maximum = items.map { dashboardValue($0.1, metric: q.metric) }.max() ?? 0
-        let days: [HostJSON] = items.map { date, totals in
+        let days: [HostJSON] = items.map { date, totals, cumulativeTokens in
             let value = dashboardValue(totals, metric: q.metric)
-            return .object(["day": .string(formatter.string(from: date)), "totals": totalsJSON(totals), "value": numberJSON(value), "label": .string(dashboardLabel(totals, metric: q.metric)), "normalizedValue": numberJSON(maximum > 0 ? value / maximum : 0)])
+            return .object(["day": .string(formatter.string(from: date)), "totals": totalsJSON(totals), "cumulativeTokens": .number(Decimal(cumulativeTokens)), "value": numberJSON(value), "label": .string(dashboardLabel(totals, metric: q.metric)), "normalizedValue": numberJSON(maximum > 0 ? value / maximum : 0)])
         }
         let total = dashboardTotal(buckets)
         let earliest = data.canonical.map(\.day).min()
@@ -545,6 +567,6 @@ extension HostWindowUsageService {
             && (q.service == nil || q.service == .cursor)
             && (q.source == nil || q.source == dashboardSource(.cursor))
         let hasOlder = cursorHistoryUnknown || (earliest.map { $0 < start } ?? false)
-        return .object(["fromDay": .string(formatter.string(from: start)), "toDay": .string(formatter.string(from: end)), "timeZone": .string(calendar.timeZone.identifier), "days": .array(days), "totals": totalsJSON(total), "nextBeforeDay": hasOlder ? .string(formatter.string(from: start)) : .null, "coverage": dashboardCoverage(q, data: data, result: data.result(), from: pageFrom, to: pageTo, includeCompleteDays: false).json, "status": statusJSON()])
+        return .object(["fromDay": .string(formatter.string(from: start)), "toDay": .string(formatter.string(from: end)), "timeZone": .string(calendar.timeZone.identifier), "cumulativeFromDay": cumulativeFromDay.map { .string(formatter.string(from: $0)) } ?? .null, "days": .array(days), "totals": totalsJSON(total), "nextBeforeDay": hasOlder ? .string(formatter.string(from: start)) : .null, "coverage": dashboardCoverage(q, data: data, result: data.result(), from: pageFrom, to: pageTo, includeCompleteDays: false).json, "status": statusJSON()])
     }
 }

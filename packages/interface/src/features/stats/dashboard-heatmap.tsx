@@ -22,7 +22,7 @@ import { useTranslation } from "@/lib/i18n";
 import { buildTokenAxisScale, type TokenAxisMode } from "@/lib/token-axis-scale";
 import "./dashboard-heatmap.css";
 
-type HeatmapView = "daily" | "weekly" | "rolling";
+type HeatmapView = "daily" | "weekly" | "cumulative";
 const dayMilliseconds = 86_400_000;
 const chartColor = heatmapColorAtIntensity(0.5);
 
@@ -51,7 +51,7 @@ export function HeatmapBlocks({
   const titles = {
     daily: t("Usage heatmap", "用量热力图"),
     weekly: t("Weekly token usage", "每周 Token 用量"),
-    rolling: t("7-day rolling total", "7 天累计用量"),
+    cumulative: t("Cumulative Token Usage", "历史累计用量"),
   };
   const descriptions = {
     daily: t(
@@ -62,16 +62,16 @@ export function HeatmapBlocks({
       "Monday–Sunday totals over the last 53 weeks",
       "最近 53 周，按周一至周日汇总",
     ),
-    rolling: t(
-      "Each day plus the previous 6 days, over the last 53 weeks",
-      "最近 53 周，每天累计当天及前 6 天用量",
+    cumulative: t(
+      "Lifetime total through each day; showing the last 53 weeks",
+      "从首次记录累计至每天，展示最近 53 周",
     ),
   };
   return (
     <Tabs
       value={view}
       onValueChange={(value) => {
-        if (value === "daily" || value === "weekly" || value === "rolling")
+        if (value === "daily" || value === "weekly" || value === "cumulative")
           setView(value);
       }}
       className="min-w-0 gap-0 p-4"
@@ -87,8 +87,8 @@ export function HeatmapBlocks({
         >
           <TabsTrigger value="daily">{t("Daily", "每天")}</TabsTrigger>
           <TabsTrigger value="weekly">{t("Weekly", "每周")}</TabsTrigger>
-          <TabsTrigger value="rolling">
-            {t("Cumulative total", "累计总量")}
+          <TabsTrigger value="cumulative">
+            {t("Cumulative", "历史累计")}
           </TabsTrigger>
         </TabsList>
       </div>
@@ -208,7 +208,7 @@ function TokenSeriesChart({
 }: {
   block: DashboardHeatmap;
   points: HeatmapSeriesPoint[];
-  view: "weekly" | "rolling";
+  view: "weekly" | "cumulative";
   interactive: boolean;
   scale: TokenAxisMode;
 }) {
@@ -260,7 +260,7 @@ function TokenSeriesChart({
     return groups;
   }, []);
   const describe = (point: HeatmapSeriesPoint) =>
-    `${point.fromDay} – ${point.toDay}: ${formatTokensCompact(point.tokens, 2)} Tokens${point.partial ? ` · ${point.dayCount}/7 ${t("days", "天")}` : ""}`;
+    `${point.fromDay} – ${point.toDay}: ${formatTokensCompact(point.tokens, 2)} Tokens${view === "weekly" && point.partial ? ` · ${point.dayCount}/7 ${t("days", "天")}` : ""}`;
   return (
     <div
       className="flex w-full min-w-0 max-w-[1004px] gap-2"
@@ -299,7 +299,7 @@ function TokenSeriesChart({
               style={{ top: `${(y(tick.value) / 160) * 100}%` }}
             />
           ))}
-          {view === "rolling" && (
+          {view === "cumulative" && (
             <svg
               viewBox="0 0 1000 160"
               preserveAspectRatio="none"
@@ -310,7 +310,7 @@ function TokenSeriesChart({
                 line.length > 1 ? (
                   <polyline
                     key={line[0]!.day}
-                    data-slot="rolling-token-line"
+                    data-slot="cumulative-token-line"
                     fill="none"
                     stroke={chartColor}
                     strokeWidth="2"
@@ -370,7 +370,7 @@ function TokenSeriesChart({
               )}
             </ChartDataTooltipTrigger>
           ))}
-          {view === "rolling" && active && (
+          {view === "cumulative" && active && (
             <span
               aria-hidden="true"
               className="pointer-events-none absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full"
@@ -383,8 +383,8 @@ function TokenSeriesChart({
           )}
           <ChartDataTooltip
             handle={handle}
-            placement={view === "weekly" ? "bar" : "cell"}
-            plotRef={view === "weekly" ? plot : undefined}
+            placement="bar"
+            plotRef={plot}
             disabled={!interactive}
           >
             {({ payload: key }) => {
@@ -396,7 +396,7 @@ function TokenSeriesChart({
                     {point.fromDay} – {point.toDay}
                   </strong>
                   <span>Tokens: {formatTokensCompact(point.tokens, 2)}</span>
-                  {point.partial && (
+                  {view === "weekly" && point.partial && (
                     <span className="text-muted-foreground">
                       {t("Available days", "已统计天数")}: {point.dayCount}/7
                     </span>

@@ -357,6 +357,151 @@ final class HostWindowUsageTests: XCTestCase {
         XCTAssertEqual(requests.last?.upperBound, firstStart)
     }
 
+    func testHeatmapCumulativeIncludesAuthoritativeHistoryBeforeTheVisibleWindow() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex])
+        let calendar = Calendar.current
+        let start = try XCTUnwrap(calendar.date(byAdding: .day, value: -364, to: fixture.day(9)))
+        let historyDay = try XCTUnwrap(calendar.date(byAdding: .day, value: -10, to: start))
+        let firstRecordDay = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: historyDay))
+        let info = fixture.info("cumulative", app: .codex, project: "cumulative-project")
+        fixture.load(infos: [info], buckets: [
+            fixture.bucket(info, day: firstRecordDay, tokens: 0),
+            fixture.bucket(info, day: historyDay, tokens: 100),
+            fixture.bucket(info, day: start, tokens: 10),
+            fixture.bucket(info, day: fixture.day(8), tokens: 20),
+            fixture.bucket(info, day: fixture.day(9), tokens: 30),
+            fixture.bucket(info, day: fixture.day(10), tokens: 1000),
+        ])
+        // History and part of today's aggregate survive without request log rows.
+        // All token kinds contribute to the lifetime total.
+        fixture.state.usageService.aggregator.ingestLocal([
+            UsageEntry(app: .codex, conversationKey: info.key, model: "gpt-5", speed: .standard,
+                day: historyDay, timestamp: historyDay, inputTokens: 0, outputTokens: 20,
+                cacheReadTokens: 30, cacheCreationTokens: 40, costUSD: 0, costBreakdown: nil),
+        ])
+        let service = fixture.service()
+        let knownToday = UsageEntry(app: .codex, conversationKey: info.key, model: "gpt-5", speed: .standard,
+            day: fixture.day(9), timestamp: fixture.now.addingTimeInterval(-3600), inputTokens: 10, outputTokens: 0,
+            cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: 0, costBreakdown: nil)
+        try fixture.index(service, records: [UsageRequestRecord(id: "known-today", entry: knownToday)], revision: "cumulative-history")
+        let response = try object(await service.handle("window.usage.heatmap", params: ["range": .string("all"), "metric": .string("tokens")]))
+        let days = try array(response["days"]).map { try object($0) }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        XCTAssertEqual(days.count, 371)
+        XCTAssertEqual(response["fromDay"], .string(formatter.string(from: start)))
+        XCTAssertEqual(response["cumulativeFromDay"], .string(formatter.string(from: firstRecordDay)))
+        XCTAssertEqual(try object(response["totals"])["totalTokens"], .number(60), "Visible daily totals exclude older history")
+        XCTAssertEqual(days[0]["cumulativeTokens"], .number(200))
+        XCTAssertEqual(days[1]["cumulativeTokens"], .number(200), "No usage keeps the existing total")
+        let yesterday = try XCTUnwrap(days.first { $0["day"] == .string("2026-03-08") })
+        let today = try XCTUnwrap(days.first { $0["day"] == .string("2026-03-09") })
+        let tomorrow = try XCTUnwrap(days.first { $0["day"] == .string("2026-03-10") })
+        XCTAssertEqual(yesterday["cumulativeTokens"], .number(220))
+        XCTAssertEqual(today["cumulativeTokens"], .number(250), "Today's natural-day aggregate includes unlocated usage")
+        XCTAssertEqual(tomorrow["cumulativeTokens"], .number(250), "Future buckets must not enter the cumulative total")
+        XCTAssertEqual(try object(tomorrow["totals"])["totalTokens"], .number(0))
+        XCTAssertEqual(days.last?["cumulativeTokens"], .number(250))
+    }
+
+    func testHeatmapCumulativeAppliesServiceSourceModelAndVisibilityFilters() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex, .claude])
+        let calendar = Calendar.current
+        let historyDay = try XCTUnwrap(calendar.date(byAdding: .day, value: -400, to: fixture.day(9)))
+        let excludedDay = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: historyDay))
+        func entry(_ app: UsageApp, _ model: String, _ day: Date, _ tokens: Int) -> UsageEntry {
+            UsageEntry(app: app, conversationKey: "filtered-history", model: model, speed: .standard,
+                day: day, timestamp: day, inputTokens: tokens, outputTokens: 0,
+                cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: 0, costBreakdown: nil)
+        }
+        fixture.state.usageService.aggregator.ingestLocal([
+            entry(.codex, "selected", historyDay, 100), entry(.codex, "selected", fixture.day(9), 5),
+            entry(.codex, "other", excludedDay, 1000), entry(.claude, "selected", excludedDay, 10_000),
+            entry(.pi, "selected", excludedDay, 100_000),
+        ])
+        let service = fixture.service()
+        try fixture.index(service, records: [], revision: "filtered-history")
+        var query: [String: HostJSON] = ["range": .string("all"), "metric": .string("tokens"),
+            "service": .string("codex"), "sourceID": .string("codex.localLogs"), "modelID": .string("selected")]
+        let selected = try object(await service.handle("window.usage.heatmap", params: query))
+        XCTAssertEqual(try object(XCTUnwrap(array(selected["days"]).last))["cumulativeTokens"], .number(105))
+        let firstDay = try XCTUnwrap(selected["cumulativeFromDay"])
+        XCTAssertEqual(firstDay, .string("2025-02-02"), "Earlier records excluded by filters cannot become the cumulative start")
+        query.removeValue(forKey: "service")
+        let sourceOnly = try object(await service.handle("window.usage.heatmap", params: query))
+        XCTAssertEqual(sourceOnly["cumulativeFromDay"], firstDay)
+        XCTAssertEqual(try object(XCTUnwrap(array(sourceOnly["days"]).last))["cumulativeTokens"], .number(105))
+        query.removeValue(forKey: "sourceID")
+        let visible = try object(await service.handle("window.usage.heatmap", params: query))
+        XCTAssertEqual(visible["cumulativeFromDay"], .string("2025-02-01"))
+        XCTAssertEqual(try object(XCTUnwrap(array(visible["days"]).last))["cumulativeTokens"], .number(10_105), "Hidden Pi history must stay excluded")
+        query["service"] = .string("codex")
+        query["sourceID"] = .string("claude.localLogs")
+        let mismatched = try object(await service.handle("window.usage.heatmap", params: query))
+        XCTAssertEqual(mismatched["cumulativeFromDay"], .null)
+        XCTAssertEqual(try object(XCTUnwrap(array(mismatched["days"]).last))["cumulativeTokens"], .number(0))
+        query["sourceID"] = .string("codex.localLogs")
+        fixture.show([.claude])
+        let hidden = try object(await service.handle("window.usage.heatmap", params: query))
+        XCTAssertEqual(hidden["cumulativeFromDay"], .null)
+        XCTAssertEqual(try object(XCTUnwrap(array(hidden["days"]).last))["cumulativeTokens"], .number(0))
+    }
+
+    func testHeatmapCumulativeDistinguishesEmptyHistoryFromZeroTokenRequests() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex])
+        let service = fixture.service()
+        try fixture.index(service, records: [], revision: "empty-history")
+        let query: [String: HostJSON] = ["range": .string("all"), "metric": .string("tokens")]
+        let empty = try object(await service.handle("window.usage.heatmap", params: query))
+        XCTAssertEqual(empty["cumulativeFromDay"], .null)
+        XCTAssertTrue(try array(empty["days"]).allSatisfy { try object($0)["cumulativeTokens"] == .number(0) })
+        let info = fixture.info("zero-token-request", app: .codex, project: "zero-project")
+        fixture.load(infos: [info], buckets: [fixture.bucket(info, day: fixture.day(8), tokens: 0)])
+        let zero = try object(await service.handle("window.usage.heatmap", params: query))
+        XCTAssertEqual(zero["cumulativeFromDay"], .string("2026-03-08"))
+        XCTAssertTrue(try array(zero["days"]).allSatisfy { try object($0)["cumulativeTokens"] == .number(0) })
+    }
+
+    func testHeatmapCumulativeUsesWholeHistoryAndOnlyVerifiedEventsForAPartialDay() async throws {
+        let fixture = try UsageWindowFixture()
+        defer { fixture.cleanup() }
+        fixture.show([.codex])
+        let info = fixture.info("partial-cumulative", app: .codex, project: "partial-project")
+        fixture.load(infos: [info], buckets: [fixture.bucket(info, day: fixture.day(2), tokens: 100)])
+        func entry(_ hour: TimeInterval, _ tokens: Int) -> UsageEntry {
+            UsageEntry(app: .codex, conversationKey: info.key, model: "gpt-5", speed: .standard,
+                day: fixture.day(9), timestamp: fixture.day(9).addingTimeInterval(hour * 3600),
+                inputTokens: tokens, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+                costUSD: 0, costBreakdown: nil)
+        }
+        let entries = [entry(8, 10), entry(10, 20), entry(13, 40)]
+        fixture.state.usageService.aggregator.ingestLocal(entries)
+        let service = fixture.service()
+        try fixture.index(service, records: entries.enumerated().map {
+            UsageRequestRecord(id: "partial-\($0.offset)", entry: $0.element)
+        }, revision: "partial-cumulative")
+        let response = try object(await service.handle("window.usage.heatmap", params: [
+            "range": .string("custom"), "metric": .string("tokens"),
+            "customFrom": service.dateJSON(fixture.day(9).addingTimeInterval(9 * 3600)),
+            "customTo": service.dateJSON(fixture.day(9).addingTimeInterval(14 * 3600)),
+        ]))
+        let days = try array(response["days"]).map { try object($0) }
+        let today = try XCTUnwrap(days.first { $0["day"] == .string("2026-03-09") })
+        XCTAssertEqual(response["cumulativeFromDay"], .string("2026-03-02"))
+        XCTAssertEqual(today["cumulativeTokens"], .number(130), "Include morning events before customFrom, but exclude events after asOf")
+        XCTAssertEqual(try object(today["totals"])["totalTokens"], .number(60), "The original daily query keeps its custom range semantics")
+        XCTAssertEqual(days.last?["cumulativeTokens"], .number(130))
+    }
+
     func testRefreshReturnsStatusAndCoalescesUntilCompletion() async throws {
         let fixture = try UsageWindowFixture()
         defer { fixture.cleanup() }

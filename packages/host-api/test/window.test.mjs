@@ -71,7 +71,7 @@ test('dashboard routes validate DTOs and forward filters', async () => {
   const coverage = { precision: 'day', incomplete: true, refreshing: true, unlocatedTotals: totals, message: null };
   const sample = { key: '2026-01-01T00:00:00Z', start: '2026-01-01T00:00:00Z', totals, value: 0, label: '0', normalizedValue: 0, segments: [{ service: 'codex', totals, value: 0, label: '0', share: 0 }] };
   const dashboard = { requestLogCount: null, kpiDisplay: { cost: '$0', requests: '0', tokens: '0', cacheHitRate: '0%' }, revision: '1', resolvedRange: { from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z', timeZone: 'UTC', granularity: 'hour', asOf: '2026-01-02T00:00:00Z' }, coverage, totals, facets: { services: [], sources: [], models: [] }, providerRows: [], modelRows: [], samples: [sample], axisTicks: [], status };
-  const results = { 'window.usage.dashboard': dashboard, 'window.usage.requests': { revision: '1', resolvedRange: dashboard.resolvedRange, totalCount: 0, page: 1, pageSize: 12, rows: [], nextCursor: null, coverage, status }, 'window.usage.heatmap': { fromDay: '2025-01-01', toDay: '2026-01-01', timeZone: 'UTC', days: [], totals, nextBeforeDay: null, coverage, status } };
+  const results = { 'window.usage.dashboard': dashboard, 'window.usage.requests': { revision: '1', resolvedRange: dashboard.resolvedRange, totalCount: 0, page: 1, pageSize: 12, rows: [], nextCursor: null, coverage, status }, 'window.usage.heatmap': { fromDay: '2025-01-01', toDay: '2026-01-01', timeZone: 'UTC', cumulativeFromDay: null, days: [], totals, nextBeforeDay: null, coverage, status } };
   const { api, host, calls } = client(results);
   try {
     const query = { range: 'today', metric: 'cost', service: 'codex' };
@@ -91,6 +91,65 @@ test('dashboard routes validate DTOs and forward filters', async () => {
     assert.throws(() => windowDTOValidators.usageDashboard.parse({ ...dashboard, samples: [{ ...sample, segments: [{ ...segments[0], service: 'unknown' }] }] }), { code: 'invalid_response' });
     const { refreshing, ...missingRefreshing } = coverage;
     assert.throws(() => windowDTOValidators.usageDashboard.parse({ ...dashboard, coverage: missingRefreshing }), { code: 'invalid_response' });
+  } finally { api.dispose(); host.dispose(); }
+});
+
+function heatmapDTO() {
+  const totals = fixtures['window.usage.overview'].totals;
+  return {
+    fromDay: '2025-01-06', toDay: '2026-01-12', timeZone: 'UTC',
+    cumulativeFromDay: '2024-02-29',
+    days: [{ day: '2025-01-06', totals, value: 12.5, label: '$12.50', normalizedValue: 1, cumulativeTokens: 5_000_000 + totals.totalTokens }],
+    totals, nextBeforeDay: '2025-01-06',
+    coverage: { precision: 'day', incomplete: false, refreshing: false, unlocatedTotals: totals, message: null },
+    status: fixtures['usage.refresh'],
+  };
+}
+
+test('heatmap preserves host history totals before the visible window and forwards filters', async () => {
+  const dto = heatmapDTO();
+  const { api, host, calls } = client({ 'window.usage.heatmap': dto });
+  try {
+    const query = { range: 'all', metric: 'cost', service: 'codex', sourceID: 'source-fixture', modelID: 'model-fixture' };
+    const result = await api.usageHeatmap(query);
+    assert.deepEqual(result, dto);
+    assert.deepEqual(calls[0].params, query);
+    assert.equal(result.days[0].cumulativeTokens - result.days[0].totals.totalTokens, 5_000_000);
+    assert.ok(result.cumulativeFromDay < result.fromDay);
+  } finally { api.dispose(); host.dispose(); }
+});
+
+test('heatmap accepts explicit null history origin and zero cumulative Tokens', () => {
+  const dto = heatmapDTO();
+  dto.cumulativeFromDay = null;
+  const emptyTotals = { ...dto.totals, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, inputWithCacheTokens: 0, totalTokens: 0, requestCount: 0, costUSD: '0', costDisplay: '$0', cacheHitRate: 0 };
+  dto.totals = emptyTotals;
+  dto.coverage.unlocatedTotals = emptyTotals;
+  dto.days = [{ ...dto.days[0], totals: emptyTotals, value: 0, label: '$0', normalizedValue: 0, cumulativeTokens: 0 }];
+  assert.deepEqual(windowDTOValidators.usageHeatmap.parse(dto), dto);
+  assert.deepEqual(windowDTOValidators.usageHeatmap.parse({ ...dto, days: [] }).days, []);
+});
+
+test('heatmap rejects missing and malformed cumulative history origins', () => {
+  const dto = heatmapDTO();
+  const { cumulativeFromDay, ...missing } = dto;
+  assert.throws(() => windowDTOValidators.usageHeatmap.parse(missing), { code: 'invalid_response' });
+  for (const invalid of [undefined, '', 0, false, '2026-1-01', '2026-02-29', '2026-02-30', '2026-13-01', '2026-01-01T00:00:00Z']) {
+    assert.throws(() => windowDTOValidators.usageHeatmap.parse({ ...dto, cumulativeFromDay: invalid }), { code: 'invalid_response' }, `origin: ${String(invalid)}`);
+  }
+});
+
+test('heatmap rejects missing or invalid cumulative Tokens instead of coercing them to zero', async () => {
+  const dto = heatmapDTO();
+  const { cumulativeTokens, ...missing } = dto.days[0];
+  const missingDTO = { ...dto, days: [missing] };
+  assert.throws(() => windowDTOValidators.usageHeatmap.parse(missingDTO), { code: 'invalid_response' });
+  for (const invalid of [undefined, null, '0', false, -1, 0.5, NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => windowDTOValidators.usageHeatmap.parse({ ...dto, days: [{ ...dto.days[0], cumulativeTokens: invalid }] }), { code: 'invalid_response' }, `tokens: ${String(invalid)}`);
+  }
+  const { api, host } = client({ 'window.usage.heatmap': missingDTO });
+  try {
+    await assert.rejects(api.usageHeatmap({ range: 'all', metric: 'tokens' }), { code: 'invalid_response' });
   } finally { api.dispose(); host.dispose(); }
 });
 
