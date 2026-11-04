@@ -20,6 +20,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+function modelDisplayName(model: string): string {
+  return model.replace(/^(?:kimi-code|deepseek)\//, "");
+}
+
 function DashboardNameLabel({ title }: { title: string }) {
   const labelRef = useRef<HTMLSpanElement>(null);
   const [truncated, setTruncated] = useState(false);
@@ -129,7 +133,9 @@ export function DashboardTable({
   };
   const aggValue = (row: DashboardRow): string | number | null =>
     field === "title"
-      ? row.title
+      ? tab === "models"
+        ? modelDisplayName(row.title)
+        : row.title
       : field === "requests"
         ? row.totals.requestCount
         : field === "cost"
@@ -331,8 +337,11 @@ export function DashboardTable({
                           ? t("Remote metering", "远端计量")
                           : t("Session logs", "会话日志"))}
                     </td>
-                    <td className="truncate px-3" title={row.modelID}>
-                      {row.modelID}
+                    <td
+                      className="truncate px-3"
+                      title={modelDisplayName(row.modelID)}
+                    >
+                      {modelDisplayName(row.modelID)}
                     </td>
                     <td className="px-3">{row.totals.costDisplay}</td>
                     <td className="px-3">
@@ -408,7 +417,11 @@ export function DashboardTable({
               {rows.map((row) => (
                 <tr key={row.id} className="border-t">
                   <td className="px-3 py-3">
-                    <DashboardNameLabel title={row.title} />
+                    <DashboardNameLabel
+                      title={
+                        tab === "models" ? modelDisplayName(row.title) : row.title
+                      }
+                    />
                   </td>
                   <td className="px-3">
                     {row.totals.requestCount.toLocaleString()}

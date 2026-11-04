@@ -14,6 +14,7 @@ import {
 import { chartBarWidth } from "@/components/stacked-bar-chart";
 import {
   brandColor,
+  formatDate,
   formatTokensCompact,
   serviceDisplayName,
 } from "@/lib/display";
@@ -200,9 +201,11 @@ export function DashboardChart({
                 return (
                   <ChartDataTooltipContent className="w-[260px]">
                     <strong>
-                      {new Date(s.start).toLocaleString(
+                      {formatDate(
+                        s.start,
                         bootstrap.resolvedLanguage,
-                        { timeZone: bootstrap.timeZone },
+                        bootstrap.timeZone,
+                        data.resolvedRange.granularity === "hour",
                       )}
                     </strong>
                     <span>
