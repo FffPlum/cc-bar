@@ -154,7 +154,7 @@ export function DashboardChart({
                 render={
                   <button
                     type="button"
-                    className="z-0 flex h-full min-w-0 flex-1 items-end justify-center hover:bg-muted focus-visible:bg-muted"
+                    className="cc-chart-column-guide relative z-0 flex h-full min-w-0 flex-1 items-end justify-center"
                     aria-label={`${fmt.format(new Date(s.start))}: ${valueLabel(s)}; ${s.segments
                       .map(
                         (segment) =>

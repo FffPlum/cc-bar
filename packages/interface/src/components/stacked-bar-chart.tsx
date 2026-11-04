@@ -115,7 +115,7 @@ export function StackedBarChart({
           render={
             <button
               type="button"
-              className="relative flex h-full min-w-0 flex-1 flex-col pb-6 outline-offset-0"
+              className="cc-chart-column-guide cc-chart-column-guide-with-label relative flex h-full min-w-0 flex-1 flex-col pb-6 outline-offset-0"
               style={{
                 maxWidth: width + 12,
                 opacity:

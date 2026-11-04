@@ -274,6 +274,35 @@ textarea[data-private] { -webkit-text-security: disc; }
   background-color: var(--muted);
 }
 
+/* Keep the whole column interactive, but mark only its centre in the plot. */
+.cc-chart-column-guide {
+  isolation: isolate;
+}
+.cc-chart-column-guide::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: color-mix(in oklab, var(--muted) 60%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+.cc-chart-column-guide-with-label::after {
+  bottom: 1.5rem;
+}
+.cc-chart-column-guide:focus-visible::after {
+  opacity: 1;
+}
+@media (hover: hover) and (pointer: fine) {
+  .cc-chart-column-guide:hover::after {
+    opacity: 1;
+  }
+}
+
 /* Bar cards use WAAPI for entry and retargeting; other cards retain CSS motion. */
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
   .cc-chart-tooltip-positioner[data-open][data-animated]:not([data-placement="bar"]) {

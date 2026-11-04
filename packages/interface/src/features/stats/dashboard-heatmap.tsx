@@ -348,7 +348,7 @@ function TokenSeriesChart({
                 <button
                   type="button"
                   aria-label={describe(point)}
-                  className="absolute inset-y-0 flex min-w-0 items-end justify-center hover:bg-muted/60 focus-visible:bg-muted/60"
+                  className={`absolute inset-y-0 flex min-w-0 items-end justify-center ${view === "weekly" ? "cc-chart-column-guide" : "hover:bg-muted/60 focus-visible:bg-muted/60"}`}
                   style={{
                     left: `${(x(point.day) - (step * dayMilliseconds) / span / 2) * 100}%`,
                     width: `${((step * dayMilliseconds) / span) * 100}%`,
