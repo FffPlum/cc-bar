@@ -3,7 +3,7 @@ import type {
   UsageService,
   UsageTotals,
 } from "@ccbar/host-api/window";
-import { serviceDisplayName } from "@/lib/display";
+import { modelDisplayName, serviceDisplayName } from "@/lib/display";
 
 export type ProjectShareDimension = "service" | "model" | "branch";
 
@@ -57,7 +57,7 @@ export function projectUsageShareRows(
   if (dimension === "model") {
     return detail.models.map((model) => ({
       id: `model:${model.model}`,
-      title: model.model,
+      title: modelDisplayName(model.model),
       services: model.services,
       totals: model.totals,
       share: share(model.totals),

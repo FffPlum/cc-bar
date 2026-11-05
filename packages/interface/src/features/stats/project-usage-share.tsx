@@ -260,6 +260,7 @@ export function ProjectUsageShare({
           ))}
         </div>
         <DataTable
+          stickyFirstColumn
           columns={columns}
           data={visibleRows}
           getRowId={rowId}

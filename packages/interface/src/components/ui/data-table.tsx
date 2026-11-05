@@ -16,9 +16,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 // Use only the core row model so the host's row order stays authoritative.
 const features = tableFeatures({});
+const stickyColumnClassName =
+  "sticky left-0 z-10 bg-background transition-colors [tr:hover_&]:bg-[color-mix(in_oklab,var(--muted)_50%,var(--background))]";
 export type DataTableFeatures = typeof features;
 export type DataTableColumnDef<
   TData extends RowData,
@@ -36,6 +39,7 @@ export interface DataTableProps<TData extends RowData> {
   ariaLabel: string;
   emptyMessage: ReactNode;
   tableClassName?: string;
+  stickyFirstColumn?: boolean;
   getRowProps?: (row: TData) => ComponentProps<"tr">;
 }
 
@@ -46,6 +50,7 @@ export function DataTable<TData extends RowData>({
   ariaLabel,
   emptyMessage,
   tableClassName,
+  stickyFirstColumn = false,
   getRowProps,
 }: DataTableProps<TData>) {
   const table = useTable({ features, columns, data, getRowId });
@@ -56,11 +61,17 @@ export function DataTable<TData extends RowData>({
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
             <TableRow key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
+              {headerGroup.headers.map((header, index) => (
                 <TableHead
                   key={header.id}
                   colSpan={header.colSpan}
                   scope={header.colSpan > 1 ? "colgroup" : "col"}
+                  className={cn(
+                    stickyFirstColumn &&
+                      index === 0 &&
+                      header.colSpan === 1 &&
+                      stickyColumnClassName,
+                  )}
                 >
                   {header.isPlaceholder ? null : (
                     <table.FlexRender header={header} />
@@ -74,8 +85,13 @@ export function DataTable<TData extends RowData>({
           {rows.length > 0 ? (
             rows.map((row) => (
               <TableRow key={row.id} {...getRowProps?.(row.original)}>
-                {row.getAllCells().map((cell) => (
-                  <TableCell key={cell.id}>
+                {row.getAllCells().map((cell, index) => (
+                  <TableCell
+                    key={cell.id}
+                    className={cn(
+                      stickyFirstColumn && index === 0 && stickyColumnClassName,
+                    )}
+                  >
                     <table.FlexRender cell={cell} />
                   </TableCell>
                 ))}

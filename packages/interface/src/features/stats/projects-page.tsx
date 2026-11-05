@@ -499,12 +499,12 @@ function ProjectDetailView({
                 <Card className="gap-0 rounded-lg py-0">
                   <button
                     type="button"
-                    className="grid w-full grid-cols-[minmax(0,1fr)_max-content] items-center gap-4 rounded-lg p-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                    className="grid w-full grid-cols-[minmax(0,1fr)_max-content] items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-muted/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
                     onClick={() =>
                       navigate("conversations", { conversationID: summary.id })
                     }
                   >
-                    <span className="flex min-w-0 flex-col gap-1">
+                    <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="flex min-w-0 items-center gap-1.5">
                         <ServiceIcon
                           name={serviceDisplayName(summary.service)}
@@ -518,22 +518,27 @@ function ProjectDetailView({
                           {summary.title ?? t("Untitled", "未命名")}
                         </span>
                       </span>
-                      <span
-                        className="truncate font-mono text-[11px] text-muted-foreground"
-                        title={summary.gitBranch ?? undefined}
-                      >
-                        {summary.gitBranch ??
-                          t("(no branch info)", "（无分支信息）")}
-                      </span>
-                      <span className="cc-number text-[10.5px] text-muted-foreground">
-                        {formatDate(
-                          summary.rangeLastAt,
-                          language,
-                          bootstrap.timeZone,
-                        )}
+                      <span className="flex min-w-0 items-center gap-1.5 text-[10.5px] text-muted-foreground">
+                        <span
+                          className="min-w-0 truncate font-mono"
+                          title={summary.gitBranch ?? undefined}
+                        >
+                          {summary.gitBranch ??
+                            t("(no branch info)", "（无分支信息）")}
+                        </span>
+                        <span aria-hidden="true" className="shrink-0">
+                          ·
+                        </span>
+                        <span className="cc-number shrink-0 whitespace-nowrap">
+                          {formatDate(
+                            summary.rangeLastAt,
+                            language,
+                            bootstrap.timeZone,
+                          )}
+                        </span>
                       </span>
                     </span>
-                    <span className="cc-number flex flex-col gap-1 text-right">
+                    <span className="cc-number flex flex-col gap-0.5 text-right">
                       <span className="whitespace-nowrap text-[12.5px] font-semibold">
                         {formatTokensCompact(summary.totals.totalTokens)} Tokens
                       </span>

@@ -126,6 +126,35 @@ it("preserves host branch order, counts and distinct missing or empty-name IDs",
   expect(rows.every((row) => row.services.length === 0)).toBe(true);
 });
 
+it("cleans model labels without merging distinct raw model identifiers", () => {
+  const models: ProjectDetail["models"] = [
+    "kimi-code/kimi-for-coding",
+    "deepseek/deepseek-chat",
+    "deepseek-chat",
+    "other/model",
+  ].map((model) => ({
+    model,
+    services: ["kimi"],
+    totals: totals(25),
+  }));
+  const input = detail({
+    totals: totals(100),
+    models,
+  });
+  const rows = projectUsageShareRows(input, "model", "tokens");
+  expect(rows.map((row) => row.title)).toEqual([
+    "kimi-for-coding",
+    "deepseek-chat",
+    "deepseek-chat",
+    "other/model",
+  ]);
+  expect(rows.map((row) => row.id)).toEqual(
+    models.map((model) => `model:${model.model}`),
+  );
+  expect(new Set(rows.map((row) => row.id)).size).toBe(4);
+  expect(rows.map((row) => row.share)).toEqual([0.25, 0.25, 0.25, 0.25]);
+});
+
 it("keeps zero or wholly unpriced cost shares at zero instead of falling back to Tokens", () => {
   const unknown = { ...totals(100), hasUnpricedUsage: true };
   const input = detail({
