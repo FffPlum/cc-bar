@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, CircleHelp, Copy, Folder } from "lucide-react";
+import {
+  ArrowDownWideNarrow,
+  ChevronDown,
+  CircleHelp,
+  Copy,
+  Folder,
+} from "lucide-react";
 import type {
   ConversationDetail,
   ConversationListResult,
@@ -14,6 +20,8 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -25,7 +33,6 @@ import {
 import { EmptyState } from "@/components/workspace";
 import { ResourceFeedback } from "@/components/resource-feedback";
 import { SearchInput } from "@/components/search-input";
-import { SelectField } from "@/components/select-field";
 import { ServiceIcon } from "@/components/service-icon";
 import { errorMessage, useHost, useHostResource } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
@@ -130,36 +137,37 @@ export function ConversationsPage({
   return (
     <div className="grid h-full min-h-0 min-w-0 grid-cols-[440px_minmax(0,1fr)] max-[1100px]:grid-cols-[minmax(0,9fr)_minmax(0,11fr)]">
       <section
-        className="flex min-h-0 min-w-0 flex-col border-r"
+        className="flex min-h-0 min-w-0 flex-col gap-1 border-r"
         onKeyDown={keyboard}
         tabIndex={0}
         aria-label={t("Conversations", "对话")}
       >
-        <div className="flex items-center gap-1.5 px-2 pt-2.5">
-          <SearchInput
-            value={search}
-            onChange={setSearch}
-            privateValue={privacy}
-            placeholder={t("Search title or project", "搜索标题或项目")}
-            className="flex-1"
-          />
-          <ProjectFilter
-            projects={list.data?.projects ?? []}
-            value={projectKey}
-            onChange={setProjectKey}
-          />
-          <SelectField
-            value={sort}
-            options={[
-              { value: "recent", label: t("Recent", "最近") },
-              { value: "tokens", label: "Tokens" },
-              { value: "cost", label: t("Cost", "费用") },
-            ]}
-            onChange={setSort}
-            ariaLabel={t("Sort", "排序")}
-          />
+        <div
+          className="flex flex-col gap-1.5 px-2 pt-2.5"
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp")
+              event.stopPropagation();
+          }}
+        >
+          <div className="flex items-center gap-1.5">
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              privateValue={privacy}
+              placeholder={t("Search title or project", "搜索标题或项目")}
+              className="flex-1"
+            />
+            <ProjectFilter
+              projects={list.data?.projects ?? []}
+              value={projectKey}
+              onChange={setProjectKey}
+            />
+          </div>
+          <div className="flex items-center justify-end">
+            <ConversationSort value={sort} onChange={setSort} />
+          </div>
         </div>
-        <div className="cc-scrollbar mt-2 flex-1 p-2">
+        <div className="cc-scrollbar flex-1 px-2 pb-2">
           <ResourceFeedback
             {...list}
             onRetry={() => void list.reload()}
@@ -233,6 +241,64 @@ export function ConversationsPage({
         )}
       </section>
     </div>
+  );
+}
+
+function ConversationSort({
+  value,
+  onChange,
+}: {
+  value: Sort;
+  onChange: (sort: Sort) => void;
+}) {
+  const t = useTranslation();
+  const options: { value: Sort; label: string }[] = [
+    { value: "recent", label: t("Recent", "最近") },
+    { value: "tokens", label: "Tokens" },
+    { value: "cost", label: t("Cost", "费用") },
+  ];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="max-w-[150px]"
+            aria-label={t("Sort conversations", "对话排序")}
+          />
+        }
+      >
+        <ArrowDownWideNarrow aria-hidden="true" />
+        <span className="truncate">
+          {options.find((option) => option.value === value)?.label}
+        </span>
+        <ChevronDown aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="w-max min-w-(--anchor-width) max-w-(--available-width)"
+      >
+        <DropdownMenuRadioGroup
+          value={value}
+          onValueChange={(next) => {
+            const option = options.find((option) => option.value === next);
+            if (option) onChange(option.value);
+          }}
+          aria-label={t("Sort", "排序")}
+        >
+          {options.map((option) => (
+            <DropdownMenuRadioItem
+              key={option.value}
+              value={option.value}
+              closeOnClick
+            >
+              {option.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
