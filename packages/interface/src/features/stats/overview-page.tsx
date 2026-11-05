@@ -175,6 +175,7 @@ export function OverviewPage({
                     onClick={() =>
                       navigate("conversations", {
                         conversationID: row.summary.id,
+                        conversationTitle: row.summary.title,
                       })
                     }
                   />

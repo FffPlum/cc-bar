@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Folder, FolderOpen } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 import type {
   ProjectDetail,
   ProjectDetailQuery,
@@ -13,6 +13,7 @@ import { ProjectUsageShare } from "@/features/stats/project-usage-share";
 import { EmptyState, KpiCard, Panel } from "@/components/workspace";
 import { ResourceFeedback } from "@/components/resource-feedback";
 import { SearchInput } from "@/components/search-input";
+import { SelectField } from "@/components/select-field";
 import { StatsSortMenu } from "@/features/stats/stats-sort-menu";
 import { StackedBarChart } from "@/components/stacked-bar-chart";
 import { DashboardChart } from "@/features/stats/dashboard-charts";
@@ -282,20 +283,23 @@ function ProjectRow({
         </span>
       </span>
       <span className="flex h-[3px] gap-0.5">
-        {Object.keys(row.totalsByService).map((service) => (
-          <span
-            key={service}
-            className="rounded-full"
-            style={{
-              width: `${(row.sharesByService[service as import("@ccbar/host-api/window").UsageService] ?? 0) * 100}%`,
-              backgroundColor: brandColor(
-                service as import("@ccbar/host-api/window").UsageService,
-                settings,
-                bootstrap.appearance === "dark",
-              ),
-            }}
-          />
-        ))}
+        {bootstrap.visibleUsageServices
+          .filter((service) => row.totalsByService[service])
+          .map((service) => (
+            <span
+              key={service}
+              data-service={service}
+              className="rounded-full"
+              style={{
+                width: `${(row.sharesByService[service] ?? 0) * 100}%`,
+                backgroundColor: brandColor(
+                  service,
+                  settings,
+                  bootstrap.appearance === "dark",
+                ),
+              }}
+            />
+          ))}
       </span>
     </button>
   );
@@ -352,6 +356,7 @@ function ProjectDetailView({
   navigate: (view: StatsView, request: StatsNavigation) => void;
 }) {
   const [revealError, setRevealError] = useState<string | null>(null);
+  const [conversationLimit, setConversationLimit] = useState<"3" | "5">("3");
   const { api, settings, bootstrap } = useHost();
   const t = useTranslation();
   const language = bootstrap.resolvedLanguage;
@@ -360,8 +365,18 @@ function ProjectDetailView({
     (worktree) => !worktree.main,
   ).length;
   const chartData = useMemo(
-    () => projectUsageChartData(detail.daily, query.granularity, language),
-    [detail.daily, query.granularity, language],
+    () =>
+      projectUsageChartData(
+        detail.daily,
+        query.granularity,
+        language,
+        bootstrap.visibleUsageServices,
+      ),
+    [detail.daily, query.granularity, language, bootstrap.visibleUsageServices],
+  );
+  const topConversations = detail.topConversations.slice(
+    0,
+    Number(conversationLimit),
   );
   return (
     <div className="p-5">
@@ -482,26 +497,29 @@ function ProjectDetailView({
             <h3 className="text-[13px] font-semibold">
               {t("Top conversations", "高消耗对话")}
             </h3>
-            <Button
-              variant="link"
-              size="sm"
-              className="h-auto p-0"
-              onClick={() =>
-                navigate("conversations", { projectKey: detail.project.key })
-              }
-            >
-              {t("View in Conversations ›", "在对话页查看 ›")}
-            </Button>
+            <SelectField
+              value={conversationLimit}
+              options={[
+                { value: "3", label: "Top 3" },
+                { value: "5", label: "Top 5" },
+              ]}
+              onChange={setConversationLimit}
+              ariaLabel={t("Top conversations limit", "高消耗对话显示数量")}
+              contentAlign="end"
+            />
           </div>
           <ul className="flex min-w-0 flex-col gap-2">
-            {detail.topConversations.slice(0, 3).map(({ summary }) => (
+            {topConversations.map(({ summary }) => (
               <li key={summary.id}>
                 <Card className="gap-0 rounded-lg py-0">
                   <button
                     type="button"
-                    className="grid w-full grid-cols-[minmax(0,1fr)_max-content] items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-muted/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                    className="grid w-full grid-cols-[minmax(0,1fr)_max-content_auto] items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-muted/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
                     onClick={() =>
-                      navigate("conversations", { conversationID: summary.id })
+                      navigate("conversations", {
+                        conversationID: summary.id,
+                        conversationTitle: summary.title,
+                      })
                     }
                   >
                     <span className="flex min-w-0 flex-col gap-0.5">
@@ -546,6 +564,10 @@ function ProjectDetailView({
                         {summary.costs.displayTotal}
                       </span>
                     </span>
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="size-4 shrink-0 text-muted-foreground"
+                    />
                   </button>
                 </Card>
               </li>

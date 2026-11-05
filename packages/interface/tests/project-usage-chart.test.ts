@@ -1,6 +1,12 @@
 import { expect, it } from "vitest";
-import type { UsageSample, UsageTotals } from "@ccbar/host-api/window";
+import type {
+  UsageSample,
+  UsageService,
+  UsageTotals,
+} from "@ccbar/host-api/window";
 import { projectUsageChartData } from "@/features/stats/project-usage-chart";
+
+const visibleUsageServices: readonly UsageService[] = ["codex", "claude", "pi"];
 
 function totals(totalTokens: number, costUSD = "0"): UsageTotals {
   return {
@@ -42,7 +48,12 @@ it("uses each bucket's Token shares even when cost shares differ", () => {
       pi: totals(0),
     },
   };
-  const mapped = projectUsageChartData([input], "day", "en").samples[0]!;
+  const mapped = projectUsageChartData(
+    [input],
+    "day",
+    "en",
+    visibleUsageServices,
+  ).samples[0]!;
   expect(mapped.value).toBe(100);
   expect(mapped.label).toBe("100.00");
   expect(
@@ -62,7 +73,7 @@ it("uses each bucket's Token shares even when cost shares differ", () => {
 });
 
 it("keeps zero buckets finite and does not invent samples or coverage", () => {
-  const empty = projectUsageChartData([], "day", "en");
+  const empty = projectUsageChartData([], "day", "en", visibleUsageServices);
   expect(empty.samples).toEqual([]);
   expect(empty.axisTicks).toEqual([
     { position: 0, label: "0" },
@@ -71,10 +82,86 @@ it("keeps zero buckets finite and does not invent samples or coverage", () => {
   ]);
   expect(empty).not.toHaveProperty("coverage");
   const input = { ...sample(0), byService: { codex: totals(0) } };
-  const mapped = projectUsageChartData([input], "day", "zh").samples[0]!;
+  const mapped = projectUsageChartData(
+    [input],
+    "day",
+    "zh",
+    visibleUsageServices,
+  ).samples[0]!;
   expect(mapped.normalizedValue).toBe(0);
   expect(mapped.segments).toHaveLength(1);
   expect(mapped.segments[0]!.share).toBe(0);
+});
+
+it("keeps every day's segments in application order when response key order changes", () => {
+  const codex = totals(60);
+  const claude = totals(30);
+  const pi = totals(10);
+  const input: UsageSample[] = [
+    { ...sample(100), byService: { claude, pi, codex } },
+    {
+      ...sample(100),
+      key: "2026-11-06",
+      start: "2026-11-05T16:00:00Z",
+      byService: { pi, codex, claude },
+    },
+  ];
+  const refreshed = input.map((bucket) => ({
+    ...bucket,
+    byService: Object.fromEntries(Object.entries(bucket.byService).reverse()),
+  }));
+  for (const response of [input, refreshed]) {
+    const result = projectUsageChartData(
+      response,
+      "day",
+      "en",
+      visibleUsageServices,
+    );
+    expect(
+      result.samples.map((bucket) =>
+        bucket.segments.map(({ service, value }) => ({ service, value })),
+      ),
+    ).toEqual([
+      [
+        { service: "codex", value: 60 },
+        { service: "claude", value: 30 },
+        { service: "pi", value: 10 },
+      ],
+      [
+        { service: "codex", value: 60 },
+        { service: "claude", value: 30 },
+        { service: "pi", value: 10 },
+      ],
+    ]);
+  }
+});
+
+it("applies a new application order without inserting segments for absent services", () => {
+  const input: UsageSample[] = [
+    {
+      ...sample(100),
+      byService: { claude: totals(30), codex: totals(60), pi: totals(10) },
+    },
+    {
+      ...sample(30),
+      key: "2026-11-06",
+      start: "2026-11-05T16:00:00Z",
+      byService: { claude: totals(30) },
+    },
+  ];
+  const first = projectUsageChartData(input, "day", "en", visibleUsageServices);
+  const reordered = projectUsageChartData(input, "day", "en", [
+    "pi",
+    "claude",
+    "codex",
+  ]);
+  expect(
+    first.samples.map((bucket) => bucket.segments.map((x) => x.service)),
+  ).toEqual([["codex", "claude", "pi"], ["claude"]]);
+  expect(
+    reordered.samples.map((bucket) => bucket.segments.map((x) => x.service)),
+  ).toEqual([["pi", "claude", "codex"], ["claude"]]);
+  expect(reordered.samples[1]!.segments[0]!.share).toBe(1);
 });
 
 it.each([
@@ -88,7 +175,12 @@ it.each([
 ] as const)(
   "uses the dashboard's standard scale for a %i-Token peak",
   (peak, maximum, middleLabel, topLabel) => {
-    const result = projectUsageChartData([sample(peak)], "day", "en");
+    const result = projectUsageChartData(
+      [sample(peak)],
+      "day",
+      "en",
+      visibleUsageServices,
+    );
     expect(result.samples[0]!.normalizedValue).toBeCloseTo(peak / maximum);
     expect(result.axisTicks).toEqual([
       { position: 0, label: "0" },
@@ -103,7 +195,12 @@ it.each([
   [24_001, ["0", "1.5万", "3万"]],
   [149_000_001, ["0", "7,500万", "1.5亿"]],
 ] as const)("uses Chinese axis units for %i Tokens", (peak, labels) => {
-  const result = projectUsageChartData([sample(peak)], "day", "zh");
+  const result = projectUsageChartData(
+    [sample(peak)],
+    "day",
+    "zh",
+    visibleUsageServices,
+  );
   expect(result.axisTicks.map((tick) => tick.label)).toEqual(labels);
 });
 
@@ -117,7 +214,12 @@ it.each(["day", "week", "month"] as const)(
       start: "2026-11-08T16:00:00Z",
     };
     const input = [first, last] as const;
-    const result = projectUsageChartData(input, granularity, "zh");
+    const result = projectUsageChartData(
+      input,
+      granularity,
+      "zh",
+      visibleUsageServices,
+    );
     expect(result.resolvedRange.granularity).toBe(granularity);
     expect(
       result.samples.map(({ key, start, highlighted }) => ({

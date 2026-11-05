@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 export type StatsView = "overview" | "conversations" | "projects" | "quota";
 export interface StatsNavigation {
   conversationID?: string;
+  conversationTitle?: string | null;
   projectKey?: string;
   unattributed?: boolean;
   conversationsByRank?: boolean;

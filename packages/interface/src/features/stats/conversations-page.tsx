@@ -47,6 +47,16 @@ const usageDomains = ["usage"] as const;
 
 type Sort = "recent" | "tokens" | "cost";
 
+function navigationSearch(navigation: StatsNavigation) {
+  const text = navigation.conversationID
+    ? (navigation.conversationTitle?.trim() ?? "")
+    : "";
+  return {
+    text,
+    pendingTitleID: text ? undefined : navigation.conversationID,
+  };
+}
+
 export function ConversationsPage({
   query,
   navigation,
@@ -64,15 +74,25 @@ export function ConversationsPage({
     { value: "tokens", label: "Tokens" },
     { value: "cost", label: t("Cost", "费用") },
   ];
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => navigationSearch(navigation));
+  const searchQuery = search.text;
   const [sort, setSort] = useState<Sort>("recent");
   const [projectKey, setProjectKey] = useState<string | undefined>();
-  const [selection, setSelection] = useState<string | null>(null);
+  const [selection, setSelection] = useState<string | null>(
+    navigation.conversationID ?? null,
+  );
   const [limit, setLimit] = useState(200);
-  const requested = useRef<string | null>(null);
+  const requested = useRef<string | null>(navigation.conversationID ?? null);
   const listQuery = useMemo(
-    () => ({ ...query, search, sort, projectKey, offset: 0, limit }),
-    [query, search, sort, projectKey, limit],
+    () => ({
+      ...query,
+      search: searchQuery,
+      sort,
+      projectKey,
+      offset: 0,
+      limit,
+    }),
+    [query, searchQuery, sort, projectKey, limit],
   );
   const list = useHostResource<ConversationListResult>(
     () => api.conversationsList(listQuery),
@@ -92,17 +112,19 @@ export function ConversationsPage({
   useEffect(() => {
     if (navigation.conversationID) {
       requested.current = navigation.conversationID;
-      setSearch("");
+      setSearch(navigationSearch(navigation));
       setProjectKey(undefined);
       setSelection(navigation.conversationID);
     }
     if (navigation.conversationsByRank) {
-      setSearch("");
+      requested.current = null;
+      setSearch({ text: "", pendingTitleID: undefined });
       setProjectKey(undefined);
       setSort(settings.appearance.statsRankMetric);
     }
     if (navigation.projectKey) {
-      setSearch("");
+      requested.current = null;
+      setSearch({ text: "", pendingTitleID: undefined });
       setProjectKey(navigation.projectKey);
     }
     if (
@@ -112,9 +134,20 @@ export function ConversationsPage({
     )
       onNavigationConsumed();
   }, [navigation, onNavigationConsumed, settings.appearance.statsRankMetric]);
+  const untitledConversation = t("Untitled conversation", "未命名对话");
+  useEffect(() => {
+    const summary = detail.data?.summary;
+    if (!summary || summary.id !== search.pendingTitleID) return;
+    const text = summary.title?.trim() || untitledConversation;
+    setSearch((current) =>
+      current.pendingTitleID === summary.id
+        ? { text, pendingTitleID: undefined }
+        : current,
+    );
+  }, [detail.data, search.pendingTitleID, untitledConversation]);
   useEffect(() => {
     setLimit(200);
-  }, [query, search, sort, projectKey]);
+  }, [query, searchQuery, sort, projectKey]);
   useEffect(() => {
     if (
       !list.data ||
@@ -149,10 +182,16 @@ export function ConversationsPage({
         >
           <div className="flex items-center gap-1.5">
             <SearchInput
-              value={search}
-              onChange={setSearch}
+              value={search.text}
+              onChange={(value) => {
+                requested.current = null;
+                setSearch({ text: value, pendingTitleID: undefined });
+              }}
               privateValue={privacy}
-              placeholder={t("Search title or project", "搜索标题或项目")}
+              placeholder={t(
+                "Search title, project or ID",
+                "搜索标题、项目或 ID",
+              )}
               className="flex-1"
             />
             <ProjectFilter
@@ -184,7 +223,7 @@ export function ConversationsPage({
               result.rows.length === 0 ? (
                 <EmptyState
                   title={
-                    search
+                    searchQuery
                       ? t("No matching conversations", "没有匹配的对话")
                       : query.range === "today"
                         ? t("No conversations today", "今天还没有对话")

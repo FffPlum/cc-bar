@@ -10,6 +10,7 @@ export function projectUsageChartData(
   samples: readonly UsageSample[],
   granularity: StatsQuery["granularity"],
   language: "zh" | "en",
+  visibleUsageServices: readonly UsageService[],
 ): DashboardChartData {
   const peak = samples.reduce(
     (maximum, sample) => Math.max(maximum, sample.totals.totalTokens),
@@ -34,22 +35,20 @@ export function projectUsageChartData(
         normalizedValue: Number.isFinite(value)
           ? Math.min(1, Math.max(0, value / maximum))
           : 0,
-        segments: (Object.keys(sample.byService) as UsageService[]).flatMap(
-          (service) => {
-            const totals = sample.byService[service];
-            if (!totals) return [];
-            const contribution = totals.totalTokens;
-            return [
-              {
-                service,
-                totals,
-                value: contribution,
-                label: formatTokensCompact(contribution, 2),
-                share: value > 0 ? contribution / value : 0,
-              },
-            ];
-          },
-        ),
+        segments: visibleUsageServices.flatMap((service) => {
+          const totals = sample.byService[service];
+          if (!totals) return [];
+          const contribution = totals.totalTokens;
+          return [
+            {
+              service,
+              totals,
+              value: contribution,
+              label: formatTokensCompact(contribution, 2),
+              share: value > 0 ? contribution / value : 0,
+            },
+          ];
+        }),
       };
     }),
   };
