@@ -7,7 +7,8 @@ import {
   createChartDataTooltipHandle,
 } from "@/components/chart-data-tooltip";
 import { ChartViewTransition } from "@/components/chart-view-transition";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SlidingTabsList } from "@/components/sliding-tabs-list";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useHost } from "@/host/host-context";
 import { formatTokensCompact } from "@/lib/display";
 import {
@@ -81,16 +82,14 @@ export function HeatmapBlocks({
           <h2 className="font-semibold">{titles[view]}</h2>
           <p className="text-muted-foreground">{descriptions[view]}</p>
         </div>
-        <TabsList
-          aria-label={t("Token usage view", "Token 用量视图")}
-          className="shrink-0"
-        >
-          <TabsTrigger value="daily">{t("Daily", "每天")}</TabsTrigger>
-          <TabsTrigger value="weekly">{t("Weekly", "每周")}</TabsTrigger>
-          <TabsTrigger value="cumulative">
-            {t("Cumulative", "历史累计")}
-          </TabsTrigger>
-        </TabsList>
+        <SlidingTabsList
+          ariaLabel={t("Token usage view", "Token 用量视图")}
+          options={[
+            { value: "daily", label: t("Daily", "每天") },
+            { value: "weekly", label: t("Weekly", "每周") },
+            { value: "cumulative", label: t("Cumulative", "历史累计") },
+          ]}
+        />
       </div>
       <TabsContent value={view} className="cc-token-chart-window mt-3">
         <ChartViewTransition view={view}>

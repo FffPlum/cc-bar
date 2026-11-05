@@ -8,22 +8,19 @@ import type {
   UnattributedUsage,
 } from "@ccbar/host-api/window";
 import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Card } from "@/components/ui/card";
+import { ProjectUsageShare } from "@/features/stats/project-usage-share";
 import { EmptyState, KpiCard, Panel } from "@/components/workspace";
 import { ResourceFeedback } from "@/components/resource-feedback";
 import { SearchInput } from "@/components/search-input";
-import { SelectField } from "@/components/select-field";
-import { ChartLegend, StackedBarChart } from "@/components/stacked-bar-chart";
+import { StatsSortMenu } from "@/features/stats/stats-sort-menu";
+import { StackedBarChart } from "@/components/stacked-bar-chart";
+import { DashboardChart } from "@/features/stats/dashboard-charts";
+import { projectUsageChartData } from "@/features/stats/project-usage-chart";
 import { ServiceIcon } from "@/components/service-icon";
 import { errorMessage, useHost, useHostResource } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 import {
   brandColor,
   delta,
@@ -31,9 +28,9 @@ import {
   formatInteger,
   formatPercent,
   formatTokens,
+  formatTokensCompact,
   serviceDisplayName,
 } from "@/lib/display";
-import { TopConversationRow } from "@/features/stats/overview-page";
 import { useListKeyboard } from "@/hooks/list-keyboard";
 import type { StatsNavigation, StatsView } from "@/features/stats/stats-page";
 
@@ -117,36 +114,46 @@ export function ProjectsPage({
     setSelection,
   );
   return (
-    <div className="grid h-full min-h-0 min-w-0 grid-cols-[400px_minmax(480px,1fr)] max-[1100px]:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+    <div className="grid h-full min-h-0 min-w-0 grid-cols-[440px_minmax(0,1fr)] max-[1100px]:grid-cols-[minmax(0,9fr)_minmax(0,11fr)]">
       <section
-        className="flex min-h-0 min-w-0 flex-col border-r"
+        className="flex min-h-0 min-w-0 flex-col gap-1 border-r"
         onKeyDown={keyboard}
         tabIndex={0}
         aria-label={t("Projects", "项目")}
       >
-        <div className="flex items-center gap-1.5 px-2 pt-2.5">
-          <SearchInput
-            value={search}
-            onChange={setSearch}
-            privateValue={settings.appearance.privacyMode}
-            placeholder={t("Search project name or path", "搜索项目名或路径")}
-            className="flex-1"
-          />
-          <span className="cc-number whitespace-nowrap text-[11px] text-muted-foreground">
-            {list.data?.total ?? 0} {t("projects", "个项目")}
-          </span>
-          <SelectField
-            value={sort}
-            options={[
-              { value: "cost", label: t("Cost", "费用") },
-              { value: "tokens", label: "Tokens" },
-              { value: "recent", label: t("Recently active", "最近活跃") },
-            ]}
-            onChange={setSort}
-            ariaLabel={t("Sort", "排序")}
-          />
+        <div
+          className="flex flex-col gap-1.5 px-2 pt-2.5"
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp")
+              event.stopPropagation();
+          }}
+        >
+          <div className="flex items-center gap-1.5">
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              privateValue={settings.appearance.privacyMode}
+              placeholder={t("Search project name or path", "搜索项目名或路径")}
+              className="flex-1"
+            />
+            <span className="cc-number shrink-0 whitespace-nowrap text-[11px] text-muted-foreground">
+              {list.data?.total ?? 0} {t("projects", "个项目")}
+            </span>
+          </div>
+          <div className="flex items-center justify-end">
+            <StatsSortMenu
+              value={sort}
+              options={[
+                { value: "cost", label: t("Cost", "费用") },
+                { value: "tokens", label: "Tokens" },
+                { value: "recent", label: t("Recently active", "最近活跃") },
+              ]}
+              onChange={setSort}
+              ariaLabel={t("Sort projects", "项目排序")}
+            />
+          </div>
         </div>
-        <div className="cc-scrollbar mt-2 flex-1 p-2">
+        <div className="cc-scrollbar flex-1 px-2 pb-2">
           <ResourceFeedback {...list} onRetry={() => void list.reload()}>
             {(result) =>
               result.rows.length === 0 &&
@@ -197,7 +204,7 @@ export function ProjectsPage({
           </ResourceFeedback>
         </div>
       </section>
-      <section className="cc-scrollbar min-h-0">
+      <section className="cc-scrollbar min-h-0 min-w-0">
         {selection === UNATTRIBUTED && list.data ? (
           <UnattributedDetail
             value={list.data.unattributed}
@@ -345,273 +352,231 @@ function ProjectDetailView({
   navigate: (view: StatsView, request: StatsNavigation) => void;
 }) {
   const [revealError, setRevealError] = useState<string | null>(null);
-  const [allModels, setAllModels] = useState(false);
-  const [allBranches, setAllBranches] = useState(false);
   const { api, settings, bootstrap } = useHost();
   const t = useTranslation();
   const language = bootstrap.resolvedLanguage;
   const dark = bootstrap.appearance === "dark";
-  const services = Object.keys(
-    detail.totalsByService,
-  ) as import("@ccbar/host-api/window").UsageService[];
-  const series = services.map((service) => ({
-    id: service,
-    name: serviceDisplayName(service),
-    color: brandColor(service, settings, dark),
-  }));
-  const columns = detail.daily.map((sample) => ({
-    key: sample.key,
-    label: sample.key.slice(5),
-    total: sample.totals.totalTokens,
-    totalLabel: formatTokens(sample.totals.totalTokens, language),
-    highlighted: sample.highlighted,
-    segments: services.flatMap((service) => {
-      const totals = sample.byService[service];
-      return totals
-        ? [
-            {
-              seriesID: service,
-              value: totals.totalTokens,
-              label: totals.costDisplay,
-            },
-          ]
-        : [];
-    }),
-  }));
+  const worktreeCount = detail.worktrees.filter(
+    (worktree) => !worktree.main,
+  ).length;
+  const chartData = useMemo(
+    () => projectUsageChartData(detail.daily, query.granularity, language),
+    [detail.daily, query.granularity, language],
+  );
   return (
-    <div className="space-y-3.5 p-5">
+    <div className="p-5">
       {revealError && (
-        <p role="alert" className="text-xs text-red-600">
+        <p role="alert" className="pb-3 text-xs text-red-600">
           {revealError}
         </p>
       )}
-      <header>
-        <div className="flex items-center gap-2">
-          <h2 className="text-[18px] font-semibold">{detail.project.name}</h2>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            disabled={detail.project.status === "unavailable"}
-            aria-label={t("Reveal project in Finder", "在 Finder 中显示项目")}
-            onClick={() =>
-              void api
-                .projectsReveal(detail.project.key)
-                .then(() => setRevealError(null))
-                .catch((reason: unknown) =>
-                  setRevealError(errorMessage(reason)),
-                )
-            }
-          >
-            <FolderOpen />
-          </Button>
-          {detail.worktrees.length > 0 && (
-            <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
-              Git · {detail.worktrees.length} worktree
-            </span>
-          )}
-        </div>
-        <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-          {detail.project.path}
-        </p>
-      </header>
-      <div className="flex gap-3">
-        <KpiCard
-          label="Tokens"
-          value={formatTokens(detail.totals.totalTokens, language)}
-          delta={delta(detail.comparison, "tokens")}
-        />
-        <KpiCard
-          label={t("Cost", "费用")}
-          value={detail.totals.costDisplay}
-          delta={delta(detail.comparison, "costUSD")}
-        />
-        <KpiCard
-          label={t("Conversations", "对话数")}
-          value={formatInteger(detail.conversationCount, language)}
-        />
-        <KpiCard
-          label={t("Active days", "活跃天数")}
-          value={`${formatInteger(detail.activeDays, language)} / ${formatInteger(detail.rangeDayCount, language)}`}
-        />
-      </div>
-      <p className="cc-number text-[11px] text-muted-foreground">
-        {t("All time", "全部时间")}:{" "}
-        {formatTokens(detail.allTimeTotals.totalTokens, language)} Tokens ·{" "}
-        {detail.allTimeTotals.costDisplay} · {t("first used", "首次使用")}{" "}
-        {formatDate(detail.firstUsedDay, language, bootstrap.timeZone)}
-      </p>
-      <div className="grid items-start gap-3 min-[760px]:grid-cols-[58fr_42fr]">
-        <Panel
-          title={
-            query.granularity === "day"
-              ? t("Daily usage", "每日用量")
-              : query.granularity === "week"
-                ? t("Weekly usage", "每周用量")
-                : t("Monthly usage", "每月用量")
-          }
-          actions={<ChartLegend series={series} />}
-        >
-          <StackedBarChart columns={columns} series={series} height={170} />
-        </Panel>
-        <Panel title={t("Tools & models", "工具与模型")} contentClassName="p-3">
-          <div className="mb-2 flex flex-wrap gap-2">
-            {services.map((service) => (
-              <span
-                key={service}
-                className="flex items-center gap-1 text-[10.5px] text-muted-foreground"
-              >
-                <ServiceIcon
-                  name={serviceDisplayName(service)}
-                  color={brandColor(service, settings, dark)}
-                  size={12}
-                />
-                {serviceDisplayName(service)}{" "}
-                {formatPercent(detail.sharesByService[service] ?? 0)}
+      <div className="@container">
+        <section className="flex flex-col gap-3 pb-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h2 className="min-w-0 break-words text-[18px] font-semibold">
+              {detail.project.name}
+            </h2>
+            {!settings.appearance.privacyMode &&
+              (detail.project.status === "available" ||
+                detail.project.status === "unverified") &&
+              detail.project.path && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t(
+                    "Reveal project in Finder",
+                    "在 Finder 中显示项目",
+                  )}
+                  onClick={() =>
+                    void api
+                      .projectsReveal(detail.project.key)
+                      .then(() => setRevealError(null))
+                      .catch((reason: unknown) =>
+                        setRevealError(errorMessage(reason)),
+                      )
+                  }
+                >
+                  <FolderOpen />
+                </Button>
+              )}
+            {detail.gitRepository === true && (
+              <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
+                Git
+                {worktreeCount > 0 ? ` · ${worktreeCount} worktree` : ""}
               </span>
-            ))}
+            )}
+            {detail.project.status === "unavailable" && (
+              <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
+                {t("Unavailable", "已不存在")}
+              </span>
+            )}
           </div>
-          {detail.models.slice(0, allModels ? undefined : 5).map((model) => (
-            <div
-              key={model.model}
-              className="flex items-center gap-1.5 border-t py-2"
-            >
-              <span className="min-w-0 flex-1 truncate font-mono text-[11.5px]">
-                {model.model}
-              </span>
-              <span className="cc-number text-[10.5px] text-muted-foreground">
-                {formatTokens(model.totals.totalTokens, language)}
-              </span>
-              <span className="cc-number w-[76px] text-right font-semibold">
-                {model.totals.costDisplay}
-              </span>
-            </div>
-          ))}
-          {detail.models.length > 5 && (
-            <Button
-              variant="link"
-              size="sm"
-              onClick={() => setAllModels(!allModels)}
-            >
-              {allModels
-                ? t("Show less", "收起")
-                : t(
-                    `Show all ${detail.models.length} models`,
-                    `显示全部 ${detail.models.length} 个模型`,
-                  )}
-            </Button>
-          )}
-        </Panel>
+          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
+            <dt>{t("Project directory", "项目目录")}</dt>
+            <dd className="break-all font-mono">
+              {settings.appearance.privacyMode
+                ? t("Hidden", "已隐藏")
+                : detail.project.path || "—"}
+            </dd>
+            <dt>{t("First used", "首次使用")}</dt>
+            <dd className="cc-number">
+              {formatDate(detail.firstUsedDay, language, bootstrap.timeZone)}
+            </dd>
+          </dl>
+        </section>
+        <section className="flex flex-col gap-3 border-y py-3">
+          <h3 className="text-[13px] font-semibold">
+            {t("Usage", "用量信息")}
+          </h3>
+          <dl className="grid grid-cols-2 @min-[640px]:grid-cols-4">
+            <ProjectUsageValue
+              label={t("Total tokens", "总 Token")}
+              value={formatTokensCompact(detail.totals.totalTokens)}
+              change={delta(detail.comparison, "tokens")}
+              className="pr-3 pb-3 @min-[640px]:pb-0"
+            />
+            <ProjectUsageValue
+              label={t("Estimated cost", "估算费用")}
+              value={detail.totals.costDisplay}
+              change={delta(detail.comparison, "costUSD")}
+              className="border-l pb-3 pl-3 @min-[640px]:pr-3 @min-[640px]:pb-0"
+            />
+            <ProjectUsageValue
+              label={t("Conversations", "对话数")}
+              value={formatInteger(detail.conversationCount, language)}
+              className="border-t pt-3 pr-3 @min-[640px]:border-t-0 @min-[640px]:border-l @min-[640px]:pt-0 @min-[640px]:pl-3"
+            />
+            <ProjectUsageValue
+              label={t("Active days", "活跃天数")}
+              value={`${formatInteger(detail.activeDays, language)} / ${formatInteger(detail.rangeDayCount, language)}`}
+              className="border-t border-l pt-3 pl-3 @min-[640px]:border-t-0 @min-[640px]:pt-0"
+            />
+          </dl>
+          <p className="cc-number text-[11px] text-muted-foreground">
+            {t("All-time tokens", "累计 Token")}{" "}
+            {formatTokensCompact(detail.allTimeTotals.totalTokens)}
+            {" · "}
+            {t("All-time cost", "累计费用")} {detail.allTimeTotals.costDisplay}
+          </p>
+        </section>
       </div>
-      <div className="grid items-start gap-3 min-[760px]:grid-cols-2">
-        <Panel title={t("Branches", "分支")} contentClassName="p-3">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("Branch", "分支")}</TableHead>
-                <TableHead className="text-right">
-                  {t("Chats", "对话数")}
-                </TableHead>
-                <TableHead className="text-right">Tokens</TableHead>
-                <TableHead className="text-right">
-                  {t("Cost", "费用")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {detail.branches
-                .slice(0, allBranches ? undefined : 5)
-                .map((branch, index) => (
-                  <TableRow key={branch.branch ?? index}>
-                    <TableCell className="max-w-40 truncate font-mono">
-                      {branch.branch ?? t("(no branch info)", "（无分支信息）")}
-                    </TableCell>
-                    <TableCell className="cc-number text-right">
-                      {branch.conversationCount}
-                    </TableCell>
-                    <TableCell className="cc-number text-right">
-                      {formatTokens(branch.totals.totalTokens, language)}
-                    </TableCell>
-                    <TableCell className="cc-number text-right">
-                      {branch.totals.costDisplay}
-                    </TableCell>
-                  </TableRow>
-                ))}
-            </TableBody>
-          </Table>
-          {detail.branches.length > 5 && (
+      <div className="flex min-w-0 flex-col gap-4 pt-3">
+        <section className="min-w-0">
+          <DashboardChart
+            data={chartData}
+            title="Tokens"
+            metric="tokens"
+            className="p-0"
+            headerTitle={
+              query.granularity === "day"
+                ? t("Daily usage", "每日用量")
+                : query.granularity === "week"
+                  ? t("Weekly usage", "每周用量")
+                  : t("Monthly usage", "每月用量")
+            }
+          />
+        </section>
+        <ProjectUsageShare detail={detail} query={query} />
+        <section className="flex min-w-0 flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-[13px] font-semibold">
+              {t("Top conversations", "高消耗对话")}
+            </h3>
             <Button
               variant="link"
               size="sm"
-              onClick={() => setAllBranches(!allBranches)}
-            >
-              {allBranches
-                ? t("Show less", "收起")
-                : t(
-                    `Show all ${detail.branches.length} branches`,
-                    `显示全部 ${detail.branches.length} 个分支`,
-                  )}
-            </Button>
-          )}
-        </Panel>
-        <Panel
-          title={t("Top conversations", "高消耗对话")}
-          actions={
-            <Button
-              variant="link"
-              size="sm"
+              className="h-auto p-0"
               onClick={() =>
                 navigate("conversations", { projectKey: detail.project.key })
               }
             >
               {t("View in Conversations ›", "在对话页查看 ›")}
             </Button>
-          }
-          contentClassName="p-0"
-        >
-          {detail.topConversations.slice(0, 3).map((row, index) => (
-            <TopConversationRow
-              key={row.summary.id}
-              row={row}
-              index={index}
-              share={row.share}
-              metric={settings.appearance.statsRankMetric}
-              showProject={false}
-              onClick={() =>
-                navigate("conversations", { conversationID: row.summary.id })
-              }
-            />
-          ))}
-        </Panel>
-      </div>
-      {detail.worktrees.length > 0 && (
-        <Panel
-          title={t("Repository & worktrees", "仓库与 worktree")}
-          contentClassName="p-3"
-        >
-          {detail.worktrees.map((item) => (
-            <div
-              key={item.path}
-              className="flex items-center gap-2 border-b py-2 last:border-0"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-mono text-[11px]">
-                  {item.path}
-                  {item.main ? ` · ${t("Main repository", "主仓库")}` : ""}
-                </p>
-                <p className="font-mono text-[10.5px] text-muted-foreground">
-                  {item.branch ?? t("(branch unknown)", "（分支未知）")}
-                </p>
+          </div>
+          <ul className="flex min-w-0 flex-col gap-2">
+            {detail.topConversations.slice(0, 3).map(({ summary }) => (
+              <li key={summary.id}>
+                <Card className="gap-0 rounded-lg py-0">
+                  <button
+                    type="button"
+                    className="grid w-full grid-cols-[minmax(0,1fr)_max-content] items-center gap-4 rounded-lg p-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                    onClick={() =>
+                      navigate("conversations", { conversationID: summary.id })
+                    }
+                  >
+                    <span className="flex min-w-0 flex-col gap-1">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <ServiceIcon
+                          name={serviceDisplayName(summary.service)}
+                          color={brandColor(summary.service, settings, dark)}
+                          size={14}
+                        />
+                        <span
+                          className="truncate text-[12.5px] font-medium"
+                          title={summary.title ?? undefined}
+                        >
+                          {summary.title ?? t("Untitled", "未命名")}
+                        </span>
+                      </span>
+                      <span
+                        className="truncate font-mono text-[11px] text-muted-foreground"
+                        title={summary.gitBranch ?? undefined}
+                      >
+                        {summary.gitBranch ??
+                          t("(no branch info)", "（无分支信息）")}
+                      </span>
+                      <span className="cc-number text-[10.5px] text-muted-foreground">
+                        {formatDate(
+                          summary.rangeLastAt,
+                          language,
+                          bootstrap.timeZone,
+                        )}
+                      </span>
+                    </span>
+                    <span className="cc-number flex flex-col gap-1 text-right">
+                      <span className="whitespace-nowrap text-[12.5px] font-semibold">
+                        {formatTokensCompact(summary.totals.totalTokens)} Tokens
+                      </span>
+                      <span className="whitespace-nowrap text-[11.5px] text-muted-foreground">
+                        {summary.costs.displayTotal}
+                      </span>
+                    </span>
+                  </button>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        </section>
+        {detail.worktrees.length > 0 && (
+          <Panel
+            title={t("Repository & worktrees", "仓库与 worktree")}
+            contentClassName="p-3"
+          >
+            {detail.worktrees.map((item) => (
+              <div
+                key={item.path}
+                className="flex items-center gap-2 border-b py-2 last:border-0"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-mono text-[11px]">
+                    {item.path}
+                    {item.main ? ` · ${t("Main repository", "主仓库")}` : ""}
+                  </p>
+                  <p className="font-mono text-[10.5px] text-muted-foreground">
+                    {item.branch ?? t("(branch unknown)", "（分支未知）")}
+                  </p>
+                </div>
+                <span className="cc-number">
+                  {formatTokens(item.totals.totalTokens, language)}
+                </span>
+                <span className="cc-number w-20 text-right">
+                  {item.totals.costDisplay}
+                </span>
               </div>
-              <span className="cc-number">
-                {formatTokens(item.totals.totalTokens, language)}
-              </span>
-              <span className="cc-number w-20 text-right">
-                {item.totals.costDisplay}
-              </span>
-            </div>
-          ))}
-        </Panel>
-      )}
+            ))}
+          </Panel>
+        )}
+      </div>
     </div>
   );
 }
@@ -755,6 +720,41 @@ function SourceRow({
       <span className="cc-number text-muted-foreground">
         {formatTokens(totals.totalTokens, bootstrap.resolvedLanguage)} Tokens
       </span>
+    </div>
+  );
+}
+
+function ProjectUsageValue({
+  label,
+  value,
+  change,
+  className,
+}: {
+  label: string;
+  value: string;
+  change?: ReturnType<typeof delta>;
+  className?: string;
+}) {
+  return (
+    <div className={cn("min-w-0", className)}>
+      <dt className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+        <span>{label}</span>
+        {change && (
+          <span
+            className={cn(
+              "cc-number font-semibold",
+              change.direction === "up"
+                ? "text-red-600 dark:text-red-400"
+                : "text-green-700 dark:text-green-400",
+            )}
+          >
+            {change.text}
+          </span>
+        )}
+      </dt>
+      <dd className="cc-number mt-1 break-all text-[22px] leading-tight font-semibold">
+        {value}
+      </dd>
     </div>
   );
 }

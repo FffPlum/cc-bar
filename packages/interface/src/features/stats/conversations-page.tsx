@@ -1,11 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  ArrowDownWideNarrow,
-  ChevronDown,
-  CircleHelp,
-  Copy,
-  Folder,
-} from "lucide-react";
+import { ChevronDown, CircleHelp, Copy, Folder } from "lucide-react";
 import type {
   ConversationDetail,
   ConversationListResult,
@@ -20,8 +14,6 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -46,6 +38,7 @@ import {
   serviceDisplayName,
 } from "@/lib/display";
 import { SpeedBadge } from "@/features/stats/overview-page";
+import { StatsSortMenu } from "@/features/stats/stats-sort-menu";
 import { useListKeyboard } from "@/hooks/list-keyboard";
 import type { StatsNavigation } from "@/features/stats/stats-page";
 import { cn } from "@/lib/utils";
@@ -66,6 +59,11 @@ export function ConversationsPage({
 }) {
   const { api, settings } = useHost();
   const t = useTranslation();
+  const sortOptions: { value: Sort; label: string }[] = [
+    { value: "recent", label: t("Recent", "最近") },
+    { value: "tokens", label: "Tokens" },
+    { value: "cost", label: t("Cost", "费用") },
+  ];
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<Sort>("recent");
   const [projectKey, setProjectKey] = useState<string | undefined>();
@@ -164,7 +162,12 @@ export function ConversationsPage({
             />
           </div>
           <div className="flex items-center justify-end">
-            <ConversationSort value={sort} onChange={setSort} />
+            <StatsSortMenu
+              value={sort}
+              options={sortOptions}
+              onChange={setSort}
+              ariaLabel={t("Sort conversations", "对话排序")}
+            />
           </div>
         </div>
         <div className="cc-scrollbar flex-1 px-2 pb-2">
@@ -241,64 +244,6 @@ export function ConversationsPage({
         )}
       </section>
     </div>
-  );
-}
-
-function ConversationSort({
-  value,
-  onChange,
-}: {
-  value: Sort;
-  onChange: (sort: Sort) => void;
-}) {
-  const t = useTranslation();
-  const options: { value: Sort; label: string }[] = [
-    { value: "recent", label: t("Recent", "最近") },
-    { value: "tokens", label: "Tokens" },
-    { value: "cost", label: t("Cost", "费用") },
-  ];
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="sm"
-            className="max-w-[150px]"
-            aria-label={t("Sort conversations", "对话排序")}
-          />
-        }
-      >
-        <ArrowDownWideNarrow aria-hidden="true" />
-        <span className="truncate">
-          {options.find((option) => option.value === value)?.label}
-        </span>
-        <ChevronDown aria-hidden="true" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        className="w-max min-w-(--anchor-width) max-w-(--available-width)"
-      >
-        <DropdownMenuRadioGroup
-          value={value}
-          onValueChange={(next) => {
-            const option = options.find((option) => option.value === next);
-            if (option) onChange(option.value);
-          }}
-          aria-label={t("Sort", "排序")}
-        >
-          {options.map((option) => (
-            <DropdownMenuRadioItem
-              key={option.value}
-              value={option.value}
-              closeOnClick
-            >
-              {option.label}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 

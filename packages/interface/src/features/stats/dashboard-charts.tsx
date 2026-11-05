@@ -21,6 +21,16 @@ import {
 } from "@/lib/display";
 import { useHost } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+
+export interface DashboardChartData {
+  samples: (DashboardSample & { highlighted?: boolean })[];
+  axisTicks: UsageDashboard["axisTicks"];
+  resolvedRange: {
+    granularity: UsageDashboard["resolvedRange"]["granularity"] | "week";
+  };
+  coverage?: Pick<UsageDashboard["coverage"], "precision">;
+}
 
 export function DashboardChart({
   data,
@@ -28,12 +38,16 @@ export function DashboardChart({
   metric,
   service,
   empty = false,
+  headerTitle,
+  className,
 }: {
-  data: UsageDashboard;
+  data: DashboardChartData;
   title: string;
   metric: DashboardMetric;
   service?: UsageService;
   empty?: boolean;
+  headerTitle?: string;
+  className?: string;
 }) {
   const [tooltipHandle] = useState(() =>
     createChartDataTooltipHandle<string>(),
@@ -48,12 +62,12 @@ export function DashboardChart({
       : sample.label;
   if (
     data.resolvedRange.granularity === "hour" &&
-    data.coverage.precision === "day"
+    data.coverage?.precision === "day"
   )
     return (
-      <div className="p-4">
+      <div className={cn("p-4", className)}>
         <h2 className="font-semibold">
-          {title} · {t("Hourly", "按小时")}
+          {headerTitle ?? `${title} · ${t("Hourly", "按小时")}`}
         </h2>
         <p className="mt-4 flex h-[180px] items-center justify-center text-center text-muted-foreground">
           {t(
@@ -96,15 +110,21 @@ export function DashboardChart({
         : { month: "2-digit", day: "2-digit" }),
   });
   return (
-    <div className="p-4">
+    <div className={cn("p-4", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-semibold">
-          {title} ·{" "}
-          {data.resolvedRange.granularity === "hour"
-            ? t("Hourly", "按小时")
-            : data.resolvedRange.granularity === "month"
-              ? t("Monthly", "按月")
-              : t("Daily", "按天")}
+          {headerTitle ?? (
+            <>
+              {title} ·{" "}
+              {data.resolvedRange.granularity === "hour"
+                ? t("Hourly", "按小时")
+                : data.resolvedRange.granularity === "month"
+                  ? t("Monthly", "按月")
+                  : data.resolvedRange.granularity === "week"
+                    ? t("Weekly", "按周")
+                    : t("Daily", "按天")}
+            </>
+          )}
         </h2>
         {!isCacheHitRate && (
           <div
@@ -177,7 +197,7 @@ export function DashboardChart({
               >
                 <span
                   data-slot="dashboard-bar"
-                  className="flex shrink-0 flex-col-reverse overflow-hidden rounded-t-[2px]"
+                  className="relative z-10 flex shrink-0 flex-col-reverse overflow-hidden rounded-t-[2px]"
                   style={{
                     width: chartBarWidth(samples.length),
                     maxWidth: "100%",
@@ -215,7 +235,7 @@ export function DashboardChart({
                 const s = samples.find((sample) => sample.key === key);
                 if (!s || empty) return null;
                 return (
-                  <ChartDataTooltipContent className="w-[260px]">
+                  <ChartDataTooltipContent className="w-[200px]">
                     <strong>
                       {formatDate(
                         s.start,
@@ -241,7 +261,9 @@ export function DashboardChart({
                           <span
                             aria-hidden="true"
                             className="size-2 shrink-0 rounded-sm"
-                            style={{ backgroundColor: colorFor(segment.service) }}
+                            style={{
+                              backgroundColor: colorFor(segment.service),
+                            }}
                           />
                           <span className="min-w-0 flex-1">
                             {serviceDisplayName(segment.service)}
