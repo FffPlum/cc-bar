@@ -53,6 +53,22 @@ nonisolated struct ScanFileState: Sendable, Equatable, Codable {
     var claudeContinuationOf: String?
     /// Codex 用：首字延迟与生成时长的跨批次计时状态（见 `CodexTimingState`）。
     var codexTiming: CodexTimingState?
+    /// 最近的独立用量记录；等待 compacted 关联时保留原始结算时间和路由，可跨增量扫描恢复。
+    var codexPendingUsageRecord: CodexPendingUsageRecord?
+}
+
+nonisolated struct CodexPendingUsageRecord: Sendable, Equatable, Codable {
+    var responseID: String
+    var timestamp: Date
+    var model: String
+    var speed: UsageSpeed
+    var inputTotal: Int
+    var cachedInput: Int
+    var cacheWrite: Int
+    var output: Int
+    var hasObservedTokenCount: Bool = false
+
+    var responseKey: String { "response:\(responseID)" }
 }
 
 /// Codex 一次请求的计时由前后几条记录拼出：输入完成 → 第一个模型条目开始 → `token_usage_record`

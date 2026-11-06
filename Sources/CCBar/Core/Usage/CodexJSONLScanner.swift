@@ -7,6 +7,7 @@ import Foundation
 ///   - `type=event_msg/payload.type=thread_settings_applied`，嵌套 `service_tier` 提供当前 Fast 档位。
 ///   - `type=event_msg`，`payload.type=token_count`，`payload.info.last_token_usage` 是本次调用的真实 token；
 ///     使用 last_token_usage 直接累计；累计 total_token_usage 未变化的设置回显事件跳过。
+///   - `compacted.compaction_response_id` 明确关联的独立用量记录，补计没有 token_count 的上下文压缩调用。
 /// Codex `input_tokens` 含 cache_read；GPT-5.6 若日志提供 `cache_write_tokens` 也需从普通输入扣掉。
 ///
 /// fork 会话（`session_meta.payload.forked_from_id`）的 JSONL 会把父会话已有的整段历史
@@ -88,15 +89,18 @@ enum CodexJSONLScanner {
     ///   截断 / 无效记录 / 末尾上下文不符的文件不产出证据；读取失败、根目录不可访问、
     ///   扫描中被移走的文件另计入 `historicalTransientFailureCount`。其返回进度不可用于增量续扫。
     /// - Parameter onProgress: 非 nil 时按批回报一次扫描进度。
+    /// - Parameter includeCompactionUsage: 旧模型标识迁移核对旧桶时关闭；正常扫描及统计重建保持开启。
     nonisolated static func scan(
         previous: [String: ScanFileState],
         seenTokenIds: [String] = [],
         knownIDs: Set<UInt64> = [],
+        knownOwner: @Sendable (UInt64) -> String? = { _ in nil },
         roots: [URL],
         indexedTitles: [String: String],
         minimumMtime: Date? = nil,
         historicalBoundary: [String: ScanFileState]? = nil,
         priceHistorical: Bool = false,
+        includeCompactionUsage: Bool = true,
         onProgress: ScanProgressCallback? = nil
     ) async -> Result {
         var filesByID: [String: JSONLFileDescriptor] = [:]
@@ -146,6 +150,7 @@ enum CodexJSONLScanner {
         // 同一条记录因此出现在多个文件里。键为 `发出该记录的会话 id#累计用量签名`。
         var seen = SeenIDSet(seenTokenIds, known: knownIDs)
         var ledger: [String: [UInt64]] = [:]
+        var owners: [String: String] = [:]
         // 本批次内出现过 cache_write 的会话 key；避免每个文件收尾时对全部
         // 已累积 entries 做线性 contains（全量重扫时是平方级开销）。
         var cacheCreationKeys: Set<String> = []
@@ -168,7 +173,8 @@ enum CodexJSONLScanner {
                         batchResults.append((
                             index,
                             scanSingleFile(file: file, previous: previous, indexedTitles: indexedTitles,
-                                           boundary: historicalBoundary?[stateKey], priceHistorical: priceHistorical)
+                                           boundary: historicalBoundary?[stateKey], priceHistorical: priceHistorical,
+                                           includeCompactionUsage: includeCompactionUsage)
                         ))
                     } else {
                         group.addTask {
@@ -176,7 +182,8 @@ enum CodexJSONLScanner {
                                 file: file,
                                 previous: previous,
                                 indexedTitles: indexedTitles,
-                                boundary: historicalBoundary?[stateKey], priceHistorical: priceHistorical
+                                boundary: historicalBoundary?[stateKey], priceHistorical: priceHistorical,
+                                includeCompactionUsage: includeCompactionUsage
                             ))
                         }
                     }
@@ -208,11 +215,19 @@ enum CodexJSONLScanner {
                 // 去重放在合并阶段：单文件解析是并发的，不能共享 seen 集合；
                 // batchResults 已按文件原始顺序排好，这里的插入顺序仍是确定的。
                 for pending in result.entries {
-                    if let key = pending.dedupeKey {
-                        if seen.contains(key) { continue }
+                    let keys = [pending.dedupeKey, pending.responseKey].compactMap { $0 }
+                    let duplicate = keys.first { seen.contains($0) }
+                    let owner = duplicate.flatMap { owners[$0] ?? knownOwner(SeenIDSet.digest($0)) }
+                        ?? (duplicate == nil ? pending.entry.conversationKey : nil)
+                    for key in keys {
+                        let isNew = !seen.contains(key)
                         seen.insert(key)
-                        ledger[pending.entry.conversationKey, default: []].append(SeenIDSet.digest(key))
+                        if let owner {
+                            owners[key] = owner
+                            if isNew { ledger[owner, default: []].append(SeenIDSet.digest(key)) }
+                        }
                     }
+                    if duplicate != nil { continue }
                     entries.append(pending.entry)
                     if pending.hasCacheCreation {
                         cacheCreationKeys.insert(pending.entry.conversationKey)
@@ -276,6 +291,8 @@ enum CodexJSONLScanner {
         /// `发出该记录的会话 id#累计用量签名`；签名缺失时为 nil（不参与去重）。
         var dedupeKey: String?
         var hasCacheCreation: Bool
+        /// 独立用量记录和普通 token_count 表示同一次响应时，共用此键，避免两路相加。
+        var responseKey: String? = nil
     }
 
     /// 单个文件的解析结果，供并发批处理合并。
@@ -300,7 +317,8 @@ enum CodexJSONLScanner {
         previous: [String: ScanFileState],
         indexedTitles: [String: String],
         boundary: ScanFileState? = nil,
-        priceHistorical: Bool = false
+        priceHistorical: Bool = false,
+        includeCompactionUsage: Bool = true
     ) -> CodexFileScanResult {
         let url = file.url
         let path = file.path
@@ -399,6 +417,7 @@ enum CodexJSONLScanner {
         var sawOwnMeta = !startsFromBeginning
         var fallbackTitle = state.fallbackTitle
         var timing = state.codexTiming ?? CodexTimingState()
+        var pendingUsage = state.codexPendingUsageRecord
         var entries: [PendingCodexEntry] = []
         var invalidHistoricalRecord = false
         // 按批流式解析：单文件不再把整份内容和全部行同时读进内存。
@@ -457,6 +476,34 @@ enum CodexJSONLScanner {
                     currentSpeed = settings.speed
                     continue
                 }
+                if type == "token_usage_record" {
+                    pendingUsage = usageRecord(
+                        root["payload"] as? [String: Any], timestamp: root["timestamp"] as? String,
+                        model: currentModel, speed: currentSpeed
+                    )
+                }
+                if type == "compacted", let payload = root["payload"] as? [String: Any] {
+                    // 只有明确的响应关联才补账；普通 token_usage_record 仍由 token_count 计费。
+                    // 新格式在 compacted 内复制完整记录，缺少前一行的旧进度也能恢复。
+                    if includeCompactionUsage,
+                       let responseID = nonEmpty(payload["compaction_response_id"] as? String),
+                       let resolvedID = ownSessionID {
+                        let embedded = usageRecord(
+                            payload["latest_token_usage_record"] as? [String: Any],
+                            timestamp: root["timestamp"] as? String, model: currentModel,
+                            speed: currentSpeed
+                        )
+                        let record = pendingUsage?.responseID == responseID ? pendingUsage : embedded
+                        if let record, record.responseID == responseID {
+                            entries.append(compactionEntry(record, conversationID: resolvedID,
+                                priced: boundary == nil || priceHistorical))
+                            pendingUsage = record
+                        }
+                    }
+                    // 压缩调用不会等待普通 token_count；其计时不能串到下一次回答。
+                    timing = CodexTimingState()
+                    continue
+                }
                 if Self.updateTiming(&timing, root: root, type: type) { continue }
                 guard type == "event_msg",
                       let payload = root["payload"] as? [String: Any],
@@ -468,13 +515,19 @@ enum CodexJSONLScanner {
                     continue
                 }
                 let totalSignature = totalUsageSignature(info["total_token_usage"] as? [String: Any])
-                if totalSignature == lastTotalUsageSignature, totalSignature != nil { continue }
+                if totalSignature == lastTotalUsageSignature, totalSignature != nil {
+                    pendingUsage?.hasObservedTokenCount = true
+                    continue
+                }
                 let inputTotal = (last["input_tokens"] as? Int) ?? 0
                 let cachedInput = (last["cached_input_tokens"] as? Int) ?? 0
                 let cacheWrite = cacheWriteTokens(in: last)
                 let output = (last["output_tokens"] as? Int) ?? 0
                 let billableInput = max(0, inputTotal - cachedInput - cacheWrite)
-                if output == 0 && billableInput == 0 && cachedInput == 0 && cacheWrite == 0 { continue }
+                if output == 0 && billableInput == 0 && cachedInput == 0 && cacheWrite == 0 {
+                    pendingUsage?.hasObservedTokenCount = true
+                    continue
+                }
 
                 let ts: Date
                 if let s = root["timestamp"] as? String,
@@ -487,6 +540,15 @@ enum CodexJSONLScanner {
                 let model = currentModel ?? "unknown"
                 guard let resolvedID = ownSessionID else { continue }
                 if let totalSignature { lastTotalUsageSignature = totalSignature }
+                // 两种累计值口径不同：thread_token_usage 包含压缩，total_token_usage 不包含。
+                // 只将最新独立记录与其后第一条 token_count 按完整用量配对；零值或回显也会关闭配对槽。
+                let responseKey: String?
+                if let record = pendingUsage, !record.hasObservedTokenCount,
+                   record.inputTotal == inputTotal, record.cachedInput == cachedInput,
+                   record.cacheWrite == cacheWrite, record.output == output {
+                    responseKey = record.responseKey
+                } else { responseKey = nil }
+                pendingUsage?.hasObservedTokenCount = true
                 // 输出 tokens 与 token_usage_record 一致才认定是同一次请求。
                 let entryTiming = timing.pendingOutputTokens == output ? timing.pending : nil
                 timing.pending = nil
@@ -523,7 +585,8 @@ enum CodexJSONLScanner {
                         emittingSessionID: emittingSessionID,
                         totalUsageSignature: totalSignature
                     ),
-                    hasCacheCreation: cacheWrite > 0
+                    hasCacheCreation: cacheWrite > 0,
+                    responseKey: responseKey
                 ))
             }
         }
@@ -574,6 +637,7 @@ enum CodexJSONLScanner {
         state.lastCodexTotalUsageSignature = lastTotalUsageSignature
         state.lastCodexEmittingSessionID = emittingSessionID
         state.codexTiming = timing.isEmpty ? nil : timing
+        state.codexPendingUsageRecord = pendingUsage
         state.conversationID = ownSessionID
         state.conversationCwd = sessionCwd
         // 从头读过仍没有分支时记空串，避免之后按「未检查」再读首行。
@@ -667,6 +731,41 @@ enum CodexJSONLScanner {
         return 0
     }
 
+    /// 独立记录只接受完整、非负且自洽的用量；没有可靠时间就不猜测归账日期。
+    private nonisolated static func usageRecord(
+        _ payload: [String: Any]?, timestamp: String?, model: String?, speed: UsageSpeed
+    ) -> CodexPendingUsageRecord? {
+        guard let payload, let responseID = nonEmpty(payload["response_id"] as? String),
+              let timestamp, let date = JSONLTimestamp.parse(timestamp),
+              let usage = payload["usage"] as? [String: Any],
+              let input = usage["input_tokens"] as? Int, let output = usage["output_tokens"] as? Int
+        else { return nil }
+        let cached = (usage["cached_input_tokens"] as? Int) ?? 0
+        let write = cacheWriteTokens(in: usage)
+        guard input >= 0, output >= 0, cached >= 0, write >= 0,
+              cached <= input, write <= input - cached, input > 0 || output > 0 else { return nil }
+        return CodexPendingUsageRecord(responseID: responseID, timestamp: date,
+            model: model ?? "unknown", speed: speed,
+            inputTotal: input, cachedInput: cached, cacheWrite: write, output: output)
+    }
+
+    private nonisolated static func compactionEntry(
+        _ record: CodexPendingUsageRecord, conversationID: String, priced: Bool
+    ) -> PendingCodexEntry {
+        let input = record.inputTotal - record.cachedInput - record.cacheWrite
+        let cost = priced ? Pricing.costBreakdown(app: .codex, model: record.model, speed: record.speed,
+            input: input, output: record.output, cacheRead: record.cachedInput,
+            cacheCreation: record.cacheWrite, at: record.timestamp, inputTotal: record.inputTotal) : nil
+        let entry = UsageEntry(app: .codex, conversationKey: "codex:\(conversationID)",
+            model: storageModel(record.model), speed: record.speed,
+            day: UsageDay.startOfDay(for: record.timestamp), timestamp: record.timestamp,
+            inputTokens: input, outputTokens: record.output, cacheReadTokens: record.cachedInput,
+            cacheCreationTokens: record.cacheWrite, costUSD: cost?.total, costBreakdown: cost)
+        return PendingCodexEntry(entry: entry,
+            dedupeKey: nil,
+            hasCacheCreation: record.cacheWrite > 0, responseKey: record.responseKey)
+    }
+
     /// 保持为 internal，供脱敏 JSONL fixture 单测验证设置切换与未知值处理。
     nonisolated static func speed(fromServiceTier value: String?) -> UsageSpeed {
         switch value?.lowercased() {
@@ -732,6 +831,7 @@ enum CodexJSONLScanner {
         state.lastCodexTotalUsageSignature = nil
         state.lastCodexEmittingSessionID = nil
         state.codexTiming = nil
+        state.codexPendingUsageRecord = nil
         // 续接的原对话随首行重新判定，避免文件被替换后沿用旧关系。
         state.codexContinuationOf = nil
     }
