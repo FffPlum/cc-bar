@@ -1220,6 +1220,11 @@
         }
       }
     ],
+    "dailyUsage" : {
+      "basis" : "weekly-estimate",
+      "points" : [],
+      "state" : "unavailable"
+    },
     "status" : {
       "error" : null,
       "historyNotice" : null,

@@ -359,6 +359,21 @@ extension HostWindowUsageService {
         ])
     }
 
+    func dailyUsageJSON(_ daily: CycleDailyUsage) -> HostJSON {
+        .object([
+            "basis": .string("weekly-estimate"),
+            "state": .string(daily.state.rawValue),
+            "points": .array(daily.points.map { point in
+                .object([
+                    "day": dateJSON(point.day),
+                    "tokens": point.tokens.map { .number(Decimal($0)) } ?? .null,
+                    "estimatedUsedPercent": point.estimatedUsedPercent.map { .number(Decimal($0)) } ?? .null,
+                    "partial": .bool(point.partial),
+                ])
+            }),
+        ])
+    }
+
     func quotaAccountJSON(_ account: QuotaAnalyticsAccount) -> HostJSON {
         .object([
             "id": .string(account.id),

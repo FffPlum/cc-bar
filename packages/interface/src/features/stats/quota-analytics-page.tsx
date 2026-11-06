@@ -1,160 +1,301 @@
-import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Clock } from "lucide-react";
-import type { CycleSummary, QuotaAccount, QuotaAnalytics, QuotaAccountsResult, QuotaTimelinePeriod, UsageService } from "@ccbar/host-api/window";
+import { useEffect, useState } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
+import type {
+  CycleSummary,
+  QuotaAccount,
+  QuotaAnalytics,
+  QuotaAccountsResult,
+  QuotaTimelinePeriod,
+  UsageService,
+} from "@ccbar/host-api/window";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { EmptyState, Panel } from "@/components/workspace";
+import { EmptyState } from "@/components/workspace";
 import { ResourceFeedback } from "@/components/resource-feedback";
-import { Segmented } from "@/components/segmented";
-import { ServiceIcon } from "@/components/service-icon";
-import { quotaStatusClass } from "@/components/quota-progress";
+import { SelectField } from "@/components/select-field";
 import { useHost, useHostResource } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
-import { brandColor, formatDate, formatTime, formatTokens, serviceDisplayName } from "@/lib/display";
-import { cn } from "@/lib/utils";
+import { LoadingBlock } from "./dashboard-loading";
+import { QuotaAccountCard } from "./quota-account-card";
+import { QuotaDailyChart } from "./quota-daily-chart";
+import {
+  quotaAccountColors,
+  quotaSupportsKind,
+} from "./quota-account-presentation";
 
 const domains = ["usage", "quota", "settings"] as const;
-const kinds = ["fiveHour", "weekly"] as const;
-type StandardKind = typeof kinds[number];
-interface AccountAnalytics { account: QuotaAccount; fiveHour: QuotaAnalytics; weekly: QuotaAnalytics }
+const ALL_ACCOUNTS = "__all_accounts__";
+type StandardKind = "fiveHour" | "weekly";
 
 /** Statistics visibility is independent of menu bar visibility. Mirror accounts
  * share the primary history and are omitted while that primary account exists. */
-export function analyticsAccounts(accounts: QuotaAccount[], visibleServices: UsageService[], service?: UsageService): QuotaAccount[] {
+export function analyticsAccounts(
+  accounts: QuotaAccount[],
+  visibleServices: UsageService[],
+  service?: UsageService,
+): QuotaAccount[] {
   return accounts.filter((account) => {
-    if (!["codex", "claude", "kimi"].includes(account.service) || !visibleServices.includes(account.service as UsageService)) return false;
+    if (
+      !["codex", "claude", "kimi"].includes(account.service) ||
+      !visibleServices.includes(account.service as UsageService)
+    )
+      return false;
     if (service && account.service !== service) return false;
     if (account.kind === "managedKimi" && !account.enabled) return false;
-    return account.kind === "primary" || !account.current || !accounts.some((primary) => primary.kind === "primary" && primary.service === account.service && primary.detected);
+    return (
+      account.kind === "primary" ||
+      !account.current ||
+      !accounts.some(
+        (primary) =>
+          primary.kind === "primary" &&
+          primary.service === account.service &&
+          primary.detected,
+      )
+    );
   });
 }
 
-export function QuotaAnalyticsPage({ service, visibleServices }: { service?: UsageService; visibleServices: UsageService[] }) {
+export function QuotaAnalyticsPage({
+  visibleServices,
+}: {
+  visibleServices: UsageService[];
+}) {
   const { api } = useHost();
   const t = useTranslation();
-  const accounts = useHostResource<QuotaAccountsResult>(() => api.quotaAccounts(), domains, [api]);
-  return <ResourceFeedback {...accounts} onRetry={() => void accounts.reload()}>{(result) => {
-    const eligible = analyticsAccounts(result.accounts, visibleServices, service);
-    if (service && !["codex", "claude", "kimi"].includes(service)) return <EmptyState title={t("No quota data", "暂无额度数据")} description={t("Only Codex, Claude Code and Kimi Code report standard quota cycles.", "只有 Codex、Claude Code 与 Kimi Code 提供标准额度周期。")} />;
-    if (!eligible.length) return <EmptyState title={t("No accounts", "暂无账号")} />;
-    return <AnalyticsCollection accounts={eligible} />;
-  }}</ResourceFeedback>;
+  const [selection, setSelection] = useState(ALL_ACCOUNTS);
+  const accounts = useHostResource<QuotaAccountsResult>(
+    () => api.quotaAccounts(),
+    domains,
+    [api],
+  );
+  const eligible = analyticsAccounts(
+    accounts.data?.accounts ?? [],
+    visibleServices,
+  );
+  const selectedID = eligible.some((account) => account.id === selection)
+    ? selection
+    : ALL_ACCOUNTS;
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-4 p-5 text-[13px]">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+        <h2 className="text-[15px] font-semibold">{t("Quota", "额度")}</h2>
+        <SelectField
+          value={selectedID}
+          options={[
+            { value: ALL_ACCOUNTS, label: t("All accounts", "全部账号") },
+            ...eligible.map((account) => ({
+              value: account.id,
+              label: [account.name, account.subtitle]
+                .filter(Boolean)
+                .join(" · "),
+            })),
+          ]}
+          onChange={setSelection}
+          ariaLabel={t("Quota account", "额度账号")}
+          className="h-8 max-w-[min(28rem,70vw)]"
+          contentAlign="end"
+          disabled={!accounts.data}
+        />
+      </div>
+      <div className="cc-scrollbar min-h-0 min-w-0 flex-1 [scrollbar-gutter:stable]">
+        <ResourceFeedback
+          {...accounts}
+          loadingFallback={<QuotaLoading />}
+          onRetry={() => void accounts.reload()}
+        >
+          {() =>
+            eligible.length ? (
+              <AnalyticsCollection
+                accounts={eligible}
+                selectedID={selectedID}
+              />
+            ) : (
+              <EmptyState
+                title={t("No quota accounts", "暂无额度账号")}
+                description={t(
+                  "Enable usage statistics for a Codex, Claude Code or Kimi Code account.",
+                  "开启 Codex、Claude Code 或 Kimi Code 的用量统计后查看。",
+                )}
+              />
+            )
+          }
+        </ResourceFeedback>
+      </div>
+    </div>
+  );
 }
 
-function AnalyticsCollection({ accounts }: { accounts: QuotaAccount[] }) {
-  const { api, bootstrap } = useHost();
+function AnalyticsCollection({
+  accounts,
+  selectedID,
+}: {
+  accounts: QuotaAccount[];
+  selectedID: string;
+}) {
+  const { api, settings } = useHost();
   const t = useTranslation();
-  const [kind, setKind] = useState<StandardKind>("fiveHour");
-  const ids = useMemo(() => accounts.map((account) => account.id).join("|"), [accounts]);
-  // Both current-cycle cards remain visible when the timeline selector changes.
-  const resource = useHostResource<AccountAnalytics[]>(() => Promise.all(accounts.map(async (account) => {
-    const [fiveHour, weekly] = await Promise.all(kinds.map((kind) => api.quotaAnalytics({ accountID: account.id, kind })));
-    return { account, fiveHour: fiveHour!, weekly: weekly! };
-  })), domains, [api, ids]);
-  return <ResourceFeedback {...resource} onRetry={() => void resource.reload()}>{(analytics) => {
-    const timelines = analytics.map((item) => item[kind]).filter((item) => item.window !== null);
-    return <div className="cc-scrollbar h-full"><div className="space-y-4">
-      <CycleCards analytics={analytics} />
-      <section><div className="mb-3 flex items-center"><h2 className="text-[13px] font-semibold">{kind === "fiveHour" ? t("Quota changes today", "今日额度变化") : t("Weekly quota changes", "每周额度变化")}</h2><span className="flex-1" /><Segmented value={kind} options={[{ value: "fiveHour", label: "5H" }, { value: "weekly", label: "WK" }]} onChange={setKind} ariaLabel={t("Quota window", "额度窗口")} /><span className="cc-number ml-3 text-[11px] text-muted-foreground">{formatDate(new Date().toISOString(), bootstrap.resolvedLanguage, bootstrap.timeZone)}</span></div>
-        {timelines.length ? <div className="grid items-start gap-3 min-[880px]:grid-cols-2">{timelines.map((item) => <TimelineAccount key={item.account.id + ":" + kind} value={item} kind={kind} />)}</div> : <EmptyState title={t("No data for this window", "该窗口暂无数据")} />}
+  const client = useQueryClient();
+  const selected = accounts.find((account) => account.id === selectedID);
+  const displayed = selected ? [selected] : accounts;
+  const colors = quotaAccountColors(accounts);
+  const requests = displayed.flatMap((account) => {
+    // Weekly history also supplies daily estimates when the current snapshot
+    // does not yet contain a weekly window. Never invent a missing 5H window.
+    const periods: StandardKind[] = quotaSupportsKind(account, "fiveHour")
+      ? ["fiveHour", "weekly"]
+      : ["weekly"];
+    return periods.map((kind) => ({ account, kind }));
+  });
+  const queries = useQueries({
+    queries: requests.map(({ account, kind }) => {
+      const queryKey = [
+        "quota-analytics",
+        account.id,
+        account.name,
+        account.subtitle,
+        kind,
+        settings.appearance.cycleIncludesOtherAgents,
+      ];
+      return {
+        queryKey,
+        queryFn: async () => {
+          const value = await api.quotaAnalytics({
+            accountID: account.id,
+            kind,
+          });
+          const previous = client.getQueryData<QuotaAnalytics>(queryKey);
+          // The official snapshot can refresh while the local index is busy or
+          // unavailable. Retain only this exact query's last daily observations.
+          if (
+            value.dailyUsage.state !== "ready" &&
+            previous?.dailyUsage.points.length
+          ) {
+            return {
+              ...value,
+              dailyUsage: {
+                ...value.dailyUsage,
+                points: previous.dailyUsage.points,
+              },
+            };
+          }
+          return value;
+        },
+        staleTime: 60_000,
+      };
+    }),
+  });
+  useEffect(
+    () =>
+      api.subscribe((event) => {
+        if (event.domains.includes("quota"))
+          void client.invalidateQueries({ queryKey: ["quota-analytics"] });
+      }),
+    [api, client],
+  );
+  const queryFor = (accountID: string, kind: StandardKind) => {
+    const index = requests.findIndex(
+      (request) => request.account.id === accountID && request.kind === kind,
+    );
+    return index < 0 ? undefined : queries[index];
+  };
+  const failed = queries.some((query) => query.isError);
+
+  return (
+    <div className="space-y-4 pb-1">
+      {failed && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-4 py-2 text-[12px] text-muted-foreground"
+        >
+          <span>
+            {t(
+              "Some account data couldn’t be updated. Available records are still shown.",
+              "部分账号数据暂未更新，保留已有记录。",
+            )}
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              queries
+                .filter((query) => query.isError)
+                .forEach((query) => void query.refetch());
+            }}
+          >
+            {t("Retry", "重试")}
+          </Button>
+        </div>
+      )}
+      <section
+        className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-3"
+        aria-label={t("Account quotas", "账号额度")}
+      >
+        {displayed.map((account) => {
+          const fiveHour = queryFor(account.id, "fiveHour");
+          const weekly = queryFor(account.id, "weekly");
+          return (
+            <QuotaAccountCard
+              key={account.id}
+              account={account}
+              fiveHour={fiveHour?.data}
+              weekly={weekly?.data}
+              color={colors.get(account.id)!}
+              loading={Boolean(fiveHour?.isFetching || weekly?.isFetching)}
+              error={Boolean(
+                fiveHour?.isError || weekly?.isError || account.refresh.failed,
+              )}
+              detailed={Boolean(selected)}
+            />
+          );
+        })}
       </section>
-    </div></div>;
-  }}</ResourceFeedback>;
+      <QuotaDailyChart
+        rows={displayed.map((account) => {
+          const weekly = queryFor(account.id, "weekly");
+          return {
+            account,
+            points: weekly?.data?.dailyUsage.points ?? [],
+            color: colors.get(account.id)!,
+            unavailable: weekly?.data?.dailyUsage.state === "unavailable",
+            loading:
+              weekly?.isFetching ||
+              weekly?.data?.dailyUsage.state === "loading",
+            error:
+              weekly?.isError ||
+              (weekly?.data?.dailyUsage.state === "unavailable" &&
+                weekly.data.dailyUsage.points.some(
+                  (point) => point.estimatedUsedPercent !== null,
+                )),
+          };
+        })}
+      />
+    </div>
+  );
 }
 
 /** Host order resolves overlapping current records by sample time and boundary quality. */
 export function currentCycle(value: QuotaAnalytics): CycleSummary | undefined {
   return value.cycles.find((item) => item.cycle.current);
 }
-
-function CycleCards({ analytics }: { analytics: AccountAnalytics[] }) {
-  const { settings } = useHost();
-  const t = useTranslation();
-  const primary = analytics.filter((item) => item.account.kind === "primary");
-  const includeOthers = settings.appearance.cycleIncludesOtherAgents && primary.some((item) => item.account.service === "codex");
-  const rebuilding = analytics.some((item) => item.fiveHour.status.rebuildingCycles);
-  return <section><div className="mb-3 flex items-center gap-2"><h2 className="text-[13px] font-semibold">{t("Full-quota estimate", "额度用满预估")}</h2><p className="truncate text-[11px] text-muted-foreground">{includeOthers ? t("Estimated from local usage, including Codex subscriptions in Pi, OpenCode and DSH, and official usage. For reference only.", "按本机用量（含 Pi、OpenCode、DSH 中的 Codex 订阅用量）和官方已用比例估算，仅供参考。") : t("Estimated from local usage and the official used percentage. For reference only.", "按本机用量和官方已用比例估算，仅供参考。")}</p>{rebuilding && <span role="status" className="text-[11px] text-muted-foreground">{t("Rebuilding current cycle data…", "正在补算当前周期数据…")}</span>}</div><div className="grid gap-3 min-[880px]:grid-cols-4 min-[520px]:grid-cols-2">
-    {primary.flatMap((item) => kinds.map((kind) => <CycleCard key={item.account.id + ":" + kind} account={item.account} kind={kind} summary={currentCycle(item[kind])} />))}
-  </div></section>;
-}
-
-function CycleCard({ summary, account, kind }: { summary?: CycleSummary; account: QuotaAccount; kind: StandardKind }) {
-  const { settings, bootstrap } = useHost();
-  const t = useTranslation();
-  const language = bootstrap.resolvedLanguage;
-  const service = account.service as UsageService;
-  const used = Math.max(0, Math.min(100, summary?.cycle.latestUsedPercent ?? 0));
-  const confidence = summary?.forecastConfidence === "early" ? t("Early estimate", "早期估算") : summary?.forecastConfidence === "rough" ? t("Rough estimate", "粗略估算") : summary?.forecastConfidence === "reference" ? t("Reference", "参考") : summary?.forecastConfidence === "reliable" ? t("More reliable", "较可靠") : null;
-  const reset = summary ? resetLabel(summary.cycle.endAt, settings.appearance.resetTimeDisplay, bootstrap.timeZone, language) : null;
-  return <article className="cc-panel flex h-[132px] flex-col p-3.5"><div className="flex items-center gap-1"><ServiceIcon name={serviceDisplayName(service)} color={brandColor(service, settings, bootstrap.appearance === "dark")} size={12} /><span className="truncate text-[11px] text-muted-foreground">{serviceDisplayName(service)} · {kind === "fiveHour" ? t("5-hour", "5 小时") : t("Weekly", "周")}</span><span className="flex-1" /><span className="cc-number text-[11px] text-muted-foreground">{reset}</span></div>
-    {summary ? <><div className="mt-2"><div className="cc-number truncate text-[22px] font-semibold tracking-[-0.5px]">{summary.estimatedFullAllowanceTokens === null ? "—" : formatTokens(summary.estimatedFullAllowanceTokens, language)} · {summary.estimatedFullAllowanceCostDisplay ?? "—"}</div><p className="cc-tertiary text-[10.5px]">{t("Full-use estimate", "用满预估")}{confidence ? " · " + confidence : ""}</p></div><div className="flex-1" /><div className="h-1.5 overflow-hidden rounded-full bg-secondary" role="progressbar" aria-label={t("Quota used", "已用额度")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={used}><div className={cn("h-full rounded-full bg-current", quotaStatusClass(100 - used))} style={{ width: used + "%" }} /></div><div className="mt-2 flex items-center text-[11px]"><span className="cc-number text-muted-foreground">{t("Used", "已用")} {formatTokens(summary.currentAllowanceTotals.totalTokens, language)} · {summary.currentAllowanceTotals.costDisplay}</span><span className="flex-1" /><span className={cn("cc-number font-semibold", quotaStatusClass(100 - used))}>{used.toFixed(0)}%</span></div></> : <div className="flex flex-1 items-center justify-center gap-1 text-[12px] text-muted-foreground"><Clock className="size-3" />{account.detected ? t("Waiting for the current cycle", "等待当前周期") : t("Not signed in", "未登录")}</div>}
-  </article>;
-}
-
-function resetLabel(value: string, mode: "relative" | "absolute", timeZone: string, language: "zh" | "en"): string {
-  if (mode === "absolute") return formatDate(value, language, timeZone) + " " + formatTime(value, timeZone);
-  const minutes = Math.max(0, Math.ceil((Date.parse(value) - Date.now()) / 60_000));
-  if (!minutes) return language === "zh" ? "即将重置" : "Resets soon";
-  const hours = Math.floor(minutes / 60), days = Math.floor(hours / 24);
-  const duration = days ? days + "d " + hours % 24 + "h" : hours ? hours + "h " + minutes % 60 + "m" : minutes + "m";
-  return language === "zh" ? duration + " 后重置" : "in " + duration;
-}
-
 export function timelineEntries(periods: QuotaTimelinePeriod[]) {
-  return periods.flatMap((period) => period.entries).sort((left, right) => Date.parse(left.sampledAt) - Date.parse(right.sampledAt));
+  return periods
+    .flatMap((period) => period.entries)
+    .sort(
+      (left, right) => Date.parse(left.sampledAt) - Date.parse(right.sampledAt),
+    );
 }
-
-function TimelineAccount({ value, kind }: { value: QuotaAnalytics; kind: StandardKind }) {
-  const { settings, bootstrap } = useHost();
+function QuotaLoading() {
   const t = useTranslation();
-  const [expanded, setExpanded] = useState(false);
-  const entries = timelineEntries(value.timeline);
-  const delta = value.timeline[0]?.totalDelta ?? 0;
-  const stamp = (date: string | null) => date ? (kind === "weekly" || formatDate(date, "en", bootstrap.timeZone) !== formatDate(new Date().toISOString(), "en", bootstrap.timeZone) ? formatDate(date, bootstrap.resolvedLanguage, bootstrap.timeZone) + " " : "") + formatTime(date, bootstrap.timeZone) : "—";
-  return <Panel title={<span className="flex items-center gap-2"><ServiceIcon name={value.account.name} color={brandColor(value.account.service as UsageService, settings, bootstrap.appearance === "dark")} size={14} />{value.account.name}<span className="text-[9px] text-muted-foreground">{kind === "fiveHour" ? "5H" : "WK"}</span></span>} actions={<div className="flex gap-4 text-[11px]"><Metric label={t("Remaining", "剩余")} value={value.window?.remainingPercent == null ? "—" : value.window.remainingPercent + "%"} /><Metric label={kind === "fiveHour" ? t("Today", "今天") : t("Current cycle", "当前周期")} value={(delta > 0 ? "+" : "") + delta + "%"} /><Metric label={t("Updated", "更新")} value={stamp(value.window?.latestSampleAt ?? null)} /></div>}>
-    <div className="mb-2 space-y-1">{value.timeline.map((period) => <div key={period.id} className="flex items-baseline gap-2 text-[10px] text-muted-foreground"><span className="font-semibold">{period.kind === "today" ? t("Today", "今天") : period.kind === "currentCycle" ? t("Current cycle", "当前周期") : t("Previous cycle", "上一周期")}</span><span className="cc-number">{stamp(period.start)} → {stamp(period.end)}</span><span className="cc-number ml-auto">{period.totalDelta > 0 ? "+" : ""}{period.totalDelta}%</span></div>)}</div>
-    <TimelineChart value={value} kind={kind} color={brandColor(value.account.service as UsageService, settings, bootstrap.appearance === "dark")} />
-    {entries.length > 0 && <Button variant="ghost" size="sm" className="mt-2 px-0" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? <ChevronDown /> : <ChevronRight />}{t("Changes", "变动明细")} · {entries.filter((entry) => entry.source === "change").length}</Button>}
-    {expanded && <div className="cc-scrollbar max-h-60"><Table><TableHeader><TableRow><TableHead>{t("Time", "时间")}</TableHead><TableHead className="text-right">{t("Change", "变动值")}</TableHead><TableHead className="text-right">{t("After", "变动后剩余")}</TableHead><TableHead className="text-right">{t("Reset", "重置时间")}</TableHead></TableRow></TableHeader><TableBody>{[...entries].reverse().map((entry) => <TableRow key={entry.id}><TableCell className="cc-number">{stamp(entry.sampledAt)}</TableCell><TableCell className={cn("cc-number text-right", entry.deltaPercent === null ? "text-muted-foreground" : entry.deltaPercent < 0 ? "text-red-600" : "text-green-700")}>{entry.deltaPercent === null ? "—" : (entry.deltaPercent > 0 ? "+" : "") + entry.deltaPercent + "%"}</TableCell><TableCell className={cn("cc-number text-right", quotaStatusClass(entry.remainingPercent))}>{entry.remainingPercent}%</TableCell><TableCell className="cc-number text-right">{stamp(entry.resetsAt)}</TableCell></TableRow>)}</TableBody></Table></div>}
-  </Panel>;
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return <span className="text-right"><span className="block text-muted-foreground">{label}</span><span className="cc-number font-semibold">{value}</span></span>;
-}
-
-function TimelineChart({ value, kind, color }: { value: QuotaAnalytics; kind: StandardKind; color: string }) {
-  const t = useTranslation();
-  const { bootstrap } = useHost();
-  const periods = value.timeline;
-  const entries = timelineEntries(periods);
-  if (!entries.length) return <div className="flex h-[200px] items-center justify-center text-[12px] text-muted-foreground">{value.account.refresh.inFlight ? t("Loading…", "正在读取…") : t("No data for this window", "该窗口暂无数据")}</div>;
-  const start = Math.min(...periods.map((period) => Date.parse(period.start)));
-  const end = Math.max(...periods.map((period) => Date.parse(period.end)));
-  const span = Math.max(1, end - start);
-  const x = (timestamp: number) => 36 + (timestamp - start) / span * 564;
-  const y = (remaining: number) => 180 - Math.max(0, Math.min(100, remaining)) / 100 * 160;
-  const groups = new Map<string, typeof entries>();
-  for (const period of periods) for (const entry of period.entries) {
-    const key = period.id + ":" + entry.windowIndex;
-    const group = groups.get(key) ?? [];
-    group.push(entry); groups.set(key, group);
-  }
-  let reset = kind === "weekly" ? periods.find((period) => period.kind === "currentCycle")?.start : undefined;
-  if (kind === "fiveHour") {
-    const next = value.window?.resetsAt ?? [...entries].reverse().find((entry) => entry.resetsAt !== null)?.resetsAt;
-    if (next) {
-      let boundary = Date.parse(next);
-      if (boundary > Date.now()) boundary -= Math.ceil((boundary - Date.now()) / (5 * 3_600_000)) * 5 * 3_600_000;
-      if (boundary >= start && boundary < end) reset = new Date(boundary).toISOString();
-    }
-  }
-  const dateLabel = (timestamp: number) => (kind === "weekly" ? formatDate(new Date(timestamp).toISOString(), bootstrap.resolvedLanguage, bootstrap.timeZone) + " " : "") + formatTime(new Date(timestamp).toISOString(), bootstrap.timeZone);
-  return <svg viewBox="0 0 620 215" className="h-[200px] w-full" role="img" aria-label={t("Quota remaining over time", "剩余额度随时间变化")}>
-    {[0, 20, 50, 80, 100].map((percent) => <g key={percent}><line x1="36" x2="600" y1={y(percent)} y2={y(percent)} stroke="currentColor" opacity="0.12" /><text x="30" y={y(percent) + 3} textAnchor="end" fontSize="9" fill="currentColor" opacity="0.55">{percent}</text></g>)}
-    {reset && <g><line x1={x(Date.parse(reset))} x2={x(Date.parse(reset))} y1="12" y2="180" stroke="currentColor" strokeDasharray="4 3" opacity="0.4" /><text x={x(Date.parse(reset))} y="9" textAnchor="middle" fontSize="9" fill="currentColor">{t("Window reset", "窗口重置")}</text></g>}
-    {[...groups.values()].map((group, index) => <polyline key={index} fill="none" stroke={color} strokeWidth="2" points={group.map((entry) => x(Date.parse(entry.sampledAt)) + "," + y(entry.remainingPercent)).join(" ")} />)}
-    {entries.map((entry) => <circle key={entry.id} cx={x(Date.parse(entry.sampledAt))} cy={y(entry.remainingPercent)} r="3" fill={color}><title>{dateLabel(Date.parse(entry.sampledAt)) + " · " + entry.remainingPercent + "%" + (entry.deltaPercent === null ? "" : " · " + entry.deltaPercent + "%")}</title></circle>)}
-    {[0, 0.25, 0.5, 0.75, 1].map((position) => <text key={position} x={x(start + span * position)} y="200" textAnchor={position === 0 ? "start" : position === 1 ? "end" : "middle"} fontSize="9" fill="currentColor" opacity="0.55">{dateLabel(start + span * position)}</text>)}
-  </svg>;
+  return (
+    <div role="status" className="space-y-4">
+      <span className="sr-only">
+        {t("Loading quota data…", "正在读取额度数据…")}
+      </span>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-3">
+        {[0, 1].map((key) => (
+          <LoadingBlock key={key} className="h-[90px] rounded-lg" />
+        ))}
+      </div>
+      <LoadingBlock className="h-80 rounded-lg" />
+    </div>
+  );
 }

@@ -200,8 +200,7 @@ export function StatsPage() {
               : (query) =>
                   view === "quota" ? (
                     <QuotaAnalyticsPage
-                      service={service}
-                      visibleServices={overview.data?.visibleServices ?? []}
+                      visibleServices={bootstrap.visibleUsageServices}
                     />
                   ) : (
                     <DailyStatsView

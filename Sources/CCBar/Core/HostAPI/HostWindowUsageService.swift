@@ -139,7 +139,7 @@ final class HostWindowUsageService {
         case "projects.list": return try await projectList(params)
         case "projects.detail": return try projectDetail(params)
         case "projects.reveal": return try revealProject(params)
-        case "quota.analytics": return try quotaAnalytics(params)
+        case "quota.analytics": return try await quotaAnalytics(params)
         default: throw HostError(code: "unknown_method", message: "Unknown method")
         }
     }
@@ -438,7 +438,7 @@ final class HostWindowUsageService {
         return mutationJSON()
     }
 
-    private func quotaAnalytics(_ params: [String: HostJSON]) throws -> HostJSON {
+    private func quotaAnalytics(_ params: [String: HostJSON]) async throws -> HostJSON {
         try validateKeys(params, allowed: ["accountID", "kind"])
         let accountID = try requiredString(params, key: "accountID")
         let rawKind = try requiredString(params, key: "kind")
@@ -447,16 +447,17 @@ final class HostWindowUsageService {
               settings.visibleUsageApps.contains(account.app) else {
             throw invalidParams()
         }
+        let currentDate = now()
         guard let historyKey = account.historyKey else {
             return .object([
                 "account": quotaAccountJSON(account),
                 "cycles": .array([]),
                 "timeline": .array([]),
                 "window": .null,
+                "dailyUsage": dailyUsageJSON(try await quotaDailyUsage(account: account, kind: kind, at: currentDate)),
                 "status": statusJSON(),
             ])
         }
-        let currentDate = now()
         let summaries = state.usageService.cycleAggregator.summaries(
             cycles: state.quotaCycles.records,
             kind: kind,
@@ -483,10 +484,12 @@ final class HostWindowUsageService {
             limitKind: kind,
             now: currentDate
         )
+        let daily = try await quotaDailyUsage(account: account, kind: kind, at: currentDate)
         return .object([
             "account": quotaAccountJSON(account),
             "window": quotaTimelineWindowJSON(account: account, historyKey: historyKey, kind: kind),
             "cycles": .array(summaries.map { cycleSummaryJSON($0) }),
+            "dailyUsage": dailyUsageJSON(daily),
             "timeline": .array(periods.map { period in
                 .object([
                     "id": .string(opaqueID(period.id, category: "quota-period")),
@@ -509,6 +512,38 @@ final class HostWindowUsageService {
             }),
             "status": statusJSON(),
         ])
+    }
+
+    private func quotaDailyUsage(account: QuotaAnalyticsAccount, kind: QuotaLimitKind, at date: Date) async throws -> CycleDailyUsage {
+        guard kind == .weekly else { return CycleDailyUsage(state: .unavailable, points: []) }
+        let payload = state.quotaCycles
+        let includeOthers = settings.cycleIncludesOtherAgents
+        let privacy = settings.privacyMode
+        let visible = settings.visibleUsageApps
+        let contextGeneration = generation
+        let plan = CycleDailyUsage.plan(app: account.app, accountKey: account.historyKey ?? "",
+            payload: payload, buckets: state.usageService.cycleAggregator.snapshot(),
+            includeOtherAgents: includeOthers, now: date)
+        guard account.historyKey != nil, plan.slices.contains(where: \.selectedAccount) else {
+            return plan.empty(.unavailable)
+        }
+        let data: DashboardData?
+        do {
+            data = try await queryDetails(plan.queries)
+        } catch let error as HostError where error.code == "usage_unavailable" {
+            // Request-index availability must not hide a valid official quota card.
+            // Cancellation and changed identity/privacy contexts still reject the query.
+            data = nil
+        }
+        guard !Task.isCancelled, generation == contextGeneration,
+              settings.privacyMode == privacy, settings.visibleUsageApps == visible,
+              settings.cycleIncludesOtherAgents == includeOthers, state.quotaCycles == payload,
+              quotaAccounts().first(where: { $0.id == account.id })?.historyKey == account.historyKey else {
+            throw HostError(code: "cancelled", message: "Quota query context changed")
+        }
+        guard let data else { return plan.empty(.unavailable) }
+        guard data.status.isReady else { return plan.empty(.loading) }
+        return CycleDailyUsage.resolve(plan, results: data.results, canonical: data.canonical, status: data.status)
     }
 
     // MARK: - Existing business models

@@ -66,9 +66,9 @@ extension HostWindowUsageService {
         return DashboardQuery(from: from, to: to, asOf: instant, service: service, source: try string("sourceID"), model: try string("modelID"), metric: metric, hourly: range == "today" || range == "last24h" || (range == "custom" && to.timeIntervalSince(from) <= 86400 * 2), naturalDays: ["today", "last7", "last14", "last30", "all"].contains(range), allTime: range == "all")
     }
 
-    private typealias SQLResult = UsageRequestIndexStore.QueryResult
+    typealias SQLResult = UsageRequestIndexStore.QueryResult
     private typealias Partition = UsageRequestIndexStore.Partition
-    private struct DashboardData {
+    struct DashboardData {
         let status: UsageRequestIndexStatus
         let canonical: [UsageBucket]
         let results: [SQLResult]
@@ -89,7 +89,7 @@ extension HostWindowUsageService {
             from: from, to: from < to ? to : from.addingTimeInterval(1), calendar: .current, hourly: hourly, page: page,
             includeRequestCount: includeRequestCount)
     }
-    private func queryDetails(_ queries: [UsageRequestIndexStore.Query]) async throws -> DashboardData {
+    func queryDetails(_ queries: [UsageRequestIndexStore.Query]) async throws -> DashboardData {
         let status = dashboardStatusProvider?() ?? state.usageService.requestIndexStatusForDisplay()
         guard !status.isUnavailable else {
             throw HostError(code: "usage_unavailable", message: "Request history is temporarily unavailable; retry shortly")

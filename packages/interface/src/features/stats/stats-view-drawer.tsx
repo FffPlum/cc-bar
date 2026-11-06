@@ -95,7 +95,10 @@ export function StatsViewDrawer({
                   >
                     <CircleHelp className="size-3.5" aria-hidden="true" />
                   </PopoverTrigger>
-                  <PopoverContent align="start" className="w-72 p-3 text-[12px]">
+                  <PopoverContent
+                    align="start"
+                    className="w-72 p-3 text-[12px]"
+                  >
                     <p>
                       {t(
                         "Overview: totals, trends and request details.",
@@ -116,8 +119,8 @@ export function StatsViewDrawer({
                     </p>
                     <p>
                       {t(
-                        "Quota: inspect quota cycles, changes and full-use estimates.",
-                        "额度：查看额度周期、变动和用满预估。",
+                        "Quota: view account allowances and estimated daily usage.",
+                        "额度：查看账号额度与每日用量估算。",
                       )}
                     </p>
                   </PopoverContent>

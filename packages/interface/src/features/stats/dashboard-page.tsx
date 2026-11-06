@@ -402,6 +402,11 @@ function DashboardContent({
       </>
     );
   };
+  // Quota owns its account scope and header. Keep this component mounted so
+  // the other views retain their date/application/provider selections.
+  if (filterMode === "quota" && renderView) {
+    return renderView(query, undefined, false);
+  }
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col gap-4 p-5 text-[13px]">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
