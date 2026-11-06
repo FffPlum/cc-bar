@@ -147,6 +147,10 @@ export function StatsPage() {
             <StatsViewDrawer
               view={view}
               onView={changeView}
+              onSync={() => void refresh()}
+              syncing={refreshing}
+              syncError={refreshError || overview.error}
+              status={overview.data?.status}
               className="-ml-px rounded-l-none"
             />
           </div>

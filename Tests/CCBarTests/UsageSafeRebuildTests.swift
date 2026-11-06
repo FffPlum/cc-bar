@@ -20,6 +20,73 @@ final class UsageSafeRebuildTests: XCTestCase {
         environment = nil
     }
 
+    func testPausingAutomaticScansPreservesHistoryAndAllowsManualSyncAndRecalculation() async throws {
+        let env = try XCTUnwrap(environment)
+        let firstLine = env.claudeLine(id: "auto-first", session: "auto-scan", model: model,
+            timestamp: timestamp(-1, from: Date()), input: 100, output: 10)
+        let secondLine = env.claudeLine(id: "auto-second", session: "auto-scan", model: model,
+            timestamp: timestamp(-0.5, from: Date()), input: 200, output: 20)
+        _ = try env.writeClaudeLog(session: "auto-scan", lines: [firstLine])
+        let service = env.makeService()
+        await env.bootstrap(service)
+        await service.scanNow()
+        let preserved = service.aggregator.snapshotLocal()
+        service.setAutomaticScanningEnabled(false)
+        _ = try env.writeClaudeLog(session: "auto-scan", lines: [firstLine, secondLine])
+        var scansStarted = 0
+        service.scanStartedForIndexTesting = { scansStarted += 1 }
+        await service.scanPeriodically()
+        await service.scanNow(automatically: true)
+        await service.rebuildCycleUsageIfNeeded()
+        await service.rebuildCycleUsageForRecentChanges(reasons: ["paused fixture"])
+        XCTAssertEqual(scansStarted, 0)
+        XCTAssertEqual(service.aggregator.snapshotLocal(), preserved)
+        await service.scanNow()
+        XCTAssertEqual(scansStarted, 1)
+        XCTAssertNotEqual(service.aggregator.snapshotLocal(), preserved)
+        let synchronized = service.aggregator.snapshotLocal()
+        _ = await service.forceRescan()
+        XCTAssertEqual(UsageHistoryConsistency.dayVector(service.aggregator.snapshotLocal()),
+            UsageHistoryConsistency.dayVector(synchronized))
+        service.setAutomaticScanningEnabled(true)
+        await service.scanNow(automatically: true)
+        XCTAssertEqual(scansStarted, 2)
+        service.scanStartedForIndexTesting = nil
+    }
+
+    func testManualSyncRepairsInitialAndChangedQuotaCyclesWhileAutomaticScanningIsPaused() async throws {
+        let env = try XCTUnwrap(environment)
+        let now = Date()
+        let service = try await seed(env, reference: now)
+        let preservedDay = UsageHistoryConsistency.dayVector(result(service).day)
+        service.setAutomaticScanningEnabled(false)
+        env.appState.quotaCycles.accountSegments = [QuotaCycleAccountSegment(id: "manual-account",
+            accountKey: "a", app: .claude, startAt: now.addingTimeInterval(-86400 * 30), endAt: nil)]
+        env.appState.quotaCycles.records = [makeCycle(id: "manual-cycle", app: .claude, accountKey: "a",
+            kind: .fiveHour, startAt: now.addingTimeInterval(-3600), endAt: now.addingTimeInterval(3600))]
+        service.requestCycleUsageRebuild(reasons: ["new quota cycle while paused"])
+        await service.scanNow(automatically: true)
+        XCTAssertTrue(result(service).cycle.isEmpty)
+
+        // No new log lines: manual sync still has to backfill the newly discovered cycle.
+        await service.scanNow()
+        XCTAssertEqual(result(service).cycle.filter { $0.cycleID == "manual-cycle" }
+            .reduce(0) { $0 + $1.inputTokens }, 500)
+        env.appState.quotaCycles.records = [makeCycle(id: "manual-cycle", app: .claude, accountKey: "a",
+            kind: .fiveHour, startAt: now.addingTimeInterval(-4 * 3600), endAt: now.addingTimeInterval(3600))]
+        service.requestCycleUsageRebuild(reasons: ["quota cycle start changed while paused"])
+        await service.scanNow()
+        XCTAssertEqual(result(service).cycle.filter { $0.cycleID == "manual-cycle" }
+            .reduce(0) { $0 + $1.inputTokens }, 2_500)
+        XCTAssertEqual(UsageHistoryConsistency.dayVector(result(service).day), preservedDay)
+        XCTAssertFalse(service.automaticScanningEnabled)
+
+        // A second manual sync must preserve totals after consuming the pending repair.
+        let repaired = UsageHistoryConsistency.cycleVector(result(service).cycle)
+        await service.scanNow()
+        XCTAssertEqual(UsageHistoryConsistency.cycleVector(result(service).cycle), repaired)
+    }
+
     // MARK: - fixture
 
     private let model = "ccbar-safe-model"

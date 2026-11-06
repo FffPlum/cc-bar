@@ -199,8 +199,8 @@ interface ApplicationOperation {
 
 `window.settings.get/update` 使用完整 `WindowSettings`；v1 精简 `settings.get/update` 保留，不能混用 DTO。普通 patch 只包含同步偏好，不包含启动项注册、自动更新或权限请求。
 
-- 外观：菜单周期、安装图标、悬浮窗、重置时间、状态点、隐私、排行、周期其他 Agent、Pi 估算速度、品牌色和最近色；`settings.resetBrandColors` 全量恢复。
-- 数据：刷新频率及 `applySettingsChange`、真实代理枚举 `system/manual` 与 `http/socks5`、币种汇率、用量进度。`settings.testProxy`、`settings.refreshCurrency` 复用原链。
+- 外观：菜单周期、安装图标、悬浮窗、重置时间、状态点、隐私、排行、统计图表类型 `statsChartType: "bar" | "area"`（默认 `bar`，用于概览与项目每日用量）、周期其他 Agent、Pi 估算速度、品牌色和最近色；`settings.resetBrandColors` 全量恢复。
+- 数据：自动会话扫描 `usageAutoScanEnabled: boolean`（默认 true）、刷新频率及 `applySettingsChange`、真实代理枚举 `system/manual` 与 `http/socks5`、币种汇率、用量进度。`settings.testProxy`、`settings.refreshCurrency` 复用原链。
 - 通用：语言、启动项实际状态、提醒偏好、通知权限、详细日志、版本与更新。阈值仅 5…50 步进 5，至少一个提醒周期。偏好保存和权限请求分离；`notifications.requestPermission` 返回独立系统状态。`NotificationState` 包含 alertsAllowed/soundAllowed/statusText，系统 allowed 显式映射为 authorized。
 - `window.settings.setLaunchAtLogin` 是独立系统动作，返回最新实际状态；`updates.setAutomatic` 也是独立动作。`UpdateState` 包含 hasUpdate/isWorking，更新器 UI 保留原生。
 - `pricing.catalog` 返回 models.dev 目录；`pricing.refreshAndRecalculate` 返回原结果与进度，不在 JS 重算。

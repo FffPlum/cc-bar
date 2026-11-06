@@ -339,6 +339,8 @@ final class UsageService {
 
     private weak var appState: AppState?
     private var scanQueued = false
+    private var queuedScanIsAutomatic = true
+    private(set) var automaticScanningEnabled = true
     private var suspendedForTermination = false
     private var isPersistingForTermination = false
     private var requiresFullRebuild = false
@@ -1265,24 +1267,58 @@ final class UsageService {
 
     // MARK: - 常规扫描
 
+    /// Finish in-flight work safely, but discard automatic followups when paused.
+    /// Explicit refresh/recalculation continues to use the manual entry points.
+    func setAutomaticScanningEnabled(_ enabled: Bool) {
+        guard enabled != automaticScanningEnabled else { return }
+        automaticScanningEnabled = enabled
+        if enabled { UsageLogWatcher.shared.requestRescan() }
+        if !enabled, scanQueued, queuedScanIsAutomatic { scanQueued = false }
+    }
+
+    private func resumeQueuedScan() {
+        guard scanQueued else { return }
+        let automatic = queuedScanIsAutomatic
+        Task { await scanNow(automatically: automatic) }
+    }
+
     /// Scheduler 的周期扫描入口：日志目录自上次扫描以来没有变化时整轮跳过。
     /// 手动刷新（`refreshNow`）与强制重算（`forceRescan`）直接走 `scanNow` / 全量路径，
     /// 不受门控影响，用户点了就一定扫。
     func scanPeriodically() async {
-        guard !suspendedForTermination, !isPersistingForTermination else { return }
-        guard UsageLogWatcher.shared.shouldScan() else {
+        guard automaticScanningEnabled, !suspendedForTermination, !isPersistingForTermination else { return }
+        guard UsageLogWatcher.shared.shouldScan() || !pendingCycleRebuildReasons.isEmpty || hasPendingOrphanCycleRebuild else {
             AppLog.debug(.usage, "usage scan skipped; no log changes since last scan")
             return
         }
-        await scanNow()
+        await scanNow(automatically: true)
+        await rebuildCycleUsageIfNeeded()
+        if !pendingCycleRebuildReasons.isEmpty || hasPendingOrphanCycleRebuild {
+            await rebuildCycleUsageForRecentChanges()
+        }
     }
 
-    /// 由 Scheduler / 手动触发；防重入。
-    func scanNow() async {
-        guard !suspendedForTermination, !isPersistingForTermination else { return }
+    /// Automatic callers must identify themselves so pausing never blocks a manual sync.
+    func scanNow(automatically: Bool = false) async {
+        let handledManualScan = await scanUsage(automatically: automatically)
+        // While paused, no background task will repair changed quota windows. Complete
+        // those repairs as part of the explicit sync, after releasing the scan lock.
+        // A queued manual request is handled by the scan that actually consumes it.
+        guard handledManualScan, !automaticScanningEnabled else { return }
+        await rebuildCycleUsageIfNeeded(automatically: false)
+        if !pendingCycleRebuildReasons.isEmpty || hasPendingOrphanCycleRebuild {
+            await rebuildCycleUsageForRecentChanges(automatically: false)
+        }
+    }
+
+    /// Returns whether this invocation completed a manual scan, including queued requests.
+    private func scanUsage(automatically: Bool) async -> Bool {
+        guard !automatically || automaticScanningEnabled else { return false }
+        guard !suspendedForTermination, !isPersistingForTermination else { return false }
         if isScanning {
+            queuedScanIsAutomatic = scanQueued ? queuedScanIsAutomatic && automatically : automatically
             scanQueued = true
-            return
+            return false
         }
         isScanning = true
         defer { isScanning = false }
@@ -1290,9 +1326,14 @@ final class UsageService {
         await scanStartedForIndexTesting?()
         #endif
 
-        if storeWriteDisabled { return }
+        if storeWriteDisabled { return false }
+        var handledManualScan = false
+        var currentScanIsAutomatic = automatically
         repeat {
+            guard !currentScanIsAutomatic || automaticScanningEnabled else { break }
+            handledManualScan = handledManualScan || !currentScanIsAutomatic
             scanQueued = false
+            defer { currentScanIsAutomatic = queuedScanIsAutomatic }
             // 借用量扫描的既有节奏当远端价格目录 24h 到期检查的心跳，不新开定时器；非阻塞。
             PricingCatalogStore.shared.refreshIfNeeded()
             PricingCatalogStore.shared.commitPending()
@@ -1306,9 +1347,12 @@ final class UsageService {
             }
             if await runScan(prev: cacheResult.state, allowDeferredWrite: true) {
                 requiresFullRebuild = false
-                await rebuildAutomaticallyIfNeeded()
+                if !currentScanIsAutomatic || automaticScanningEnabled {
+                    await rebuildAutomaticallyIfNeeded()
+                }
             }
         } while scanQueued && !suspendedForTermination
+        return handledManualScan
     }
 
     /// 受限恢复：历史可用但进度不可信。
@@ -1359,11 +1403,16 @@ final class UsageService {
     /// 重建期间新到的请求留给下一轮。
     func requestCycleUsageRebuild(reasons: [String]) {
         guard !reasons.isEmpty, !suspendedForTermination, !isPersistingForTermination else { return }
+        // One deferred reason is enough while paused; quota polling may keep changing cycles.
+        guard automaticScanningEnabled else {
+            pendingCycleRebuildReasons = ["cycle changes while automatic scanning paused"]
+            return
+        }
         pendingCycleRebuildReasons.append(contentsOf: reasons)
         guard cycleRebuildRequestTask == nil else { return }
         cycleRebuildRequestTask = Task { [weak self] in
             guard let self else { return }
-            while !self.pendingCycleRebuildReasons.isEmpty {
+            while self.automaticScanningEnabled && !self.pendingCycleRebuildReasons.isEmpty {
                 let batch = self.pendingCycleRebuildReasons
                 self.pendingCycleRebuildReasons = []
                 await self.rebuildCycleUsageForRecentChanges(reasons: batch)
@@ -1377,13 +1426,21 @@ final class UsageService {
     /// 触发频率高（5h / weekly 滚动，每天数次），必须保持轻量；
     /// 全量重建只在冷启动且 cycle rollup 无效时发生一次（见 `rebuildCycleUsageIfNeeded`）。
     /// `reasons` 只用于日志统计本轮合并了多少次触发。
-    func rebuildCycleUsageForRecentChanges(reasons: [String] = []) async {
+    func rebuildCycleUsageForRecentChanges(reasons: [String] = [], automatically: Bool = true) async {
         guard !suspendedForTermination, !isPersistingForTermination else { return }
+        guard !automatically || automaticScanningEnabled else {
+            requestCycleUsageRebuild(reasons: reasons)
+            return
+        }
         guard let appState, !appState.quotaCycles.records.isEmpty else { return }
         let started = Date()
         while isScanning || isCycleRebuilding {
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !suspendedForTermination, !isPersistingForTermination else { return }
+            guard !automatically || automaticScanningEnabled else {
+                requestCycleUsageRebuild(reasons: reasons)
+                return
+            }
         }
         let waitEnded = Date()
 
@@ -1393,9 +1450,7 @@ final class UsageService {
             isCycleRebuilding = false
             isScanning = false
             scanProgress = nil
-            if scanQueued {
-                Task { await scanNow() }
-            }
+            resumeQueuedScan()
         }
         // 先提交上次常规扫描之后新追加的日志，推进主 watermark。
         // 否则它们会先被下面的窗口重扫灌入，再被下一次常规增量扫描重复计入。
@@ -1830,8 +1885,8 @@ final class UsageService {
         AppLog.info(.usage, "cycle usage \(tag) \(status) commit=\(elapsed)")
     }
 
-    func rebuildCycleUsageIfNeeded() async {
-        guard !suspendedForTermination, !isPersistingForTermination else { return }
+    func rebuildCycleUsageIfNeeded(automatically: Bool = true) async {
+        guard (!automatically || automaticScanningEnabled), !suspendedForTermination, !isPersistingForTermination else { return }
         guard let appState, !appState.quotaCycles.records.isEmpty else { return }
         guard !storeWriteDisabled, historyRecoveryState == .complete else { return }
         guard !Self.pendingInitialCycleRebuildApps(
@@ -1840,7 +1895,7 @@ final class UsageService {
         ).isEmpty else { return }
         while isScanning || isCycleRebuilding {
             try? await Task.sleep(nanoseconds: 150_000_000)
-            guard !suspendedForTermination, !isPersistingForTermination else { return }
+            guard (!automatically || automaticScanningEnabled), !suspendedForTermination, !isPersistingForTermination else { return }
             if Self.pendingInitialCycleRebuildApps(
                 cycles: appState.quotaCycles.records,
                 completedApps: cycleInitialRebuildCompletedApps
@@ -1853,9 +1908,7 @@ final class UsageService {
             isCycleRebuilding = false
             isScanning = false
             scanProgress = nil
-            if scanQueued {
-                Task { await scanNow() }
-            }
+            resumeQueuedScan()
         }
         guard await drainPendingUsageBeforeCycleRebuild() else { return }
         let progress: ScanProgressCallback? = { [weak self] progress in
@@ -1997,7 +2050,7 @@ final class UsageService {
         defer {
             isScanning = false
             scanProgress = nil
-            if scanQueued { Task { await scanNow() } }
+            resumeQueuedScan()
         }
         lastRebuildOutcome = nil
         PricingCatalogStore.shared.refreshIfNeeded()
@@ -2121,7 +2174,7 @@ final class UsageService {
             )
             guard let self else { return }
             self.isRefreshingMissingPricing = false
-            if refreshed { await self.scanNow() }
+            if refreshed { await self.scanNow(automatically: true) }
         }
     }
 

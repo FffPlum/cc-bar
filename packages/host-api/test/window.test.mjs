@@ -220,3 +220,24 @@ test('bootstrap requires visible usage services and validates each service', () 
   assert.throws(() => windowDTOValidators.bootstrap.parse(missing), { code: 'invalid_response' });
   assert.throws(() => windowDTOValidators.bootstrap.parse({ ...dto, visibleUsageServices: ['unknown'] }), { code: 'invalid_response' });
 });
+
+
+test('scan and chart settings validate values and forward a combined patch', async () => {
+  const dto = JSON.parse(readFileSync(new URL('../fixtures/window-settings.json', import.meta.url)));
+  assert.equal(dto.data.usageAutoScanEnabled, true);
+  assert.equal(dto.appearance.statsChartType, 'bar');
+  for (const mutate of [
+    value => { value.data.usageAutoScanEnabled = 'false'; },
+    value => { value.appearance.statsChartType = 'pie'; },
+  ]) {
+    const invalid = structuredClone(dto);
+    mutate(invalid);
+    assert.throws(() => windowDTOValidators.settings.parse(invalid), { code: 'invalid_response' });
+  }
+  const { api, host, calls } = client({ 'window.settings.update': dto });
+  try {
+    const patch = { usageAutoScanEnabled: false, usageInterval: 'm10', statsChartType: 'area' };
+    await api.settingsUpdate(patch);
+    assert.deepEqual(calls[0].params, { patch });
+  } finally { api.dispose(); host.dispose(); }
+});

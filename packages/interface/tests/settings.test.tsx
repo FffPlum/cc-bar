@@ -2,11 +2,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { HostProvider } from "@/host/host-context";
 import { LanguageProvider } from "@/lib/i18n";
-import { SettingsPage } from "@/features/settings/settings-page";
+import { SettingsPage, type SettingsSection } from "@/features/settings/settings-page";
 import { bootstrap, makeAPI, settings } from "./fixtures";
 const sessions: ReturnType<typeof makeAPI>[] = [];
 afterEach(() => sessions.splice(0).forEach((session) => session.close()));
-function mount() {
+function mount(section: SettingsSection = "appearance") {
   const session = makeAPI();
   sessions.push(session);
   session.transport.handler = (request) => {
@@ -17,15 +17,14 @@ function mount() {
   render(
     <LanguageProvider language="en">
       <HostProvider api={session.api}>
-        <SettingsPage />
+        <SettingsPage section={section} />
       </HostProvider>
     </LanguageProvider>,
   );
   return session;
 }
 it("uses the separate launch-at-login action", async () => {
-  const { transport } = mount();
-  fireEvent.click(await screen.findByRole("tab", { name: "General" }));
+  const { transport } = mount("general");
   fireEvent.click(
     await screen.findByRole("switch", { name: "Launch at login" }),
   );
@@ -43,8 +42,7 @@ it("uses the separate launch-at-login action", async () => {
   ).toBe(false);
 });
 it("requests system permission after enabling quota alerts", async () => {
-  const { transport } = mount();
-  fireEvent.click(await screen.findByRole("tab", { name: "General" }));
+  const { transport } = mount("general");
   fireEvent.click(
     await screen.findByRole("switch", { name: "Enable quota alerts" }),
   );
