@@ -318,3 +318,15 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ccb
 - 趋势提示中的 Tokens 合计与应用贡献沿用上方总量的 K/M/B 单位选择规则，从原始数值固定保留两位小数，移除底部重复 Tokens 行；其他指标标签和热力图提示保持原样。
 - 日期选中及悬停底色四周内缩 2px，相邻日期之间保留 4px 间隙，完整点击区域和数字位置不变。
 - 已同步相关文档、现有测试数据和预期；最终状态仅完成静态代码审阅与 `git diff --check`。本轮未运行构建、类型检查、测试或实际窗口验收；上方阶段性测试结果不代表此次最终改动已经通过回归。
+
+## 2026-11-06：设置导航、扫描控制与图表样式
+
+独立工作区分支 `feature/react-settings-navigation`，从 `feature/react-main-window` 的 `23057c7` 创建；原工作区未提交的文档改动保持原样。
+
+- 设置入口将左侧导航替换为三个设置分类，返回恢复此前页面；顶部分类切换移除。
+- 用量设置切换视图后关闭抽屉；新增自动扫描开关、周期和手动同步。暂停模式仍允许同步及必要的额度周期修复；扫描和图表偏好由宿主持久化。
+- 概览及项目每日用量可切换柱状图 / 曲线面积图，沿用数据、轴、品牌色和提示卡。
+- 前端类型检查通过；设置导航、抽屉、面积路径、图表与项目图表共 38 项定向测试通过。首次抽屉测试缺少 Base UI 所需的 pointerDown 事件，补齐真实点击序列后 2 项复跑通过。
+- SDK 窗口契约 14 项测试通过；Swift `HostWindowSettingsTests` 与 `UsageSafeRebuildTests` 共 53 项通过，包含暂停/恢复、手动同步、周期修复及历史保护。
+- Xcode Debug `build` 与最终代码的 `build-for-testing` 通过。新工作区首次拉取依赖更新遇到 HTTP/2 错误，改用复制到当前工作区 `build/ValidationSourcePackages` 的既有缓存，核对四个依赖 revision 与 Package.resolved 一致，并关闭自动依赖解析/更新后完成；工程与锁文件未改。测试构建仅通过命令参数使用 ad-hoc 签名，独立 Xcode `xctest` 加载本次 Debug dylib 与测试 bundle，设置 `XCTestBundlePath` 隔离真实采集；不宣称标准 `xcodebuild test` 启动流程通过。
+- `git diff --check` 通过。按用户要求未检查视图；验证时尚未提交或推送，没有打包或替换已安装 App。

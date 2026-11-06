@@ -50,7 +50,7 @@ struct ConversationStatsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task {
             if appState.usageService.lastScanAt.map({ Date().timeIntervalSince($0) > 60 }) ?? true {
-                await appState.usageService.scanNow()
+                await appState.usageService.scanNow(automatically: true)
             }
         }
         .onAppear {

@@ -30,6 +30,7 @@ export const settings: WindowSettings = {
     showServiceStatus: true,
     privacyMode: false,
     statsRankMetric: "tokens",
+    statsChartType: "bar",
     cycleIncludesOtherAgents: true,
     piEstimatedOutputSpeed: false,
     brandColors: [],
@@ -38,6 +39,7 @@ export const settings: WindowSettings = {
   data: {
     quotaInterval: "m5",
     usageInterval: "m5",
+    usageAutoScanEnabled: true,
     proxyMode: "system",
     proxyType: "http",
     proxyHost: "",

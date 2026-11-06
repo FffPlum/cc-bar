@@ -28,9 +28,9 @@ final class HostWindowSettingsService {
 
     func trackChanges() {
         _ = (settings.menuBarWindow, settings.useInstalledAppIcons, settings.floatingEnabled, settings.resetTimeDisplay,
-             settings.showServiceStatus, settings.privacyMode, settings.statsRankMetric, settings.cycleIncludesOtherAgents,
+             settings.showServiceStatus, settings.privacyMode, settings.statsRankMetric, settings.statsChartType, settings.cycleIncludesOtherAgents,
              settings.piEstimatedOutputSpeed, settings.brandColorPreferences, settings.recentBrandColors,
-             settings.quotaInterval, settings.usageInterval, settings.proxyMode, settings.proxyType, settings.proxyHost,
+             settings.quotaInterval, settings.usageInterval, settings.usageAutoScanEnabled, settings.proxyMode, settings.proxyType, settings.proxyHost,
              settings.proxyPort, settings.displayCurrency, settings.appLanguage, settings.quotaAlertsEnabled,
              settings.quotaAlertThresholdPercent, settings.quotaAlertFiveHourEnabled, settings.quotaAlertWeeklyEnabled,
              settings.quotaAlertBillingCycleEnabled, settings.quotaAlertSoundEnabled, settings.verboseLogging)
@@ -54,7 +54,7 @@ final class HostWindowSettingsService {
             let patch = try HostWindowValidation.object(params, "patch")
             let changes = try validatedChanges(patch)
             for change in changes { change() }
-            if patch["quotaInterval"] != nil || patch["usageInterval"] != nil { actions.applyRefreshIntervals() }
+            if patch["quotaInterval"] != nil || patch["usageInterval"] != nil || patch["usageAutoScanEnabled"] != nil { actions.applyRefreshIntervals() }
             if patch["floatingEnabled"] != nil { actions.system.syncFloating() }
             if patch.keys.contains(where: { $0.hasPrefix("quotaAlert") }) { actions.notificationSettingsChanged() }
             // Saving the preference and requesting permission are distinct operations. The frontend
@@ -147,9 +147,9 @@ final class HostWindowSettingsService {
             "cycleIncludesOtherAgents": \.cycleIncludesOtherAgents, "piEstimatedOutputSpeed": \.piEstimatedOutputSpeed,
             "quotaAlertsEnabled": \.quotaAlertsEnabled, "quotaAlertFiveHourEnabled": \.quotaAlertFiveHourEnabled,
             "quotaAlertWeeklyEnabled": \.quotaAlertWeeklyEnabled, "quotaAlertBillingCycleEnabled": \.quotaAlertBillingCycleEnabled,
-            "quotaAlertSoundEnabled": \.quotaAlertSoundEnabled
+            "quotaAlertSoundEnabled": \.quotaAlertSoundEnabled, "usageAutoScanEnabled": \.usageAutoScanEnabled
         ]
-        let otherFields: Set<String> = ["menuBarWindow", "resetTimeDisplay", "statsRankMetric", "brandColor", "quotaInterval",
+        let otherFields: Set<String> = ["menuBarWindow", "resetTimeDisplay", "statsRankMetric", "statsChartType", "brandColor", "quotaInterval",
             "usageInterval", "proxyMode", "proxyType", "proxyHost", "proxyPort", "currency", "language", "quotaAlertThresholdPercent", "verboseLogging"]
         try HostWindowValidation.keys(patch, allowed: Set(booleanFields.keys).union(otherFields))
         var changes: [() -> Void] = []
@@ -167,6 +167,7 @@ final class HostWindowSettingsService {
         try enumeration("menuBarWindow", \.menuBarWindow)
         try enumeration("resetTimeDisplay", \.resetTimeDisplay)
         try enumeration("statsRankMetric", \.statsRankMetric)
+        try enumeration("statsChartType", \.statsChartType)
         try enumeration("quotaInterval", \.quotaInterval)
         try enumeration("usageInterval", \.usageInterval)
         try enumeration("proxyMode", \.proxyMode)
@@ -219,6 +220,7 @@ final class HostWindowSettingsService {
             "menuBarWindow": .string(settings.menuBarWindow.rawValue),
             "useInstalledAppIcons": .bool(settings.useInstalledAppIcons), "floatingEnabled": .bool(settings.floatingEnabled),
             "resetTimeDisplay": .string(settings.resetTimeDisplay.rawValue), "showServiceStatus": .bool(settings.showServiceStatus),
+            "statsChartType": .string(settings.statsChartType.rawValue),
             "privacyMode": .bool(settings.privacyMode), "statsRankMetric": .string(settings.statsRankMetric.rawValue),
             "cycleIncludesOtherAgents": .bool(settings.cycleIncludesOtherAgents), "piEstimatedOutputSpeed": .bool(settings.piEstimatedOutputSpeed),
             "brandColors": .array(ServiceBrand.allCases.map { brand in .object([
@@ -229,6 +231,7 @@ final class HostWindowSettingsService {
             "recentBrandColors": .array(settings.recentBrandColors.map(HostJSON.string))
         ]
         let data: [String: HostJSON] = [
+            "usageAutoScanEnabled": .bool(settings.usageAutoScanEnabled),
             "quotaInterval": .string(settings.quotaInterval.rawValue), "usageInterval": .string(settings.usageInterval.rawValue),
             "proxyMode": .string(settings.proxyMode.rawValue), "proxyType": .string(settings.proxyType.rawValue),
             "proxyHost": .string(settings.proxyHost), "proxyPort": .number(Decimal(settings.proxyPort)),

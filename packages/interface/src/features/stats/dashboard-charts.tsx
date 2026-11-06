@@ -22,6 +22,7 @@ import {
 import { useHost } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { dashboardAreaPaths } from "./dashboard-area-paths";
 
 export interface DashboardChartData {
   samples: (DashboardSample & { highlighted?: boolean })[];
@@ -56,6 +57,7 @@ export function DashboardChart({
   const { bootstrap, settings } = useHost();
   const t = useTranslation();
   const isCacheHitRate = metric === "cacheHitRate";
+  const isArea = settings.appearance.statsChartType === "area";
   const valueLabel = (sample: DashboardSample | DashboardSampleSegment) =>
     metric === "tokens"
       ? formatTokensCompact(sample.totals.totalTokens, 2)
@@ -91,6 +93,9 @@ export function DashboardChart({
   ];
   const colorFor = (service: (typeof services)[number]) =>
     brandColor(service, settings, bootstrap.appearance === "dark");
+  const aggregateColor = service ? colorFor(service) : "var(--foreground)";
+  const areaBands =
+    isArea && !empty ? dashboardAreaPaths(samples, services, metric) : [];
   const indices = new Set(
     samples
       .map((_, i) => i)
@@ -173,6 +178,36 @@ export function DashboardChart({
           <div ref={plot} className="relative flex h-40 items-end border-b">
             <div className="pointer-events-none absolute inset-x-0 top-0 border-t" />
             <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t" />
+            {isArea && (
+              <svg
+                data-slot="dashboard-area"
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                {areaBands.map((band) => {
+                  const color = band.service
+                    ? colorFor(band.service)
+                    : aggregateColor;
+                  return (
+                    <g
+                      key={band.service ?? "total"}
+                      data-service={band.service ?? undefined}
+                    >
+                      <path d={band.fill} fill={color} fillOpacity={0.55} />
+                      <path
+                        d={band.line}
+                        fill="none"
+                        stroke={color}
+                        strokeWidth={1.5}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </g>
+                  );
+                })}
+              </svg>
+            )}
             {(empty ? [] : samples).map((s) => (
               <ChartDataTooltipTrigger
                 key={s.key}
@@ -181,7 +216,7 @@ export function DashboardChart({
                 render={
                   <button
                     type="button"
-                    className="cc-chart-column-guide relative z-0 flex h-full min-w-0 flex-1 items-end justify-center"
+                    className="cc-chart-column-guide group relative z-0 flex h-full min-w-0 flex-1 items-end justify-center"
                     aria-label={`${fmt.format(new Date(s.start))}: ${valueLabel(s)}; ${
                       isCacheHitRate
                         ? `${t("Cache read tokens", "命中 Tokens")}: ${formatTokensCompact(s.totals.cacheReadTokens, 2)}`
@@ -195,35 +230,45 @@ export function DashboardChart({
                   />
                 }
               >
-                <span
-                  data-slot="dashboard-bar"
-                  className="relative z-10 flex shrink-0 flex-col-reverse overflow-hidden rounded-t-[2px]"
-                  style={{
-                    width: chartBarWidth(samples.length),
-                    maxWidth: "100%",
-                    height: `${Math.max(0, Math.min(1, s.normalizedValue)) * 100}%`,
-                    backgroundColor: isCacheHitRate
-                      ? service
-                        ? colorFor(service)
-                        : "var(--foreground)"
-                      : undefined,
-                  }}
-                >
-                  {!isCacheHitRate &&
-                    s.segments
-                      .filter((segment) => segment.share > 0)
-                      .map((segment) => (
-                        <span
-                          key={segment.service}
-                          data-service={segment.service}
-                          style={{
-                            height: `${Math.max(0, Math.min(1, segment.share)) * 100}%`,
-                            backgroundColor: colorFor(segment.service),
-                            flexShrink: 0,
-                          }}
-                        />
-                      ))}
-                </span>
+                {isArea ? (
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute z-10 size-1.5 translate-y-1/2 rounded-full border border-background bg-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+                    style={{
+                      bottom: `${Math.max(0, Math.min(1, s.normalizedValue)) * 100}%`,
+                    }}
+                  />
+                ) : (
+                  <span
+                    data-slot="dashboard-bar"
+                    className="relative z-10 flex shrink-0 flex-col-reverse overflow-hidden rounded-t-[2px]"
+                    style={{
+                      width: chartBarWidth(samples.length),
+                      maxWidth: "100%",
+                      height: `${Math.max(0, Math.min(1, s.normalizedValue)) * 100}%`,
+                      backgroundColor: isCacheHitRate
+                        ? service
+                          ? colorFor(service)
+                          : "var(--foreground)"
+                        : undefined,
+                    }}
+                  >
+                    {!isCacheHitRate &&
+                      s.segments
+                        .filter((segment) => segment.share > 0)
+                        .map((segment) => (
+                          <span
+                            key={segment.service}
+                            data-service={segment.service}
+                            style={{
+                              height: `${Math.max(0, Math.min(1, segment.share)) * 100}%`,
+                              backgroundColor: colorFor(segment.service),
+                              flexShrink: 0,
+                            }}
+                          />
+                        ))}
+                  </span>
+                )}
               </ChartDataTooltipTrigger>
             ))}
             <ChartDataTooltip

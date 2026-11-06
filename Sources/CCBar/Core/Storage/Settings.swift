@@ -63,6 +63,13 @@ enum UsageIntervalChoice: String, CaseIterable, Identifiable {
     }
 }
 
+enum StatsChartType: String, CaseIterable, Identifiable {
+    case bar
+    case area
+
+    var id: String { rawValue }
+}
+
 enum ResetTimeDisplay: String, CaseIterable, Identifiable {
     case relative
     case absolute
@@ -316,9 +323,13 @@ final class SettingsStore {
 
     // 刷新
     var quotaInterval: QuotaIntervalChoice { didSet { defaults.set(quotaInterval.rawValue, forKey: Keys.quotaInterval) } }
+    var usageAutoScanEnabled: Bool { didSet { defaults.set(usageAutoScanEnabled, forKey: Keys.usageAutoScanEnabled) } }
     var usageInterval: UsageIntervalChoice { didSet { defaults.set(usageInterval.rawValue, forKey: Keys.usageInterval) } }
     var resetTimeDisplay: ResetTimeDisplay { didSet { defaults.set(resetTimeDisplay.rawValue, forKey: Keys.resetTimeDisplay) } }
     var displayCurrency: DisplayCurrency { didSet { defaults.set(displayCurrency.rawValue, forKey: Keys.displayCurrency) } }
+
+    /// React 用量趋势图样式，默认柱状图。
+    var statsChartType: StatsChartType { didSet { defaults.set(statsChartType.rawValue, forKey: Keys.statsChartType) } }
 
     /// 统计页排行口径（默认 Tokens），见 `StatsRankMetric`。
     var statsRankMetric: StatsRankMetric { didSet { defaults.set(statsRankMetric.rawValue, forKey: Keys.statsRankMetric) } }
@@ -447,11 +458,13 @@ final class SettingsStore {
         // 刷新
         let qiRaw = defaults.string(forKey: Keys.quotaInterval) ?? QuotaIntervalChoice.m2.rawValue
         quotaInterval = QuotaIntervalChoice(rawValue: qiRaw) ?? .m2
+        usageAutoScanEnabled = defaults.object(forKey: Keys.usageAutoScanEnabled) as? Bool ?? true
         let uiRaw = defaults.string(forKey: Keys.usageInterval) ?? UsageIntervalChoice.m5.rawValue
         usageInterval = UsageIntervalChoice(rawValue: uiRaw) ?? .m5
         let rtdRaw = defaults.string(forKey: Keys.resetTimeDisplay) ?? ResetTimeDisplay.relative.rawValue
         resetTimeDisplay = ResetTimeDisplay(rawValue: rtdRaw) ?? .relative
         displayCurrency = defaults.string(forKey: Keys.displayCurrency).flatMap(DisplayCurrency.init(rawValue:)) ?? .usd
+        statsChartType = defaults.string(forKey: Keys.statsChartType).flatMap(StatsChartType.init(rawValue:)) ?? .bar
         let srmRaw = defaults.string(forKey: Keys.statsRankMetric) ?? StatsRankMetric.tokens.rawValue
         statsRankMetric = StatsRankMetric(rawValue: srmRaw) ?? .tokens
         cycleIncludesOtherAgents = defaults.object(forKey: Keys.cycleIncludesOtherAgents) as? Bool ?? false
@@ -891,9 +904,11 @@ final class SettingsStore {
         static let floatingShowCodex = "ccbar.settings.floatingShowCodex"
         static let floatingShowClaude = "ccbar.settings.floatingShowClaude"
         static let quotaInterval = "ccbar.settings.quotaInterval"
+        static let usageAutoScanEnabled = "ccbar.settings.usageAutoScanEnabled"
         static let usageInterval = "ccbar.settings.usageInterval"
         static let resetTimeDisplay = "ccbar.settings.resetTimeDisplay"
         static let displayCurrency = "ccbar.settings.displayCurrency"
+        static let statsChartType = "ccbar.settings.statsChartType"
         static let statsRankMetric = "ccbar.settings.statsRankMetric"
         static let cycleIncludesOtherAgents = "ccbar.settings.cycleIncludesOtherAgents"
         static let piEstimatedOutputSpeed = "ccbar.settings.piEstimatedOutputSpeed"

@@ -1,5 +1,14 @@
-import { lazy, Suspense, useEffect, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { ArrowLeft, Palette, RefreshCw, Settings } from "lucide-react";
 import type { Route } from "@ccbar/host-api/window";
+import type { SettingsSection } from "@/features/settings/settings-page";
 import { Button } from "@/components/ui/button";
 import { HostIcon } from "@/components/host-icon";
 import { NavigationIcon } from "@/components/navigation-icon";
@@ -53,6 +62,25 @@ function Workspace() {
   const { bootstrap, navigate, routePending, hostError, retry } = useHost();
   const t = useTranslation();
   const route = bootstrap.route;
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSection>("appearance");
+  const previousPage = useRef<Route>({ page: "stats" });
+  useEffect(() => {
+    if (route.page !== "settings") previousPage.current = route;
+  }, [route]);
+  const settingsSections = [
+    {
+      value: "appearance",
+      label: t("Appearance & Display", "外观与显示"),
+      icon: Palette,
+    },
+    {
+      value: "data",
+      label: t("Data & Refresh", "数据与刷新"),
+      icon: RefreshCw,
+    },
+    { value: "general", label: t("General", "通用"), icon: Settings },
+  ] as const;
   const nav = (target: Route, label: string, icon: ReactNode) => {
     const active =
       target.page === route.page &&
@@ -83,58 +111,96 @@ function Workspace() {
         className="flex w-[200px] shrink-0 flex-col border-r bg-sidebar px-2.5 pb-2.5 pt-4"
         aria-label={t("Navigation", "导航")}
       >
-        <div className="mb-3 px-2 text-[11px] font-semibold text-muted-foreground">
-          CCBar
-        </div>
-        <nav
-          className="cc-scrollbar min-h-0 flex-1 space-y-1"
-          aria-label={t("Applications", "应用")}
-        >
-          {bootstrap.sidebarApplications
-            .filter((app) => app.addedToSidebar)
-            .map((app) =>
-              nav(
-                { page: "application", application: app.id },
-                app.name,
-                <HostIcon
-                  icon={app.icon}
-                  name={app.name}
-                  dark={bootstrap.appearance === "dark"}
-                  size={20}
-                />,
-              ),
-            )}
-        </nav>
-        <nav
-          className="mt-3 space-y-1 border-t pt-2"
-          aria-label={t("Workspace", "工作区")}
-        >
-          {nav(
-            { page: "quotaManagement" },
-            t("Quota Management", "额度管理"),
-            <NavigationIcon page="quotaManagement" />,
-          )}
-          {nav(
-            { page: "stats" },
-            t("Usage Statistics", "用量统计"),
-            <NavigationIcon page="stats" />,
-          )}
-        </nav>
-        <nav
-          className="mt-2 space-y-1 border-t pt-2"
-          aria-label={t("Manage", "管理")}
-        >
-          {nav(
-            { page: "applications" },
-            t("Applications", "应用"),
-            <NavigationIcon page="applications" />,
-          )}
-          {nav(
-            { page: "settings" },
-            t("Settings", "设置"),
-            <NavigationIcon page="settings" />,
-          )}
-        </nav>
+        {route.page === "settings" ? (
+          <>
+            <Button
+              variant="ghost"
+              className="mb-3 w-full justify-start px-2 text-[12.5px]"
+              onClick={() => void navigate(previousPage.current)}
+              disabled={routePending}
+            >
+              <ArrowLeft aria-hidden="true" />
+              {t("Back", "返回")}
+            </Button>
+            <nav
+              className="cc-scrollbar min-h-0 flex-1 space-y-1"
+              aria-label={t("Settings", "设置")}
+            >
+              {settingsSections.map(({ value, label, icon: Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-current={settingsSection === value ? "page" : undefined}
+                  onClick={() => setSettingsSection(value)}
+                  className={cn(
+                    "flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-left text-[12.5px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    settingsSection === value
+                      ? "bg-black/[0.08] font-medium dark:bg-white/[0.10]"
+                      : "hover:bg-black/[0.04] dark:hover:bg-white/[0.04]",
+                  )}
+                >
+                  <Icon className="size-[18px] shrink-0" aria-hidden="true" />
+                  <span className="truncate">{label}</span>
+                </button>
+              ))}
+            </nav>
+          </>
+        ) : (
+          <>
+            <div className="mb-3 px-2 text-[11px] font-semibold text-muted-foreground">
+              CCBar
+            </div>
+            <nav
+              className="cc-scrollbar min-h-0 flex-1 space-y-1"
+              aria-label={t("Applications", "应用")}
+            >
+              {bootstrap.sidebarApplications
+                .filter((app) => app.addedToSidebar)
+                .map((app) =>
+                  nav(
+                    { page: "application", application: app.id },
+                    app.name,
+                    <HostIcon
+                      icon={app.icon}
+                      name={app.name}
+                      dark={bootstrap.appearance === "dark"}
+                      size={20}
+                    />,
+                  ),
+                )}
+            </nav>
+            <nav
+              className="mt-3 space-y-1 border-t pt-2"
+              aria-label={t("Workspace", "工作区")}
+            >
+              {nav(
+                { page: "quotaManagement" },
+                t("Quota Management", "额度管理"),
+                <NavigationIcon page="quotaManagement" />,
+              )}
+              {nav(
+                { page: "stats" },
+                t("Usage Statistics", "用量统计"),
+                <NavigationIcon page="stats" />,
+              )}
+            </nav>
+            <nav
+              className="mt-2 space-y-1 border-t pt-2"
+              aria-label={t("Manage", "管理")}
+            >
+              {nav(
+                { page: "applications" },
+                t("Applications", "应用"),
+                <NavigationIcon page="applications" />,
+              )}
+              {nav(
+                { page: "settings" },
+                t("Settings", "设置"),
+                <NavigationIcon page="settings" />,
+              )}
+            </nav>
+          </>
+        )}
       </aside>
       <main
         className="relative flex min-h-0 min-w-0 flex-1 flex-col"
@@ -164,7 +230,9 @@ function Workspace() {
             )}
             {route.page === "quotaManagement" && <QuotaPage />}
             {route.page === "stats" && <StatsPage />}
-            {route.page === "settings" && <SettingsPage />}
+            {route.page === "settings" && (
+              <SettingsPage section={settingsSection} />
+            )}
           </Suspense>
         </div>
       </main>

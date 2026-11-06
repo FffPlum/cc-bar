@@ -512,6 +512,7 @@ final class AppState {
         defer { activeStateOperations -= 1 }
         guard !didBootstrap else { return }
         didBootstrap = true
+        usageService.setAutomaticScanningEnabled(SettingsStore.shared.usageAutoScanEnabled)
 
         loadQuotaCache()
         loadQuotaHistory()
@@ -551,11 +552,11 @@ final class AppState {
         scheduler.start(
             appState: self,
             quotaInterval: settings.quotaInterval.seconds,
-            usageInterval: settings.usageInterval.seconds
+            usageInterval: settings.usageAutoScanEnabled ? settings.usageInterval.seconds : nil
         )
         // 启动后台触发一次 JSONL 扫描，让今日 cost 立刻更新（不阻塞 bootstrap）
         Task {
-            await usageService.scanNow()
+            await usageService.scanNow(automatically: true)
             await usageService.rebuildCycleUsageIfNeeded()
             // load 时修复过超长周期记录：旧 rollup 桶按污染窗口切分过，必须重算。
             // 放在初始重建之后，避免与全量重建的桶清空互相干扰（两者都能自愈，
@@ -567,7 +568,7 @@ final class AppState {
                     + "orphanBuckets=\(usageService.hasPendingOrphanCycleRebuild)"
                 pendingCycleRepairs = []
                 AppLog.info(.usage, "cycle usage rebuild requested \(reason)")
-                await usageService.rebuildCycleUsageForRecentChanges(reasons: [reason])
+                usageService.requestCycleUsageRebuild(reasons: [reason])
             }
         }
         // 启动后异步拉一次服务状态;后续由 Scheduler 5 分钟刷新一次
@@ -637,7 +638,8 @@ final class AppState {
     func applySettingsChange() {
         let settings = SettingsStore.shared
         scheduler.setQuotaInterval(settings.quotaInterval.seconds)
-        scheduler.setUsageInterval(settings.usageInterval.seconds)
+        usageService.setAutomaticScanningEnabled(settings.usageAutoScanEnabled)
+        scheduler.setUsageInterval(settings.usageAutoScanEnabled ? settings.usageInterval.seconds : nil)
     }
 
     func refreshNow() async {

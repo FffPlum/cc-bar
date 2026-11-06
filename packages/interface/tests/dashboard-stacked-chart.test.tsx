@@ -184,6 +184,7 @@ afterEach(() => {
   bootstrap.appearance = "light";
   bootstrap.visibleUsageServices = [];
   settings.appearance.brandColors = [];
+  settings.appearance.statsChartType = "bar";
 });
 it("renders proportional segments, excludes zeros, and orders the legend by configured services", () => {
   bootstrap.visibleUsageServices = ["claude", "codex", "kimi"];
@@ -345,3 +346,47 @@ it.each([
     expect(tooltip.textContent).not.toMatch(/Requests:|Cost:/);
   },
 );
+
+it("changes to stacked areas without changing category targets, values or axes", async () => {
+  bootstrap.visibleUsageServices = ["claude", "codex", "kimi"];
+  const second = { ...sample, key: "2", start: "2026-11-09T00:00:00Z" };
+  const view = renderChart([sample, second]);
+  const labels = screen.getAllByRole("button").map((node) => node.getAttribute("aria-label"));
+  const axis = view.container.querySelector('[data-slot="dashboard-y-axis"]')?.textContent;
+  settings.appearance.statsChartType = "area";
+  view.rerender(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardChart data={make([sample, second])} title="Tokens" metric="tokens" />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  expect(view.container.querySelector('[data-slot="dashboard-bar"]')).toBeNull();
+  const area = view.container.querySelector('[data-slot="dashboard-area"]')!;
+  expect(Array.from(area.querySelectorAll("[data-service]")).map((node) => node.getAttribute("data-service")))
+    .toEqual(["claude", "codex"]);
+  expect(screen.getAllByRole("button").map((node) => node.getAttribute("aria-label"))).toEqual(labels);
+  expect(view.container.querySelector('[data-slot="dashboard-y-axis"]')?.textContent).toBe(axis);
+  fireEvent.focus(screen.getAllByRole("button")[0]!);
+  expect(await screen.findByText("Tokens: 100.00")).toBeTruthy();
+  expect(await screen.findByText("75.00 · 75.0%")).toBeTruthy();
+});
+
+it("keeps cache hit rate as one aggregate area with the original tooltip", async () => {
+  settings.appearance.statsChartType = "area";
+  const cached = {
+    ...sample,
+    label: "50%",
+    normalizedValue: 0.5,
+    totals: { ...totals, cacheReadTokens: 48_210, cacheHitRate: 0.5 },
+  };
+  const view = renderChart([cached], "Cache hit rate", "cacheHitRate");
+  const area = view.container.querySelector('[data-slot="dashboard-area"]')!;
+  expect(area.querySelectorAll("g")).toHaveLength(1);
+  expect(area.querySelectorAll("[data-service]")).toHaveLength(0);
+  expect(area.querySelector("path")?.getAttribute("fill")).toBe("var(--foreground)");
+  expect(screen.queryByLabelText("Applications")).toBeNull();
+  fireEvent.focus(screen.getByRole("button", { name: /Cache read tokens/ }));
+  expect(await screen.findByText("Cache hit rate: 50%")).toBeTruthy();
+  expect(await screen.findByText("Cache read tokens: 48.21K")).toBeTruthy();
+});

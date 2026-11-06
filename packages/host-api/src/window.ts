@@ -504,6 +504,7 @@ export interface WindowSettings {
     showServiceStatus: boolean;
     privacyMode: boolean;
     statsRankMetric: RankMetric;
+    statsChartType: "bar" | "area";
     cycleIncludesOtherAgents: boolean;
     piEstimatedOutputSpeed: boolean;
     brandColors: BrandColorSetting[];
@@ -511,6 +512,7 @@ export interface WindowSettings {
   };
   data: {
     quotaInterval: "m1" | "m2" | "m3" | "m5" | "m10";
+    usageAutoScanEnabled: boolean;
     usageInterval: "m1" | "m2" | "m3" | "m5" | "m10";
     proxyMode: "system" | "manual";
     proxyType: "http" | "socks5";
@@ -544,10 +546,12 @@ export interface SettingsPatch {
   showServiceStatus?: boolean;
   privacyMode?: boolean;
   statsRankMetric?: RankMetric;
+  statsChartType?: WindowSettings["appearance"]["statsChartType"];
   cycleIncludesOtherAgents?: boolean;
   piEstimatedOutputSpeed?: boolean;
   brandColor?: BrandColorPatch;
   quotaInterval?: WindowSettings["data"]["quotaInterval"];
+  usageAutoScanEnabled?: boolean;
   usageInterval?: WindowSettings["data"]["usageInterval"];
   proxyMode?: WindowSettings["data"]["proxyMode"];
   proxyType?: WindowSettings["data"]["proxyType"];
@@ -786,7 +790,7 @@ const currencyKeys = ["USD", "CNY", "JPY", "KRW", "HKD", "AUD", "SGD", "GBP"] as
 const currencySchema = object({ selected: enumeration(currencyKeys), rates: keyedDictionary(currencyKeys, decimal), fetchedAt: nullable(isoDate), sourceUpdatedAt: nullable(isoDate), refreshing: boolean, lastRefreshFailedAt: nullable(isoDate) });
 const notificationSchema = object({ authorization: enumeration(["notDetermined", "denied", "authorized", "provisional", "ephemeral", "unknown"] as const), canSubmit: boolean, alertsAllowed: nullable(boolean), soundAllowed: nullable(boolean), statusText: nullable(string), requesting: boolean, authorizationFailed: boolean, permissionReadFailed: boolean, storagePaused: boolean, rebuilding: boolean });
 const updateStateSchema = object({ version: string, automaticChecks: boolean, canCheck: boolean, hasUpdate: boolean, isWorking: boolean, lastCheckedAt: nullable(isoDate) });
-const settingsSchema = object({ appearance: object({ menuBarWindow: enumeration(["primary", "weekly", "both"] as const), useInstalledAppIcons: boolean, floatingEnabled: boolean, resetTimeDisplay: enumeration(["relative", "absolute"] as const), showServiceStatus: boolean, privacyMode: boolean, statsRankMetric: enumeration(["tokens", "cost"] as const), cycleIncludesOtherAgents: boolean, piEstimatedOutputSpeed: boolean, brandColors: array(object({ brand: serviceBrand, mode: enumeration(["brand", "custom"] as const), customHex: nullable(string), defaultLightHex: string, defaultDarkHex: string })), recentBrandColors: array(string) }), data: object({ quotaInterval: enumeration(["m1", "m2", "m3", "m5", "m10"] as const), usageInterval: enumeration(["m1", "m2", "m3", "m5", "m10"] as const), proxyMode: enumeration(["system", "manual"] as const), proxyType: enumeration(["http", "socks5"] as const), proxyHost: string, proxyPort: integer, currency: currencySchema, usage: usageStatusSchema, piTimingGuide: object({ title: string, instructions: string, copyText: string }) }), general: object({ language: enumeration(["system", "zh", "en"] as const), launchAtLogin: boolean, launchAtLoginRequiresApproval: boolean, quotaAlertsEnabled: boolean, quotaAlertThresholdPercent: integer, quotaAlertFiveHourEnabled: boolean, quotaAlertWeeklyEnabled: boolean, quotaAlertBillingCycleEnabled: boolean, quotaAlertSoundEnabled: boolean, notifications: notificationSchema, verboseLogging: boolean, updates: updateStateSchema }) });
+const settingsSchema = object({ appearance: object({ menuBarWindow: enumeration(["primary", "weekly", "both"] as const), useInstalledAppIcons: boolean, floatingEnabled: boolean, resetTimeDisplay: enumeration(["relative", "absolute"] as const), showServiceStatus: boolean, privacyMode: boolean, statsRankMetric: enumeration(["tokens", "cost"] as const), statsChartType: enumeration(["bar", "area"] as const), cycleIncludesOtherAgents: boolean, piEstimatedOutputSpeed: boolean, brandColors: array(object({ brand: serviceBrand, mode: enumeration(["brand", "custom"] as const), customHex: nullable(string), defaultLightHex: string, defaultDarkHex: string })), recentBrandColors: array(string) }), data: object({ quotaInterval: enumeration(["m1", "m2", "m3", "m5", "m10"] as const), usageAutoScanEnabled: boolean, usageInterval: enumeration(["m1", "m2", "m3", "m5", "m10"] as const), proxyMode: enumeration(["system", "manual"] as const), proxyType: enumeration(["http", "socks5"] as const), proxyHost: string, proxyPort: integer, currency: currencySchema, usage: usageStatusSchema, piTimingGuide: object({ title: string, instructions: string, copyText: string }) }), general: object({ language: enumeration(["system", "zh", "en"] as const), launchAtLogin: boolean, launchAtLoginRequiresApproval: boolean, quotaAlertsEnabled: boolean, quotaAlertThresholdPercent: integer, quotaAlertFiveHourEnabled: boolean, quotaAlertWeeklyEnabled: boolean, quotaAlertBillingCycleEnabled: boolean, quotaAlertSoundEnabled: boolean, notifications: notificationSchema, verboseLogging: boolean, updates: updateStateSchema }) });
 const proxyTestSchema = object({ ok: boolean, message: string });
 const priceSchema = object({ input: decimal, output: decimal, cacheRead: decimal, cacheCreation: decimal });
 const pricingCatalogSchema = object({ providers: array(object({ id: string, name: string, models: array(object({ id: string, name: string, price: priceSchema, displayPrice: object({ input: string, output: string, cacheRead: string, cacheCreation: string }) })) })), fetchedAt: nullable(isoDate), refreshFailed: boolean, usage: usageStatusSchema });

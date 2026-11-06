@@ -15,11 +15,15 @@ final class HostWindowSettingsTests: XCTestCase {
             ["quotaAlertFiveHourEnabled": .bool(false), "quotaAlertWeeklyEnabled": .bool(false), "quotaAlertBillingCycleEnabled": .bool(false)],
             ["privacyMode": .bool(true), "brandColor": .object(["brand": .string("codex"), "mode": .string("custom"), "customHex": .string("#nope00")])],
             ["privacyMode": .bool(true), "unknown": .bool(true)],
-            ["showServiceStatus": .string("false")]
+            ["showServiceStatus": .string("false")],
+            ["usageAutoScanEnabled": .bool(false), "statsChartType": .string("pie")],
+            ["usageAutoScanEnabled": .string("false")]
         ]
         for patch in invalid {
             await expectError("invalid_params") { try await service.handle("window.settings.update", params: ["patch": .object(patch)]) }
         }
+        XCTAssertTrue(fixture.settings.usageAutoScanEnabled)
+        XCTAssertEqual(fixture.settings.statsChartType, .bar)
         XCTAssertFalse(fixture.settings.privacyMode)
         XCTAssertFalse(fixture.settings.floatingEnabled)
         XCTAssertTrue(fixture.settings.quotaAlertFiveHourEnabled)
@@ -64,6 +68,29 @@ final class HostWindowSettingsTests: XCTestCase {
         XCTAssertEqual(restored.displayCurrency, .jpy)
         XCTAssertEqual(restored.appLanguage, .en)
         XCTAssertTrue(restored.piEstimatedOutputSpeed)
+    }
+
+    func testScanAndChartPreferencesPersistWithoutChangingTheScanPeriod() async throws {
+        let fixture = try SettingsFixture()
+        defer { fixture.cleanup() }
+        let service = fixture.service()
+        let initial = try await service.handle("window.settings.get", params: [:])
+        XCTAssertEqual(value(initial, "data", "usageAutoScanEnabled"), .bool(true))
+        XCTAssertEqual(value(initial, "appearance", "statsChartType"), .string("bar"))
+        let paused = try await service.handle("window.settings.update", params: ["patch": .object([
+            "usageAutoScanEnabled": .bool(false), "usageInterval": .string("m10"), "statsChartType": .string("area")
+        ])])
+        XCTAssertEqual(value(paused, "data", "usageAutoScanEnabled"), .bool(false))
+        XCTAssertEqual(value(paused, "appearance", "statsChartType"), .string("area"))
+        let restored = SettingsStore(defaults: fixture.defaults)
+        XCTAssertFalse(restored.usageAutoScanEnabled)
+        XCTAssertEqual(restored.usageInterval, .m10)
+        XCTAssertEqual(restored.statsChartType, .area)
+        _ = try await service.handle("window.settings.update", params: ["patch": .object([
+            "usageAutoScanEnabled": .bool(true)
+        ])])
+        XCTAssertEqual(fixture.settings.usageInterval, .m10)
+        XCTAssertEqual(fixture.calls, ["permission.read", "intervals.apply", "intervals.apply"])
     }
 
     func testBrandColorRecentHistoryAndResetPersist() async throws {

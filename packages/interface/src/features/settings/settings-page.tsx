@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/page-header";
 import { SettingsGroup, SettingsRow } from "@/components/workspace";
 import { SelectField } from "@/components/select-field";
 import { PendingButton } from "@/components/pending-button";
@@ -32,7 +32,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
-export function SettingsPage() {
+export type SettingsSection = "appearance" | "data" | "general";
+
+export function SettingsPage({ section }: { section: SettingsSection }) {
   const { api, settings, refreshSettings, refreshBootstrap } = useHost();
   const t = useTranslation();
   const [pending, setPending] = useState<string | null>(null);
@@ -79,49 +81,44 @@ export function SettingsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Tabs defaultValue="appearance" className="flex min-h-0 flex-1 flex-col">
-        <div className="px-5 pt-5">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="appearance">
-              {t("Appearance & Display", "外观与显示")}
-            </TabsTrigger>
-            <TabsTrigger value="data">
-              {t("Data & Refresh", "数据与刷新")}
-            </TabsTrigger>
-            <TabsTrigger value="general">{t("General", "通用")}</TabsTrigger>
-          </TabsList>
-        </div>
-        {error && (
-          <p
-            className="mx-9 mt-3 text-[11.5px] text-red-600 dark:text-red-400"
-            role="alert"
-          >
-            {error}
-          </p>
-        )}
-        {message && (
-          <p
-            className="mx-9 mt-3 text-[11.5px] text-muted-foreground"
-            role="status"
-          >
-            {message}
-          </p>
-        )}
-        <TabsContent value="appearance" className="cc-scrollbar min-h-0 flex-1">
-          <div className="mx-auto flex max-w-[680px] flex-col gap-[22px] px-9 py-6">
-            <fieldset disabled={pending !== null} className="contents">
+      <PageHeader
+        page="settings"
+        title={
+          section === "appearance"
+            ? t("Appearance & Display", "外观与显示")
+            : section === "data"
+              ? t("Data & Refresh", "数据与刷新")
+              : t("General", "通用")
+        }
+      />
+      {error && (
+        <p
+          className="mx-9 mt-3 text-[11.5px] text-red-600 dark:text-red-400"
+          role="alert"
+        >
+          {error}
+        </p>
+      )}
+      {message && (
+        <p
+          className="mx-9 mt-3 text-[11.5px] text-muted-foreground"
+          role="status"
+        >
+          {message}
+        </p>
+      )}
+      <div key={section} className="cc-scrollbar min-h-0 flex-1">
+        <div className="mx-auto flex max-w-[680px] flex-col gap-[22px] px-9 py-6">
+          <fieldset disabled={pending !== null} className="contents">
+            {section === "appearance" && (
               <AppearanceSettings
                 settings={settings}
                 pending={pending}
                 update={update}
                 onReset={() => setConfirm("brands")}
               />
-            </fieldset>
-          </div>
-        </TabsContent>
-        <TabsContent value="data" className="cc-scrollbar min-h-0 flex-1">
-          <div className="mx-auto flex max-w-[680px] flex-col gap-[22px] px-9 py-6">
-            <fieldset disabled={pending !== null} className="contents">
+            )}
+            {section === "data" && (
               <DataSettings
                 settings={settings}
                 pending={pending}
@@ -129,12 +126,8 @@ export function SettingsPage() {
                 action={action}
                 setMessage={setMessage}
               />
-            </fieldset>
-          </div>
-        </TabsContent>
-        <TabsContent value="general" className="cc-scrollbar min-h-0 flex-1">
-          <div className="mx-auto flex max-w-[680px] flex-col gap-[22px] px-9 py-6">
-            <fieldset disabled={pending !== null} className="contents">
+            )}
+            {section === "general" && (
               <GeneralSettings
                 settings={settings}
                 pending={pending}
@@ -143,10 +136,10 @@ export function SettingsPage() {
                 setMessage={setMessage}
                 onConfirm={setConfirm}
               />
-            </fieldset>
-          </div>
-        </TabsContent>
-      </Tabs>
+            )}
+          </fieldset>
+        </div>
+      </div>
       {confirm === "brands" && (
         <ConfirmDialog
           title={t("Reset to Brand Colors?", "恢复品牌主题色？")}
@@ -498,14 +491,25 @@ function DataSettings({
             ariaLabel={t("Quota refresh", "额度刷新")}
           />
         </SettingsRow>
-        <SettingsRow label={t("Log scan", "日志扫描")}>
+        <SettingsRow
+          label={t("Automatically scan session logs", "自动扫描会话日志")}
+        >
+          <Switch
+            checked={value.usageAutoScanEnabled}
+            onCheckedChange={(usageAutoScanEnabled) =>
+              void update("usageAutoScanEnabled", { usageAutoScanEnabled })
+            }
+          />
+        </SettingsRow>
+        <SettingsRow label={t("Scan interval", "扫描周期")}>
           <SelectField
             value={value.usageInterval}
             options={intervalOptions}
+            disabled={!value.usageAutoScanEnabled}
             onChange={(usageInterval) =>
               void update("usageInterval", { usageInterval })
             }
-            ariaLabel={t("Log scan", "日志扫描")}
+            ariaLabel={t("Scan interval", "扫描周期")}
           />
         </SettingsRow>
         <SettingsRow label={t("Last refresh", "上次刷新")}>
