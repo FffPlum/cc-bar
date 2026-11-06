@@ -9,7 +9,8 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { EmptyState, WorkspaceHeader } from "@/components/workspace";
+import { EmptyState } from "@/components/workspace";
+import { PageHeader } from "@/components/page-header";
 import { ResourceFeedback } from "@/components/resource-feedback";
 import { SearchInput } from "@/components/search-input";
 import { useHost, useHostResource, errorMessage } from "@/host/host-context";
@@ -89,13 +90,11 @@ export function ApplicationsPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <div className="shrink-0 border-b px-6 py-4">
-        <WorkspaceHeader
-          title={t("Applications", "应用")}
-          leading={<Grid2X2 className="size-5 text-muted-foreground" />}
-          actions={<ApplicationInventoryActions management={management} />}
-        />
-      </div>
+      <PageHeader
+        page="applications"
+        title={t("Applications", "应用")}
+        actions={<ApplicationInventoryActions management={management} />}
+      />
       <div className="cc-scrollbar flex min-h-0 flex-1 flex-col gap-4 px-6 pb-10 pt-4">
         <SearchInput
           value={search}

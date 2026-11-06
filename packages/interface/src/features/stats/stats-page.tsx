@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { BarChart3, CircleHelp, RefreshCw } from "lucide-react";
+import { CircleHelp, RefreshCw } from "lucide-react";
 import type {
   DashboardQuery,
   StatsQuery,
@@ -13,6 +13,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { InlineNotice } from "@/components/workspace";
+import { PageHeader } from "@/components/page-header";
 import { errorMessage, useHost, useHostResource } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
 import { formatDate } from "@/lib/display";
@@ -84,72 +85,73 @@ export function StatsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-3 border-b px-5 py-3.5">
-        <BarChart3 className="size-4" aria-hidden="true" />
-        <h1 className="text-[17px] font-bold tracking-[-0.4px]">
-          {t("Usage statistics", "用量统计")}
-        </h1>
-        <Popover>
-          <PopoverTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t("About usage statistics", "关于用量统计")}
+      <PageHeader
+        page="stats"
+        title={t("Usage statistics", "用量统计")}
+        titleAccessory={
+          <Popover>
+            <PopoverTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("About usage statistics", "关于用量统计")}
+                />
+              }
+            >
+              <CircleHelp />
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72 p-3">
+              {t(
+                "Usage is based on available local logs and remote metering. Some historical requests may lack precise timestamps.",
+                "用量来自可用的本机日志与远端计量，部分历史请求可能缺少精确时间。",
+              )}
+            </PopoverContent>
+          </Popover>
+        }
+        actions={
+          <div
+            role="group"
+            aria-label={t("Usage actions", "用量操作")}
+            data-slot="button-group"
+            className="inline-flex shrink-0 items-center"
+          >
+            <Button
+              variant="outline"
+              className="cc-number rounded-r-none text-[13px] focus-visible:z-10"
+              onClick={() => void refresh()}
+              aria-label={t("Refresh local usage", "刷新本机用量")}
+              aria-describedby={refreshStatusID}
+              aria-busy={refreshing}
+              disabled={refreshing}
+            >
+              <span id={refreshStatusID} role="status">
+                {refreshing ? (
+                  t("Refreshing…", "刷新中…")
+                ) : refreshError || overview.error ? (
+                  t("Refresh failed", "刷新失败")
+                ) : overview.data?.status.error ? (
+                  t("Refresh issue", "刷新异常")
+                ) : (
+                  <RefreshAge lastScanAt={overview.data?.status.lastScanAt} />
+                )}
+              </span>
+              <RefreshCw
+                aria-hidden="true"
+                data-icon="inline-end"
+                className={cn(
+                  refreshing && "animate-spin motion-reduce:animate-none",
+                )}
               />
-            }
-          >
-            <CircleHelp />
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-72 p-3">
-            {t(
-              "Usage is based on available local logs and remote metering. Some historical requests may lack precise timestamps.",
-              "用量来自可用的本机日志与远端计量，部分历史请求可能缺少精确时间。",
-            )}
-          </PopoverContent>
-        </Popover>
-        <span className="flex-1" />
-        <div
-          role="group"
-          aria-label={t("Usage actions", "用量操作")}
-          data-slot="button-group"
-          className="inline-flex shrink-0 items-center"
-        >
-          <Button
-            variant="outline"
-            className="cc-number rounded-r-none text-[13px] focus-visible:z-10"
-            onClick={() => void refresh()}
-            aria-label={t("Refresh local usage", "刷新本机用量")}
-            aria-describedby={refreshStatusID}
-            aria-busy={refreshing}
-            disabled={refreshing}
-          >
-            <span id={refreshStatusID} role="status">
-              {refreshing ? (
-                t("Refreshing…", "刷新中…")
-              ) : refreshError || overview.error ? (
-                t("Refresh failed", "刷新失败")
-              ) : overview.data?.status.error ? (
-                t("Refresh issue", "刷新异常")
-              ) : (
-                <RefreshAge lastScanAt={overview.data?.status.lastScanAt} />
-              )}
-            </span>
-            <RefreshCw
-              aria-hidden="true"
-              data-icon="inline-end"
-              className={cn(
-                refreshing && "animate-spin motion-reduce:animate-none",
-              )}
+            </Button>
+            <StatsViewDrawer
+              view={view}
+              onView={changeView}
+              className="-ml-px rounded-l-none"
             />
-          </Button>
-          <StatsViewDrawer
-            view={view}
-            onView={changeView}
-            className="-ml-px rounded-l-none"
-          />
-        </div>
-      </div>
+          </div>
+        }
+      />
       {refreshError && <InlineNotice tone="error">{refreshError}</InlineNotice>}
       {overview.data?.status.historyNotice && (
         <InlineNotice>

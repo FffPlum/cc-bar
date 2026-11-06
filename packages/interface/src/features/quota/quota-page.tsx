@@ -38,7 +38,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { WorkspaceHeader } from "@/components/workspace";
+import { PageHeader } from "@/components/page-header";
 import { ResourceFeedback } from "@/components/resource-feedback";
 import { HostIcon } from "@/components/host-icon";
 import { ServiceIcon } from "@/components/service-icon";
@@ -165,229 +165,235 @@ export function QuotaPage() {
   };
 
   return (
-    <div className="cc-scrollbar h-full">
-      <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 p-7">
-        <WorkspaceHeader
-          title={t("Quota Management", "额度管理")}
-          actions={
-            <PendingButton
-              pending={pending === "refresh"}
-              disabled={pending !== null}
-              variant="outline"
-              onClick={() => void mutate("refresh", () => api.quotaRefresh())}
-            >
-              <RefreshCw />
-              {t("Refresh", "刷新")}
-            </PendingButton>
-          }
-        />
-        {!settings.appearance.floatingEnabled && (
-          <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
-            <p>
-              {t(
-                "The desktop window is off. Selected accounts still appear in the menu bar panel.",
-                "桌面悬浮窗已关闭，菜单栏展开面板仍会显示选中的账号。",
-              )}
-            </p>
-            <Button
-              variant="link"
-              size="xs"
-              onClick={() => void navigate({ page: "settings" })}
-            >
-              {t("Open settings", "前往设置")}
-            </Button>
-          </div>
-        )}
-        {(operationError || resource.data?.operationError) && (
-          <p
-            className="text-[11.5px] text-orange-600 dark:text-orange-400"
-            role="alert"
+    <div className="flex h-full min-h-0 flex-col">
+      <PageHeader
+        page="quotaManagement"
+        title={t("Quota Management", "额度管理")}
+        actions={
+          <PendingButton
+            pending={pending === "refresh"}
+            disabled={pending !== null}
+            variant="outline"
+            onClick={() => void mutate("refresh", () => api.quotaRefresh())}
           >
-            {operationError ?? resource.data?.operationError}
-          </p>
-        )}
-        <ResourceFeedback {...resource} onRetry={() => void resource.reload()}>
-          {(result) => {
-            const row = (account: QuotaAccount) => (
-              <AccountRow
-                key={account.id}
-                account={account}
-                pending={pending !== null}
-                onUpdate={(patch) => void update(account, patch)}
-                onDrag={
-                  account.kind === "importedCodex"
-                    ? (source, direction, edge) =>
-                        reorderAccount(account, source, direction, edge)
-                    : undefined
-                }
-                onMenu={(action) => {
-                  if (action === "reset") setResetAccount(account);
-                  if (action === "delete") setDeleteAccount(account);
-                  if (action === "refresh")
-                    void mutate(account.id, () =>
-                      account.kind === "deepSeek"
-                        ? api.deepSeekRefresh(account.id)
-                        : api.quotaRefresh(account.id),
-                    );
-                  if (action === "retry")
-                    void mutate(account.id, () =>
-                      account.kind === "importedCodex"
-                        ? api.codexRetryAccess(account.id)
-                        : api.kimiRetryAccess(account.id),
-                    );
-                  if (action === "grant" && account.authorizationRequired)
-                    void mutate(account.id, () =>
-                      api.authorizationsGrantAccess(
-                        account.authorizationRequired!,
-                      ),
-                    );
-                  if (action === "login") {
-                    setSelectedAccount(account);
-                    setDialog(
-                      account.kind === "managedKimi" ? "kimi" : "deepSeek",
-                    );
+            <RefreshCw />
+            {t("Refresh", "刷新")}
+          </PendingButton>
+        }
+      />
+      <div className="cc-scrollbar min-h-0 flex-1">
+        <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 p-7">
+          {!settings.appearance.floatingEnabled && (
+            <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
+              <p>
+                {t(
+                  "The desktop window is off. Selected accounts still appear in the menu bar panel.",
+                  "桌面悬浮窗已关闭，菜单栏展开面板仍会显示选中的账号。",
+                )}
+              </p>
+              <Button
+                variant="link"
+                size="xs"
+                onClick={() => void navigate({ page: "settings" })}
+              >
+                {t("Open settings", "前往设置")}
+              </Button>
+            </div>
+          )}
+          {(operationError || resource.data?.operationError) && (
+            <p
+              className="text-[11.5px] text-orange-600 dark:text-orange-400"
+              role="alert"
+            >
+              {operationError ?? resource.data?.operationError}
+            </p>
+          )}
+          <ResourceFeedback
+            {...resource}
+            onRetry={() => void resource.reload()}
+          >
+            {(result) => {
+              const row = (account: QuotaAccount) => (
+                <AccountRow
+                  key={account.id}
+                  account={account}
+                  pending={pending !== null}
+                  onUpdate={(patch) => void update(account, patch)}
+                  onDrag={
+                    account.kind === "importedCodex"
+                      ? (source, direction, edge) =>
+                          reorderAccount(account, source, direction, edge)
+                      : undefined
                   }
-                  if (action === "application")
-                    void navigate({
-                      page: "application",
-                      application: account.service as ApplicationID,
-                    });
-                }}
-              />
-            );
-            return (
-              <>
-                {quotaProviderGroups.map((provider) => {
-                  const accounts = accountsForProvider(
-                    result.accounts,
-                    provider.id,
-                  );
-                  const icon = applications.data?.applications.find(
-                    (app) => app.id === provider.application,
-                  )?.icon;
-                  return (
-                    <AccountGroup
-                      key={provider.id}
-                      id={provider.id}
-                      title={provider.name}
-                      icon={icon ?? null}
-                      color={brandColor(provider.brand, settings, dark)}
-                      dark={dark}
-                      hasAccounts={accounts.length > 0}
-                      action={
-                        provider.add && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={pending !== null}
-                            onClick={() => {
-                              setSelectedAccount(null);
-                              setDialog(provider.add!);
-                            }}
-                          >
-                            <Plus />
-                            {t("Add account", "添加账号")}
-                          </Button>
-                        )
-                      }
+                  onMenu={(action) => {
+                    if (action === "reset") setResetAccount(account);
+                    if (action === "delete") setDeleteAccount(account);
+                    if (action === "refresh")
+                      void mutate(account.id, () =>
+                        account.kind === "deepSeek"
+                          ? api.deepSeekRefresh(account.id)
+                          : api.quotaRefresh(account.id),
+                      );
+                    if (action === "retry")
+                      void mutate(account.id, () =>
+                        account.kind === "importedCodex"
+                          ? api.codexRetryAccess(account.id)
+                          : api.kimiRetryAccess(account.id),
+                      );
+                    if (action === "grant" && account.authorizationRequired)
+                      void mutate(account.id, () =>
+                        api.authorizationsGrantAccess(
+                          account.authorizationRequired!,
+                        ),
+                      );
+                    if (action === "login") {
+                      setSelectedAccount(account);
+                      setDialog(
+                        account.kind === "managedKimi" ? "kimi" : "deepSeek",
+                      );
+                    }
+                    if (action === "application")
+                      void navigate({
+                        page: "application",
+                        application: account.service as ApplicationID,
+                      });
+                  }}
+                />
+              );
+              return (
+                <>
+                  {quotaProviderGroups.map((provider) => {
+                    const accounts = accountsForProvider(
+                      result.accounts,
+                      provider.id,
+                    );
+                    const icon = applications.data?.applications.find(
+                      (app) => app.id === provider.application,
+                    )?.icon;
+                    return (
+                      <AccountGroup
+                        key={provider.id}
+                        id={provider.id}
+                        title={provider.name}
+                        icon={icon ?? null}
+                        color={brandColor(provider.brand, settings, dark)}
+                        dark={dark}
+                        hasAccounts={accounts.length > 0}
+                        action={
+                          provider.add && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={pending !== null}
+                              onClick={() => {
+                                setSelectedAccount(null);
+                                setDialog(provider.add!);
+                              }}
+                            >
+                              <Plus />
+                              {t("Add account", "添加账号")}
+                            </Button>
+                          )
+                        }
+                      >
+                        {accounts.length > 0 ? (
+                          accounts.map(row)
+                        ) : (
+                          <div className="px-4 py-5 text-[12px] text-muted-foreground">
+                            <p>{t("No accounts yet", "暂无账号")}</p>
+                            <p className="mt-1 text-[11px]">
+                              {t(...provider.hint)}
+                            </p>
+                          </div>
+                        )}
+                      </AccountGroup>
+                    );
+                  })}
+                  {dialog === "codexImport" && (
+                    <CodexImportDialog
+                      privacyMode={settings.appearance.privacyMode}
+                      onClose={() => setDialog(null)}
+                      onImported={resource.setData}
+                    />
+                  )}
+                  {dialog === "kimi" && (
+                    <DeviceAuthorizationDialog
+                      kind="kimi"
+                      account={selectedAccount}
+                      state={result.kimiAuthorization}
+                      onClose={() => {
+                        setDialog(null);
+                        setSelectedAccount(null);
+                      }}
+                      onChanged={resource.setData}
+                    />
+                  )}
+                  {dialog === "deepSeek" && (
+                    <DeviceAuthorizationDialog
+                      kind="deepSeek"
+                      account={selectedAccount}
+                      state={result.deepSeekAuthorization}
+                      onClose={() => {
+                        setDialog(null);
+                        setSelectedAccount(null);
+                      }}
+                      onChanged={resource.setData}
+                    />
+                  )}
+                  {resetAccount && (
+                    <ResetCreditsDialog
+                      account={resetAccount}
+                      onClose={() => setResetAccount(null)}
+                    />
+                  )}
+                  {deleteAccount && (
+                    <AlertDialog
+                      open
+                      onOpenChange={(open) => {
+                        if (!open) setDeleteAccount(null);
+                      }}
                     >
-                      {accounts.length > 0 ? (
-                        accounts.map(row)
-                      ) : (
-                        <div className="px-4 py-5 text-[12px] text-muted-foreground">
-                          <p>{t("No accounts yet", "暂无账号")}</p>
-                          <p className="mt-1 text-[11px]">
-                            {t(...provider.hint)}
-                          </p>
-                        </div>
-                      )}
-                    </AccountGroup>
-                  );
-                })}
-                {dialog === "codexImport" && (
-                  <CodexImportDialog
-                    privacyMode={settings.appearance.privacyMode}
-                    onClose={() => setDialog(null)}
-                    onImported={resource.setData}
-                  />
-                )}
-                {dialog === "kimi" && (
-                  <DeviceAuthorizationDialog
-                    kind="kimi"
-                    account={selectedAccount}
-                    state={result.kimiAuthorization}
-                    onClose={() => {
-                      setDialog(null);
-                      setSelectedAccount(null);
-                    }}
-                    onChanged={resource.setData}
-                  />
-                )}
-                {dialog === "deepSeek" && (
-                  <DeviceAuthorizationDialog
-                    kind="deepSeek"
-                    account={selectedAccount}
-                    state={result.deepSeekAuthorization}
-                    onClose={() => {
-                      setDialog(null);
-                      setSelectedAccount(null);
-                    }}
-                    onChanged={resource.setData}
-                  />
-                )}
-                {resetAccount && (
-                  <ResetCreditsDialog
-                    account={resetAccount}
-                    onClose={() => setResetAccount(null)}
-                  />
-                )}
-                {deleteAccount && (
-                  <AlertDialog
-                    open
-                    onOpenChange={(open) => {
-                      if (!open) setDeleteAccount(null);
-                    }}
-                  >
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>
-                          {t("Remove account?", "删除此账号？")}
-                        </AlertDialogTitle>
-                        <AlertDialogDescription>
-                          {deleteAccount.kind === "deepSeek"
-                            ? deleteAccount.sourceApplication
-                              ? t(
-                                  "This account will be hidden from CCBar. The original application stays signed in.",
-                                  "此账号将从 CCBar 中隐藏，原应用保持登录。",
-                                )
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>
+                            {t("Remove account?", "删除此账号？")}
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {deleteAccount.kind === "deepSeek"
+                              ? deleteAccount.sourceApplication
+                                ? t(
+                                    "This account will be hidden from CCBar. The original application stays signed in.",
+                                    "此账号将从 CCBar 中隐藏，原应用保持登录。",
+                                  )
+                                : t(
+                                    "Removes the credentials saved by CCBar and requests sign-out from DeepSeek.",
+                                    "将删除 CCBar 保存的凭据，并请求退出 DeepSeek 登录。",
+                                  )
                               : t(
-                                  "Removes the credentials saved by CCBar and requests sign-out from DeepSeek.",
-                                  "将删除 CCBar 保存的凭据，并请求退出 DeepSeek 登录。",
-                                )
-                            : t(
-                                "This account will be removed from CCBar. The original application sign-in is not affected.",
-                                "此账号将从 CCBar 中移除，原应用登录不受影响。",
-                              )}
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>
-                          {t("Cancel", "取消")}
-                        </AlertDialogCancel>
-                        <AlertDialogAction
-                          variant="destructive"
-                          onClick={() => void remove()}
-                        >
-                          {t("Remove", "删除")}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                )}
-              </>
-            );
-          }}
-        </ResourceFeedback>
+                                  "This account will be removed from CCBar. The original application sign-in is not affected.",
+                                  "此账号将从 CCBar 中移除，原应用登录不受影响。",
+                                )}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>
+                            {t("Cancel", "取消")}
+                          </AlertDialogCancel>
+                          <AlertDialogAction
+                            variant="destructive"
+                            onClick={() => void remove()}
+                          >
+                            {t("Remove", "删除")}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
+                </>
+              );
+            }}
+          </ResourceFeedback>
+        </div>
       </div>
     </div>
   );

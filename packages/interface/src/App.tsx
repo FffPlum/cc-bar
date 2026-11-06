@@ -1,13 +1,8 @@
 import { lazy, Suspense, useEffect, type ReactNode } from "react";
-import {
-  ChartNoAxesCombined,
-  CircleGauge,
-  LayoutGrid,
-  Settings,
-} from "lucide-react";
 import type { Route } from "@ccbar/host-api/window";
 import { Button } from "@/components/ui/button";
 import { HostIcon } from "@/components/host-icon";
+import { NavigationIcon } from "@/components/navigation-icon";
 import { InlineNotice, LoadingState } from "@/components/workspace";
 import { useHost } from "@/host/host-context";
 import { LanguageProvider, useTranslation } from "@/lib/i18n";
@@ -117,12 +112,12 @@ function Workspace() {
           {nav(
             { page: "quotaManagement" },
             t("Quota Management", "额度管理"),
-            <CircleGauge className="size-[18px]" />,
+            <NavigationIcon page="quotaManagement" />,
           )}
           {nav(
             { page: "stats" },
             t("Usage Statistics", "用量统计"),
-            <ChartNoAxesCombined className="size-[18px]" />,
+            <NavigationIcon page="stats" />,
           )}
         </nav>
         <nav
@@ -132,12 +127,12 @@ function Workspace() {
           {nav(
             { page: "applications" },
             t("Applications", "应用"),
-            <LayoutGrid className="size-[18px]" />,
+            <NavigationIcon page="applications" />,
           )}
           {nav(
             { page: "settings" },
             t("Settings", "设置"),
-            <Settings className="size-[18px]" />,
+            <NavigationIcon page="settings" />,
           )}
         </nav>
       </aside>
