@@ -7,6 +7,7 @@ import CCBarConfiguration
 final class HostWindowApplicationsService: HostWindowPresenter {
     static let methods: Set<String> = [
         "applications.list", "applications.detect", "applications.setVisibility", "applications.detail",
+        "applications.inventory", "applications.checkVersions", "applications.planOperation", "applications.executeOperation",
         "providers.catalog", "authorizations.saveAPIKey", "providers.add"
     ]
     private let detect: () -> Void
@@ -18,6 +19,31 @@ final class HostWindowApplicationsService: HostWindowPresenter {
 
     func handle(_ method: String, params: [String: HostJSON]) throws -> HostJSON {
         switch method {
+        case "applications.inventory":
+            try HostWindowValidation.keys(params, allowed: ["refresh"])
+            let refresh = try HostWindowValidation.bool(params, "refresh", required: false) ?? false
+            state.applications.management.ensureScan(refresh: refresh)
+            return inventoryJSON()
+        case "applications.checkVersions":
+            try HostWindowValidation.keys(params, allowed: ["catalogID"])
+            let id = try HostWindowValidation.string(params, "catalogID", required: false, max: 100)
+            try state.applications.management.checkVersions(catalogID: id)
+            return inventoryJSON()
+        case "applications.planOperation":
+            try HostWindowValidation.keys(params, allowed: ["catalogID", "action", "installationID"])
+            guard let action = ApplicationLifecycleAction(rawValue: try string(params, "action", max: 30)) else { throw HostWindowValidation.invalid() }
+            let installation = try HostWindowValidation.string(params, "installationID", required: false, max: 100)
+            let (id, plan, expires) = try state.applications.management.prepare(catalogID: string(params, "catalogID", max: 100), action: action, installationID: installation)
+            let name = state.applications.management.definitions.first { $0.id == plan.catalogID }?.name ?? plan.catalogID
+            return .object(["id": .string(id), "catalogID": .string(plan.catalogID),
+                "installationID": HostWindowJSON.string(plan.installation?.id), "action": .string(plan.action.rawValue),
+                "name": .string(name), "sourceLabel": .string(plan.sourceLabel),
+                "steps": .array(plan.steps.map { .string(displayPath($0.description)) }),
+                "preservesData": .bool(true), "expiresAt": HostWindowJSON.date(expires)])
+        case "applications.executeOperation":
+            try HostWindowValidation.keys(params, allowed: ["planID"])
+            try state.applications.management.execute(planID: string(params, "planID", max: 100))
+            return inventoryJSON()
         case "applications.list":
             try HostWindowValidation.keys(params, allowed: [])
             return listJSON()
@@ -92,6 +118,80 @@ final class HostWindowApplicationsService: HostWindowPresenter {
             return detailJSON(application)
         default: throw HostError(code: "unknown_method", message: "Unknown application method")
         }
+    }
+
+    func trackManagementChanges() {
+        let manager = state.applications.management
+        _ = (manager.inventory, manager.versions, manager.scanning, manager.checkingVersions,
+             manager.lastScannedAt, manager.operation, manager.error)
+    }
+
+    private func displayPath(_ path: String) -> String {
+        settings.privacyMode ? path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~") : path
+    }
+
+    private func inventoryJSON() -> HostJSON {
+        let manager = state.applications.management
+        let planner = manager.planner
+        let rows = manager.definitions.map { definition -> HostJSON in
+            let discovery = manager.inventory[definition.id] ?? ApplicationDiscoveryResult()
+            let install = Result { try planner.plan(definition, action: .install) }
+            let installReason: String? = if case .failure(let error) = install { error.localizedDescription } else { nil }
+            let brand: ServiceBrand? = definition.configurationApplication?.brand
+                ?? (definition.id == "claude-desktop" ? .claude : definition.id == "codex-desktop" ? .codex : nil)
+            let installations = discovery.installations.map { installation -> HostJSON in
+                func unavailableReason(_ action: ApplicationLifecycleAction) -> String? {
+                    // Discovery already validated this managed installer. Enumerating every
+                    // release file belongs to the requested plan, not every list refresh.
+                    if definition.id == "mcode", installation.source == .native, installation.ownershipRoot != nil { return nil }
+                    do { _ = try planner.plan(definition, action: action, installation: installation); return nil }
+                    catch { return error.localizedDescription }
+                }
+                let upgradeReason = unavailableReason(.upgrade)
+                let uninstallReason = unavailableReason(.uninstall)
+                var version = manager.versions[installation.id] ?? ApplicationVersionState(error: installation.versionError)
+                if ["current", "updateAvailable"].contains(version.status) {
+                    if ApplicationVersionClient.source(for: definition, installation: installation) != nil,
+                       let installed = installation.version, let latest = version.latestVersion,
+                       let order = ApplicationVersionClient.compare(installed: installed, latest: latest) {
+                        version.status = order == .orderedAscending ? "updateAvailable" : "current"
+                    } else {
+                        version.status = "unknown"
+                        version.error = installation.versionError
+                    }
+                }
+                return .object([
+                    "id": .string(installation.id), "path": .string(displayPath(installation.path)),
+                    "resolvedPath": .string(displayPath(installation.resolvedPath)), "version": HostWindowJSON.string(installation.version),
+                    "source": .string(installation.source.rawValue), "sourceLabel": .string(installation.source.label), "active": .bool(installation.active),
+                    "versionCheck": .object(["status": .string(version.status), "latestVersion": HostWindowJSON.string(version.latestVersion),
+                        "checkedAt": HostWindowJSON.date(version.checkedAt), "error": HostWindowJSON.string(version.error)]),
+                    "canUpgrade": .bool(upgradeReason == nil), "canUninstall": .bool(uninstallReason == nil),
+                    "unavailableReason": HostWindowJSON.string(upgradeReason ?? uninstallReason)
+                ])
+            }
+            return .object([
+                "id": .string(definition.id), "name": .string(definition.name), "kind": .string(definition.kind.rawValue),
+                "configurationApplication": HostWindowJSON.string(definition.configurationApplication?.rawValue),
+                "website": .string(definition.website), "icon": brand.map(iconJSON) ?? .null,
+                "installed": .bool(!discovery.installations.isEmpty), "configurationFound": .bool(discovery.configurationFound),
+                "installations": .array(installations), "canInstall": .bool(installReason == nil && discovery.installations.isEmpty),
+                "installUnavailableReason": HostWindowJSON.string(installReason)
+            ])
+        }
+        let operation: HostJSON = manager.operation.map { operation in
+            .object(["id": .string(operation.id), "catalogID": .string(operation.plan.catalogID),
+                "installationID": HostWindowJSON.string(operation.plan.installation?.id), "action": .string(operation.plan.action.rawValue),
+                "status": .string(operation.status), "startedAt": HostWindowJSON.date(operation.startedAt),
+                "finishedAt": HostWindowJSON.date(operation.finishedAt), "error": safeError(operation.error),
+                "output": .string(settings.privacyMode ? "" : Redact.scrub(operation.output))])
+        } ?? .null
+        let detectionErrors = manager.definitions.compactMap { definition -> String? in
+            manager.inventory[definition.id]?.error.map { definition.name + ": " + $0 }
+        }
+        return .object(["applications": .array(rows), "scanning": .bool(manager.scanning),
+            "checkingVersions": .bool(manager.checkingVersions), "lastScannedAt": HostWindowJSON.date(manager.lastScannedAt),
+            "operation": operation, "error": safeError(manager.error ?? (detectionErrors.isEmpty ? nil : detectionErrors.joined(separator: "\n")))])
     }
 
     private func application(_ params: [String: HostJSON]) throws -> AgentApplication {

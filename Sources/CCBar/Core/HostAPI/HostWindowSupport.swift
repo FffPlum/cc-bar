@@ -166,7 +166,7 @@ class HostWindowPresenter {
         .object([
             "id": .string(application.rawValue),
             "name": .string(application.name),
-            "detected": .bool(state.applications.detected.contains(application)),
+            "detected": .bool(state.applications.isDetected(application)),
             "addedToSidebar": .bool(state.applications.addedApplications.contains(application)),
             "usageService": application.usageApp.map { .string($0.rawValue) } ?? .null,
             "usageVisible": .bool(application.usageApp.map { settings.isUsageServiceVisible($0) } ?? false),

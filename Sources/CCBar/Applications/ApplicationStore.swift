@@ -13,14 +13,22 @@ final class ApplicationStore {
     private let defaults: UserDefaults
     private static let addedKey = "ccbar.applications.added.v1"
     let repository = ConfigurationRepository()
+    let management: ApplicationManager
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, management: ApplicationManager? = nil) {
         self.defaults = defaults
+        self.management = management ?? ApplicationManager()
         addedApplications = Set((defaults.stringArray(forKey: Self.addedKey) ?? []).compactMap(AgentApplication.init(rawValue:)))
     }
 
     var sidebarApplications: [AgentApplication] {
-        AgentApplication.allCases.filter { detected.contains($0) && addedApplications.contains($0) }
+        AgentApplication.allCases.filter { isDetected($0) && addedApplications.contains($0) }
+    }
+
+    func isDetected(_ application: AgentApplication) -> Bool {
+        detected.contains(application) || management.definitions.contains {
+            $0.configurationApplication == application && !(management.inventory[$0.id]?.installations.isEmpty ?? true)
+        }
     }
 
     func setAdded(_ added: Bool, application: AgentApplication) {

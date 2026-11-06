@@ -46,6 +46,69 @@ export interface ApplicationSummary {
 }
 export interface ApplicationsResult { applications: ApplicationSummary[]; error: string | null }
 export interface ApplicationVisibilityPatch { addedToSidebar?: boolean; usageVisible?: boolean }
+export type ApplicationOperationAction = "install" | "upgrade" | "uninstall";
+export interface ApplicationVersionCheck {
+  status: "unchecked" | "checking" | "current" | "updateAvailable" | "unknown" | "failed";
+  latestVersion: string | null;
+  checkedAt: ISODateTime | null;
+  error: string | null;
+}
+export interface ApplicationInstallation {
+  id: string;
+  path: string;
+  resolvedPath: string;
+  version: string | null;
+  source: string;
+  sourceLabel: string;
+  active: boolean;
+  versionCheck: ApplicationVersionCheck;
+  canUpgrade: boolean;
+  canUninstall: boolean;
+  unavailableReason: string | null;
+}
+export interface ManagedApplication {
+  id: string;
+  name: string;
+  kind: "cli" | "desktop";
+  configurationApplication: ApplicationID | null;
+  website: string;
+  icon: BrandIcon | null;
+  installed: boolean;
+  configurationFound: boolean;
+  installations: ApplicationInstallation[];
+  canInstall: boolean;
+  installUnavailableReason: string | null;
+}
+export interface ApplicationOperationPlan {
+  id: string;
+  catalogID: string;
+  installationID: string | null;
+  action: ApplicationOperationAction;
+  name: string;
+  sourceLabel: string;
+  steps: string[];
+  preservesData: boolean;
+  expiresAt: ISODateTime;
+}
+export interface ApplicationOperation {
+  id: string;
+  catalogID: string;
+  installationID: string | null;
+  action: ApplicationOperationAction;
+  status: "running" | "succeeded" | "failed";
+  startedAt: ISODateTime;
+  finishedAt: ISODateTime | null;
+  error: string | null;
+  output: string;
+}
+export interface ApplicationInventory {
+  applications: ManagedApplication[];
+  scanning: boolean;
+  checkingVersions: boolean;
+  lastScannedAt: ISODateTime | null;
+  operation: ApplicationOperation | null;
+  error: string | null;
+}
 export interface ProviderConnection {
   id: string;
   name: string;
@@ -539,6 +602,10 @@ export class WindowAPI {
   navigate(route: Route): Promise<WindowBootstrap> { return this.call("window.navigate", { route }, windowBootstrapSchema); }
   applicationsList(): Promise<ApplicationsResult> { return this.call("applications.list", {}, applicationsSchema); }
   applicationsDetect(): Promise<ApplicationsResult> { return this.call("applications.detect", {}, applicationsSchema); }
+  applicationsInventory(input: { refresh?: boolean } = {}): Promise<ApplicationInventory> { return this.call("applications.inventory", input, applicationInventorySchema); }
+  applicationsCheckVersions(input: { catalogID?: string } = {}): Promise<ApplicationInventory> { return this.call("applications.checkVersions", input, applicationInventorySchema); }
+  applicationsPlanOperation(input: { catalogID: string; action: ApplicationOperationAction; installationID?: string }): Promise<ApplicationOperationPlan> { return this.call("applications.planOperation", input, applicationOperationPlanSchema); }
+  applicationsExecuteOperation(input: { planID: string }): Promise<ApplicationInventory> { return this.call("applications.executeOperation", input, applicationInventorySchema); }
   applicationsSetVisibility(application: ApplicationID, patch: ApplicationVisibilityPatch): Promise<ApplicationsResult> { return this.call("applications.setVisibility", { application, patch }, applicationsSchema); }
   applicationDetail(application: ApplicationID): Promise<ApplicationDetail> { return this.call("applications.detail", { application }, applicationDetailSchema); }
   providersCatalog(application: ApplicationID): Promise<ProviderCatalog> { return this.call("providers.catalog", { application }, providerCatalogSchema); }
@@ -661,6 +728,13 @@ const applicationFields = { id: applicationID, name: string, detected: boolean, 
 const applicationSummarySchema = object(applicationFields);
 const windowBootstrapSchema = object({ route: routeSchema, language: enumeration(["system", "zh", "en"] as const), resolvedLanguage: enumeration(["zh", "en"] as const), platform: nonEmpty, timeZone: string, appearance: enumeration(["light", "dark"] as const), version: string, sidebarApplications: array(applicationSummarySchema), visibleUsageServices: array(usageService), capabilities: array(string) });
 const applicationsSchema = object({ applications: array(applicationSummarySchema), error: nullable(string) });
+const applicationOperationAction = enumeration(["install", "upgrade", "uninstall"] as const);
+const applicationVersionCheckSchema = object({ status: enumeration(["unchecked", "checking", "current", "updateAvailable", "unknown", "failed"] as const), latestVersion: nullable(string), checkedAt: nullable(isoDate), error: nullable(string) });
+const applicationInstallationSchema = object({ id: nonEmpty, path: string, resolvedPath: string, version: nullable(string), source: string, sourceLabel: string, active: boolean, versionCheck: applicationVersionCheckSchema, canUpgrade: boolean, canUninstall: boolean, unavailableReason: nullable(string) });
+const managedApplicationSchema = object({ id: nonEmpty, name: string, kind: enumeration(["cli", "desktop"] as const), configurationApplication: nullable(applicationID), website: string, icon: nullable(brandIconSchema), installed: boolean, configurationFound: boolean, installations: array(applicationInstallationSchema), canInstall: boolean, installUnavailableReason: nullable(string) });
+const applicationOperationSchema = object({ id: nonEmpty, catalogID: nonEmpty, installationID: nullable(string), action: applicationOperationAction, status: enumeration(["running", "succeeded", "failed"] as const), startedAt: isoDate, finishedAt: nullable(isoDate), error: nullable(string), output: string });
+const applicationInventorySchema = object({ applications: array(managedApplicationSchema), scanning: boolean, checkingVersions: boolean, lastScannedAt: nullable(isoDate), operation: nullable(applicationOperationSchema), error: nullable(string) });
+const applicationOperationPlanSchema = object({ id: nonEmpty, catalogID: nonEmpty, installationID: nullable(string), action: applicationOperationAction, name: string, sourceLabel: string, steps: array(string), preservesData: boolean, expiresAt: isoDate });
 const providerConnectionSchema = object({ id: string, name: string, supplier, endpoint: string, models: array(string), protocol, contextWindow: integer, official: boolean, active: boolean, authorizationID: nullable(string) });
 const applicationDetailSchema = object({ ...applicationFields, loginSummary: nullable(string), error: nullable(string), connections: array(providerConnectionSchema) });
 const apiKeyChoiceSchema = object({ id: string, name: string, supplier, endpoint: string, sourceApplications: array(applicationID) });
@@ -722,6 +796,8 @@ const diagnosticsSchema = object({ path: string });
 export const windowDTOValidators = {
   bootstrap: windowBootstrapSchema,
   applications: applicationsSchema,
+  applicationInventory: applicationInventorySchema,
+  applicationOperationPlan: applicationOperationPlanSchema,
   applicationDetail: applicationDetailSchema,
   providerCatalog: providerCatalogSchema,
   quotaAccounts: quotaAccountsSchema,

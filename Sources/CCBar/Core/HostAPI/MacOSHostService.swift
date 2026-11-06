@@ -137,6 +137,7 @@ final class MacOSHostService {
                 _ = state.applications.logins
                 _ = state.applications.errors
                 _ = state.applications.addedApplications
+                applications.trackManagementChanges()
                 _ = state.authorizations.accounts
                 _ = state.authorizations.providers
                 _ = state.authorizations.error

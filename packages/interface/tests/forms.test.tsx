@@ -15,6 +15,7 @@ import { ApplicationsPage } from "@/features/applications/applications-page";
 import { SearchInput } from "@/components/search-input";
 import { bootstrap, deferred, makeAPI, settings } from "./fixtures";
 import type { ProviderCatalog } from "@ccbar/host-api/window";
+import { applicationInventory } from "./application-fixtures";
 const sessions: ReturnType<typeof makeAPI>[] = [];
 afterEach(() => sessions.splice(0).forEach((session) => session.close()));
 function session() {
@@ -216,7 +217,9 @@ describe("forms through fake transport", () => {
         ? bootstrap
         : request.method === "window.settings.get"
           ? settings
-          : { applications: [], error: null };
+          : request.method === "applications.inventory"
+            ? applicationInventory([])
+            : { applications: [], error: null };
     render(
       <LanguageProvider language="en">
         <HostProvider api={api}>
@@ -224,7 +227,7 @@ describe("forms through fake transport", () => {
         </HostProvider>
       </LanguageProvider>,
     );
-    expect(await screen.findByText("No applications detected")).toBeTruthy();
+    expect(await screen.findByText("No applications available")).toBeTruthy();
   });
   it("masks a privacy-mode search without changing its actual query", () => {
     const onChange = vi.fn();

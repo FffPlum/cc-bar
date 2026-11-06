@@ -16,6 +16,13 @@ import { useTranslation } from "@/lib/i18n";
 import { brandColor, supplierBrand } from "@/lib/display";
 import { ProviderCatalogView } from "@/features/applications/provider-catalog-view";
 import { cn } from "@/lib/utils";
+import {
+  ApplicationInventoryActions,
+  ApplicationManagementCard,
+  ApplicationManagementFeedback,
+  ApplicationOperationDialog,
+  useApplicationManagement,
+} from "./application-management";
 
 const applicationDomains = ["applications", "authorizations"] as const;
 
@@ -27,6 +34,7 @@ export function ApplicationDetailPage({
   const { api, settings, bootstrap } = useHost();
   const t = useTranslation();
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const management = useApplicationManagement();
   const detail = useHostResource<ApplicationDetail>(
     () => api.applicationDetail(application),
     applicationDomains,
@@ -85,6 +93,17 @@ export function ApplicationDetailPage({
           </div>
           <div className="cc-scrollbar flex-1">
             <div className="flex flex-col gap-4 p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-[13px] font-semibold">{t("Installations", "安装信息")}</h2>
+                <div className="flex gap-2"><ApplicationInventoryActions management={management} /></div>
+              </div>
+              <ApplicationManagementFeedback management={management} />
+              <ResourceFeedback {...management.resource} onRetry={() => void management.resource.reload()}>
+                {(inventory) => inventory.applications
+                  .filter((item) => item.configurationApplication === application)
+                  .map((item) => <ApplicationManagementCard key={item.id} application={item} management={management} />)}
+              </ResourceFeedback>
+              <ApplicationOperationDialog management={management} />
               {result.error && (
                 <p
                   className="text-[12px] text-orange-600 dark:text-orange-400"

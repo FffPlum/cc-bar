@@ -18,6 +18,66 @@ function client(results) {
   return { api: new WindowAPI(host), calls, host };
 }
 
+const applicationInventory = {
+  applications: [{
+    id: 'future-agent', name: 'Future Agent', kind: 'cli', configurationApplication: null,
+    website: 'https://example.invalid', icon: null, installed: true, configurationFound: false,
+    installations: [{
+      id: 'opaque-installation', path: '/fixture/bin/agent', resolvedPath: '/fixture/lib/agent', version: null,
+      source: 'custom-source', sourceLabel: 'Custom source', active: false,
+      versionCheck: { status: 'failed', latestVersion: null, checkedAt: '2026-11-06T00:00:00Z', error: 'Registry unavailable' },
+      canUpgrade: false, canUninstall: false, unavailableReason: 'Source cannot be managed',
+    }], canInstall: false, installUnavailableReason: 'No supported installer',
+  }], scanning: false, checkingVersions: false, lastScannedAt: null, operation: null, error: null,
+};
+
+test('application inventory accepts independent catalog IDs but validates installation status and excludes credentials', () => {
+  assert.deepEqual(windowDTOValidators.applicationInventory.parse(applicationInventory), applicationInventory);
+  const invalid = structuredClone(applicationInventory);
+  invalid.applications[0].installations[0].versionCheck.status = 'latest';
+  assert.throws(() => windowDTOValidators.applicationInventory.parse(invalid), { code: 'invalid_response' });
+  const credential = structuredClone(applicationInventory);
+  credential.applications[0].installations[0].accessToken = 'fixture-only';
+  assert.throws(() => windowDTOValidators.applicationInventory.parse(credential), { code: 'invalid_response' });
+  const fakeConfiguration = structuredClone(applicationInventory);
+  fakeConfiguration.applications[0].configurationApplication = 'future-agent';
+  assert.throws(() => windowDTOValidators.applicationInventory.parse(fakeConfiguration), { code: 'invalid_response' });
+});
+
+test('application management binds plans to exact installations and executes using only the opaque plan ID', async () => {
+  const plan = {
+    id: 'opaque-plan', catalogID: 'future-agent', installationID: 'opaque-installation', action: 'uninstall',
+    name: 'Future Agent', sourceLabel: 'npm', steps: ['Remove the selected installation.'], preservesData: true,
+    expiresAt: '2026-11-06T01:00:00Z',
+  };
+  const running = { ...applicationInventory, operation: {
+    id: 'operation', catalogID: 'future-agent', installationID: 'opaque-installation', action: 'uninstall',
+    status: 'running', startedAt: '2026-11-06T00:00:00Z', finishedAt: null, error: null, output: '',
+  } };
+  const { api, host, calls } = client({
+    'applications.inventory': applicationInventory,
+    'applications.checkVersions': { ...applicationInventory, checkingVersions: true },
+    'applications.planOperation': plan,
+    'applications.executeOperation': running,
+  });
+  try {
+    await api.applicationsInventory();
+    await api.applicationsInventory({ refresh: true });
+    await api.applicationsCheckVersions({ catalogID: undefined });
+    await api.applicationsCheckVersions({ catalogID: 'future-agent' });
+    assert.deepEqual(await api.applicationsPlanOperation({ catalogID: 'future-agent', installationID: 'opaque-installation', action: 'uninstall' }), plan);
+    assert.equal((await api.applicationsExecuteOperation({ planID: plan.id })).operation.status, 'running');
+    assert.deepEqual(calls.map(({ method, params }) => ({ method, params })), [
+      { method: 'applications.inventory', params: {} },
+      { method: 'applications.inventory', params: { refresh: true } },
+      { method: 'applications.checkVersions', params: {} },
+      { method: 'applications.checkVersions', params: { catalogID: 'future-agent' } },
+      { method: 'applications.planOperation', params: { catalogID: 'future-agent', installationID: 'opaque-installation', action: 'uninstall' } },
+      { method: 'applications.executeOperation', params: { planID: 'opaque-plan' } },
+    ]);
+  } finally { api.dispose(); host.dispose(); }
+});
+
 test('window SDK accepts real Swift DTOs across all statistics routes', async () => {
   const { api, host } = client(fixtures);
   try {

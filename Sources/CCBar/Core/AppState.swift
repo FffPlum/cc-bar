@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import CCBarConfiguration
 
 nonisolated struct AppTerminationError: Error, LocalizedError {
     private let message: String
@@ -803,6 +804,9 @@ final class AppState {
 
     /// 只保存已读取的内存状态；不为退出发请求、扫描日志或重新计算历史。
     func prepareForTermination() async throws {
+        guard !applications.management.hasActiveOperation else {
+            throw ApplicationLifecycleError.unavailable(tr("Wait for the application installation operation to finish before quitting.", "应用安装管理操作尚未完成，请结束后再退出。"))
+        }
         guard !isPreparingForTermination else { throw AppTerminationError.busy }
         terminationRequested = true
         cancelKimiDeviceLogin()

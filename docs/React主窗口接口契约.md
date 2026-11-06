@@ -26,7 +26,7 @@
 
 | WindowAPI | RPC | 行为 |
 |---|---|---|
-| `applicationsList()` | `applications.list` | 检测、侧栏、用量开关、协议和宿主图标。 |
+| `applicationsList()` | `applications.list` | 保留配置应用的旧 DTO：检测、侧栏、用量开关、协议和宿主图标；不作为真实安装目录。 |
 | `applicationsDetect()` | `applications.detect` | 调 `AppState.reloadApplications()`，不激活原应用配置。 |
 | `applicationsSetVisibility(id,patch)` | `applications.setVisibility` | 分别更新侧栏和用量可见性；当前侧栏应用移除后路由回退。 |
 | `applicationDetail(id)` | `applications.detail` | 登录摘要、错误及 `ProviderConnection.list` 连接卡；不提供编辑/删除/切换。 |
@@ -34,6 +34,94 @@
 | `authorizationsSaveAPIKey(input)` | `authorizations.saveAPIKey` | 保存到 `AuthorizationStore`，返回脱敏 `APIKeyChoice`，不回显 key。 |
 | `providersAdd(input)` | `providers.add` | 验证凭据同源、协议、模型和上下文后 `saveProvider`；只写 CCBar。 |
 | `authorizationsGrantAccess(kind)` | `authorizations.grantAccess` | `claudeDesktop` / `cursor` 原生授权流程。 |
+
+### 安装管理接口
+
+安装 catalog ID 为独立字符串，不能扩展或替换 `ApplicationID` / `UsageService` / `QuotaService`。当前 18 项与配置映射见 [产品需求](产品需求.md#应用供应商与额度管理)；前端动态渲染宿主目录，未知 catalog ID 仍可正常展示。`configurationApplication` 为已有 `ApplicationID` 或 null；null 项仅在安装目录管理，不生成配置详情路由、侧栏、供应商或统计能力。`applications.list` 和 bootstrap 继续服务旧调用方。
+
+| WindowAPI | RPC 参数 | 返回 |
+|---|---|---|
+| `applicationsInventory(input = {})` | `applications.inventory({ refresh?: boolean })` | `ApplicationInventory`；首读按需启动后台扫描，`refresh: true` 明确重扫。 |
+| `applicationsCheckVersions(input = {})` | `applications.checkVersions({ catalogID?: string })` | `ApplicationInventory`；省略 ID 检查全部，否则只检查对应应用的安装实例。 |
+| `applicationsPlanOperation(input)` | `applications.planOperation({ catalogID: string, action: "install" \| "upgrade" \| "uninstall", installationID?: string })` | `ApplicationOperationPlan`；安装省略实例 ID，升级 / 卸载必须指定已发现的实例。 |
+| `applicationsExecuteOperation(input)` | `applications.executeOperation({ planID: string })` | `ApplicationInventory`；只接受宿主计划 ID，可立即返回进行中的任务。 |
+
+安装管理 DTO 的所有 nullable 字段均显式返回 null，不省略；时间为 ISO 时间字符串。响应继续拒绝未知字段：
+
+```ts
+type ApplicationOperationAction = "install" | "upgrade" | "uninstall";
+interface ApplicationInventory {
+  applications: ManagedApplication[];
+  scanning: boolean;
+  checkingVersions: boolean;
+  lastScannedAt: string | null;
+  operation: ApplicationOperation | null;
+  error: string | null;
+}
+interface ManagedApplication {
+  id: string;
+  name: string;
+  kind: "cli" | "desktop";
+  configurationApplication: ApplicationID | null;
+  website: string;
+  icon: BrandIcon | null;
+  installed: boolean;
+  configurationFound: boolean;
+  installations: ApplicationInstallation[];
+  canInstall: boolean;
+  installUnavailableReason: string | null;
+}
+interface ApplicationInstallation {
+  id: string;
+  path: string;
+  resolvedPath: string;
+  version: string | null;
+  source: string;
+  sourceLabel: string;
+  active: boolean;
+  versionCheck: {
+    status: "unchecked" | "checking" | "current" | "updateAvailable" | "unknown" | "failed";
+    latestVersion: string | null;
+    checkedAt: string | null;
+    error: string | null;
+  };
+  canUpgrade: boolean;
+  canUninstall: boolean;
+  unavailableReason: string | null;
+}
+interface ApplicationOperationPlan {
+  id: string;
+  catalogID: string;
+  installationID: string | null;
+  action: ApplicationOperationAction;
+  name: string;
+  sourceLabel: string;
+  steps: string[];
+  preservesData: boolean;
+  expiresAt: string;
+}
+interface ApplicationOperation {
+  id: string;
+  catalogID: string;
+  installationID: string | null;
+  action: ApplicationOperationAction;
+  status: "running" | "succeeded" | "failed";
+  startedAt: string;
+  finishedAt: string | null;
+  error: string | null;
+  output: string;
+}
+```
+
+`installed` 只由已验证的程序 / Bundle 实例决定，配置路径残留独立进入 `configurationFound`。安装扫描不读取凭据内容。CLI 的 `version` 来自精确入口实际执行的 `--version`，失败返回 null 和错误，`installed` 仍为 true，不以 package.json / receipt 版本替代；桌面版本来自 Info.plist。`active` 仅对当前进程 PATH 确认的 CLI 首入口为 true，不能由补扫 nvm 等目录或桌面安装推断。`path / resolvedPath` 继续保留在 DTO，隐私模式将用户目录替换为 `~`；列表和默认确认摘要不展示这些字段，前端也不能把它们传回宿主执行。实例 ID、计划 ID 和操作 ID 都是不透明值。`source` / `sourceLabel` 描述实际来源，操作可用性只读 `canInstall / canUpgrade / canUninstall` 和对应原因，不能由前端依据名称或来源拼命令。无图标用首字母占位。
+
+安装目录保留搜索，按 `installed` 分为已安装和未安装两组，并显示当前结果中的应用数量，移除安装状态 Select。`lastScannedAt` 为 null 且尚无扫描结果时先显示加载状态，不依据默认 `installed=false` 提前分类。主行优先选择 `active` 实例，其余安装默认折叠，展示来源、版本和安装序号；序号仅用于呈现，操作仍使用对应 `installationID`。安装按钮用于未安装应用，升级按钮仅在 `versionCheck.status=updateAvailable` 时显示并继续受 `canUpgrade` 限制；卸载、单应用版本检查、官网、配置和用量开关进入行末菜单，侧栏开关保持同行。
+
+`versionCheck` 属于每个安装实例；远端检查失败保留此前 `latestVersion`，但状态必须为 `failed`，来源不明、当前版本缺失或不能比较为 `unknown`，只有成功比较才可标为 `current`。重扫后的 Host DTO 用实际当前版本重新比较缓存的 latest，手工降级后不能沿用旧的「最新」状态。前端不能用 `latestVersion` 非空判断此次检查成功，也不能把未知显示为最新。
+
+计划绑定应用、安装实例、来源及宿主生成的步骤，5 分钟过期。确认对话框默认展示来源，以及已有实例的版本和安装序号；`steps` 收纳在默认折叠的操作详情中，`preservesData` 对应的保留配置和历史说明始终显示。用户确认后前端只提交 `planID`；宿主消费一次计划，重新检测目标及生成计划，完整比对后再执行，目标变化或过期均返回错误要求重新确认，不自动选择别的实例。计划中的 `steps` 仅为展示，不能回传为命令。当前计划保留配置和历史，`preservesData` 返回 true；Native 卸载仅删除已验证程序文件，手动桌面 App 卸载仅移入废纸篓。桌面运行状态、官方下载、签名和准确目标路径由原生生命周期校验，前端只展示具体错误。
+
+后台任务由 `AppState` 持有，不依赖当前页面和 WebKit 窗口；切页或关闭主窗口后再次读取 inventory 可恢复状态。安装管理操作尚未完成时，`AppState.prepareForTermination` 拒绝退出并提示等待完成，避免中断替换，不承诺强制结束进程后的恢复。扫描、检查与变更通过 `scanning / checkingVersions / operation` 表达，变更操作单次串行，冲突请求返回 `busy`；操作结束重新检测实际结果，退出码成功不等同于安装成功。前端订阅 `applications` 事件重新拉取，收到后台任务响应后仅追加一次读取以消除完成事件早于响应的竞态，不进行长轮询。目录和详情页共用该数据与操作确认，旧账号额度、供应商和统计 DTO 保持兼容。
 
 ## 4. 额度账号
 
