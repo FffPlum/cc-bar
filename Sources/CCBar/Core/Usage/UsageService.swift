@@ -2345,6 +2345,7 @@ final class UsageService {
                 previous: [:],
                 seenTokenIds: [],
                 knownIDs: codexKnown,
+                knownOwner: { ledgerSnapshot.conversationKey(containing: $0, app: .codex) },
                 roots: codexRoots,
                 indexedTitles: codexTitles,
                 onProgress: progress
@@ -2667,6 +2668,7 @@ final class UsageService {
                 previous: prev.codex,
                 seenTokenIds: prev.codexSeenTokenIds,
                 knownIDs: codexKnown,
+                knownOwner: { ledgerSnapshot.conversationKey(containing: $0, app: .codex) },
                 roots: codexRoots,
                 indexedTitles: codexTitles,
                 onProgress: progress
@@ -3129,7 +3131,8 @@ final class UsageService {
         let codexRoots = roots.codexRoots
         let evidence = await Task.detached(priority: .utility) {
             await CodexJSONLScanner.scan(previous: [:], roots: codexRoots, indexedTitles: [:],
-                                         historicalBoundary: baseline.scanState.codex)
+                                         historicalBoundary: baseline.scanState.codex,
+                                         includeCompactionUsage: false)
         }.value
         // 读取失败 / 根目录不可访问 / 扫描中被移走可能下次就恢复，不能当成确定结果提交。
         // 本进程不再重试；在迁移提交前，新调用继续按旧身份入账（见 usesLegacyCodexModels），
