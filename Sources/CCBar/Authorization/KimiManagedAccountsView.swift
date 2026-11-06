@@ -38,8 +38,8 @@ struct KimiManagedAccountsSettingsView: View {
                     ))
                     .frame(width: ServiceRowMetrics.destination)
                     DisplayDestinationCheckbox(title: tr("Show in floating window", "在悬浮窗显示"), isOn: Binding(
-                        get: { account.showInFloatingHUD },
-                        set: { value in appState.updateKimiManagedAccount(id: account.id) { $0.showInFloatingHUD = value } }
+                        get: { account.showsInFloatingSurfaces },
+                        set: { value in appState.updateKimiManagedAccount(id: account.id) { $0.visibleInPopover = value; $0.showInFloatingHUD = value } }
                     ))
                     .frame(width: ServiceRowMetrics.destination)
                     Menu {
@@ -56,8 +56,8 @@ struct KimiManagedAccountsSettingsView: View {
                     .menuStyle(.button).buttonStyle(.borderless).menuIndicator(.hidden)
                     .frame(width: ServiceRowMetrics.info)
                     Toggle(account.id, isOn: Binding(
-                        get: { account.visibleInPopover },
-                        set: { value in appState.updateKimiManagedAccount(id: account.id) { $0.visibleInPopover = value } }
+                        get: { account.showsInFloatingSurfaces },
+                        set: { value in appState.updateKimiManagedAccount(id: account.id) { $0.visibleInPopover = value; $0.showInFloatingHUD = value } }
                     ))
                     .labelsHidden().toggleStyle(.switch).controlSize(.small).tint(.green)
                     .help(tr("Show in popover", "在弹出面板中显示"))

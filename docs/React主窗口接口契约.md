@@ -37,16 +37,24 @@
 
 ## 4. 额度账号
 
-`quota.accounts` 包含主账号、导入 Codex、托管 Kimi、DeepSeek，以及不作为额度 Provider 的 Gemini/Grok `localLogin` 项。每项包含来源说明、`sourceOwned`、`sourceApplication`、needsRefresh、显示开关、快照/余额和退避。`serviceOrder` 只含真实额度服务。
+`quota.accounts` 保留主账号、导入 Codex、托管 Kimi、DeepSeek，以及不作为额度 Provider 的 Gemini/Grok `localLogin` 项，维持统计页既有账号集合。每项包含来源说明、`sourceOwned`、`sourceApplication`、needsRefresh、显示开关、快照/余额和退避。`serviceOrder` 仍返回完整真实额度服务顺序，供既有排序接口及统计使用，不等于管理页的六个供应商分组。
+
+每项新增管理页专属的 `quotaManagement: { provider, isDefault } | null`。`provider` 枚举为 `claude / chatgpt / kimi / xai / deepseekHarness / antigravity`；管理页只渲染非 null 的账号，按上述固定顺序归组，同组先展示 `isDefault` 为真的本机账号。主账号需要实际登录或 Claude 待钥匙串授权；Codex PAT、Kimi API Key 及清单外供应商返回 null。导入的 Codex OAuth 和托管 Kimi 返回 `isDefault: false`，不随 `current`（与 CLI 同身份）变为默认；本机主账号、Grok 登录及带来源应用的 DeepSeek 账号返回 true。没有本机账号时，即使存在手动账号，也不为主账号生成管理页资格。
+
+`quotaManagement` 在 TypeScript 账号类型及校验中为可选，以兼容独立的统计详情 DTO；字段缺失不进入管理页。`sourceOwned` / `detected` / `current` 不单独用来推断默认标记或管理页资格。主账号 `name` 优先使用邮箱 / 昵称、缺失时回退品牌名，`subtitle` 保留套餐或登录指引；隐私模式使用宿主匿名名。字段仅供展示分组，不改变底层凭据、Provider、额度刷新或统计账号筛选。
+
+管理页不再渲染或提交独立 `enabled` 开关。`showInMenuBar` 控制顶栏标签；`showInFloatingHUD` 同时控制菜单栏展开的 Popover 与桌面 HUD。宿主将两者的逻辑或作为账号启用状态：任一选中即可刷新额度，全关后隐藏账号展示并停止自动额度刷新，凭据和历史保留。`QuotaAccountsResult.floatingEnabled` 与设置中的同名值只表示桌面窗口总开关，不决定 Popover 可见性，也不能用于禁用位置复选框。托管 Kimi 的位置选择独立于主账号，镜像去重必须按当前展示位置判断；用量统计仍由应用统计设置独立控制。
+
+现有 `enabled` 字段仍供兼容 DTO / 调用方使用，返回值为两个位置的逻辑或。旧主 Provider 偏好一次迁移保留原启用账号的 Popover 选择；手动账号旧 `visibleInPopover` 与 `showInFloatingHUD` 取并集作为返回的浮层选择，新的 `showInFloatingHUD` 写入同步更新两项旧字段。旧 `enabled` patch 仍被接受：主 Provider 沿用兼容启停入口，手动账号在未显式传 `showInFloatingHUD` 时将其作为浮层选择；新管理页只写位置字段。
 
 | WindowAPI | RPC | 行为 |
 |---|---|---|
 | `quotaAccounts()` | `quota.accounts` | 完整账号和 Kimi/DeepSeek 授权状态。 |
-| `quotaUpdateAccount(id,patch)` | `quota.updateAccount` | 修改启用、菜单栏、悬浮窗并 sync。 |
+| `quotaUpdateAccount(id,patch)` | `quota.updateAccount` | 管理页只提交 `showInMenuBar` / `showInFloatingHUD` 位置选择；宿主据两者推导启用状态并同步展示，任一开启后按原刷新链更新额度。 |
 | `quotaReorder(serviceOrder,importedCodexOrder?)` | `quota.reorder` | 主服务与导入 Codex 分别按完整、唯一 ID 排序。 |
-| `quotaRefresh(id?)` | `window.quota.refresh` | 整体或单账号原刷新链；独立于 v1 `quota.refresh`，不绕过退避。 |
+| `quotaRefresh(id?)` | `window.quota.refresh` | 无 ID 时先独立读取 Codex / Claude / Antigravity / Kimi 本机账号，再走原额度刷新链；传入 ID 时不执行这一步全量账号发现。独立于 v1 `quota.refresh`，不改变显示偏好或绕过退避。 |
 | `quotaResetCredits(id)` | `quota.resetCredits` | 返回 `availableCount` 与 `{id,title,status,grantedAt,expiresAt}`。 |
-| `codexPreview(payload)` | `codex.preview` | 单账号、批量 auth.json、PAT 的脱敏预览。 |
+| `codexPreview(payload)` | `codex.preview` | 保留单账号、批量 auth.json、PAT 的脱敏预览；React 管理页拒绝 PAT，仅允许 OAuth 预览进入导入步骤。 |
 | `codexImport(input)` | `codex.import` | 批量 OAuth 保存；PAT 联网验证；仅该写操作接收原始 payload。 |
 | `codexDelete(id)` / `codexRetryAccess(id)` | `codex.delete` / `codex.retryAccess` | 删除 CCBar 副本或重试旧钥匙串，不影响 CLI。 |
 | `kimiStartAuthorization(input)` | `kimi.startAuthorization` | 地区、设备授权、可选重登，打开系统浏览器。 |
@@ -54,8 +62,10 @@
 | `kimiRetryAccess(id)` / `kimiDelete(id)` | `kimi.retryAccess` / `kimi.delete` | 重试钥匙串或删除托管账号，不改 CLI。 |
 | `deepSeekStartAuthorization(input)` | `deepseek.startAuthorization` | 启动浏览器授权并查余额。 |
 | `deepSeekCancelAuthorization()` | `deepseek.cancelAuthorization` | 取消任务与授权对象。 |
-| `deepSeekRename(id,name)` / `deepSeekDelete(id)` | `deepseek.rename` / `deepseek.delete` | 改名或删除；前端依据 sourceOwned/sourceApplication 显示正确确认。 |
+| `deepSeekRename(id,name)` / `deepSeekDelete(id)` | `deepseek.rename` / `deepseek.delete` | 改名或删除；前端依据 `sourceApplication` 区分本机读取与手动授权，显示隐藏本机副本或删除并请求退出的确认。 |
 | `deepSeekRefresh(id)` | `deepseek.refresh` | 失败保留旧余额。 |
+
+无 ID 的 `window.quota.refresh` 通过 `discoverAccounts` 调用 `AppState.reloadQuotaAccounts()`，使两个展示位置都关闭的主账号也能在本机登录后被识别。该发现步骤不请求远端额度、不自动开启显示；随后 `refreshQuotas(reason: .userInitiated)` 按原有设置与刷新计划查询额度，继续遵守 429 退避。Grok / DSH 等应用登录由后续刷新链原有的 `reloadApplications()` 更新；单账号操作仍走既有目标刷新逻辑，不额外调用这一步四个主账号的独立发现。
 
 ## 5. 统计域（HostWindowUsageService）
 

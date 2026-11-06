@@ -186,7 +186,8 @@ private final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private var labelView: StatusLabelHostingView?
-    private var contentView: NSHostingView<AnyView>?
+    private let contentItem = NSMenuItem()
+    private var isMenuOpen = false
     private var keyMonitor: Any?
     private let appState: AppState
     private weak var appDelegate: AppDelegate?
@@ -211,30 +212,37 @@ private final class MenuBarController: NSObject, NSMenuDelegate {
         button.addSubview(view)
         labelView = view
 
+        menu.autoenablesItems = false
+        menu.showsStateColumn = false
+        menu.delegate = self
+        menu.addItem(contentItem)
+        prepareContent()
+        // 交给 NSStatusItem 开启系统菜单 tracking，不激活 App，也不手动弹出浮窗。
+        statusItem.menu = menu
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        // tracking 中继续由 SwiftUI 更新数值，不更换用户正在操作的视图。
+        guard !isMenuOpen else { return }
+        prepareContent()
+    }
+
+    private func prepareContent() {
+        // 关闭时的离屏 hosting 不保证立即完成 SwiftUI 更新。每次打开重新读取账号选择，
+        // 完成布局后再交给 NSMenu 测量，避免增删账号后沿用旧内容或旧高度。
         let content = NSHostingView(rootView: AnyView(PopoverRootView(
             openMain: { [weak appDelegate] tab in
                 appDelegate?.appState.mainTab = tab
                 appDelegate?.openMainWindow()
             }
         ).environment(appState)))
+        content.layoutSubtreeIfNeeded()
         content.setFrameSize(content.fittingSize)
-        contentView = content
-        let item = NSMenuItem()
-        item.view = content
-        menu.autoenablesItems = false
-        menu.showsStateColumn = false
-        menu.delegate = self
-        menu.addItem(item)
-        // 交给 NSStatusItem 开启系统菜单 tracking，不激活 App，也不手动弹出浮窗。
-        statusItem.menu = menu
-    }
-
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        // 自定义菜单视图在打开前测量；tracking 期间不修改菜单尺寸。
-        if let contentView { contentView.setFrameSize(contentView.fittingSize) }
+        contentItem.view = content
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        isMenuOpen = true
         // 自定义菜单视图不接收键盘事件；保留面板原有的快捷键入口。
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self,
@@ -256,6 +264,7 @@ private final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
     }
 

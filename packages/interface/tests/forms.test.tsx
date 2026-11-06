@@ -101,7 +101,7 @@ describe("forms through fake transport", () => {
       expect(onChanged).toHaveBeenCalledWith({ ...catalog, apiKeys: [choice] }),
     );
   });
-  it("freezes the Codex payload while its preview is pending", async () => {
+  it("freezes the ChatGPT payload while its preview is pending and rejects PAT imports", async () => {
     const { api, transport } = session();
     const preview = deferred<unknown>();
     transport.handler = (request) =>
@@ -130,10 +130,84 @@ describe("forms through fake transport", () => {
       preview.resolve({ kind: "personalAccessToken", accounts: [] }),
     );
     expect((input as HTMLTextAreaElement).disabled).toBe(false);
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Add a ChatGPT account using OAuth auth.json credentials.",
+    );
     expect(
       (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement)
         .disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      transport.requests.some((request) => request.method === "codex.import"),
     ).toBe(false);
+  });
+  it("imports a previewed OAuth account and reloads the host account list", async () => {
+    const { api, transport } = session();
+    const onImported = vi.fn();
+    const onClose = vi.fn();
+    const authorization = {
+      inProgress: false,
+      awaitingBrowser: false,
+      error: null,
+      region: null,
+      replacingAccountID: null,
+    };
+    const result = {
+      accounts: [],
+      serviceOrder: ["codex"],
+      floatingEnabled: false,
+      kimiAuthorization: authorization,
+      deepSeekAuthorization: authorization,
+      operationError: null,
+    };
+    transport.handler = (request) => {
+      if (request.method === "window.bootstrap") return bootstrap;
+      if (request.method === "window.settings.get") return settings;
+      if (request.method === "codex.preview")
+        return {
+          kind: "oauth",
+          accounts: [
+            {
+              id: "preview-account",
+              email: "synthetic@example.invalid",
+              plan: "Plus",
+              chatgptAccountID: "synthetic-id",
+            },
+          ],
+        };
+      if (request.method === "codex.import")
+        return { imported: 1, failed: 0, error: null };
+      if (request.method === "quota.accounts") return result;
+      throw new Error(request.method);
+    };
+    render(
+      <LanguageProvider language="en">
+        <HostProvider api={api}>
+          <CodexImportDialog
+            privacyMode={false}
+            onClose={onClose}
+            onImported={onImported}
+          />
+        </HostProvider>
+      </LanguageProvider>,
+    );
+    fireEvent.change(await screen.findByLabelText("Paste auth.json content"), {
+      target: { value: "synthetic-oauth-payload" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await screen.findByText("synthetic@example.invalid");
+    const save = screen.getByRole("button", {
+      name: "Save",
+    }) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    await waitFor(() => expect(onImported).toHaveBeenCalledWith(result));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(
+      transport.requests.find((request) => request.method === "codex.import")
+        ?.params,
+    ).toEqual({ payload: "synthetic-oauth-payload", visibleInPopover: true });
   });
   it("shows real empty application state", async () => {
     const { api, transport } = session();

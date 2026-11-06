@@ -43,13 +43,13 @@ struct MenuBarLabel: View {
     }
 
     private var managedKimiSnapshots: [QuotaSnapshot] {
-        SettingsStore.shared.isProviderEnabled(.kimi)
-            ? appState.kimiManagedAccounts.filter { $0.showInMenuBar && !(appState.kimiManagedMirrorsCLI($0) && SettingsStore.shared.effectiveMenuBarVisibility(for: .kimi)) }.compactMap { appState.kimiManagedQuotas[$0.id] }
-            : []
+        appState.kimiManagedAccounts.filter { $0.showInMenuBar && !(appState.kimiManagedMirrorsCLI($0) && SettingsStore.shared.effectiveMenuBarVisibility(for: .kimi)) }.compactMap { appState.kimiManagedQuotas[$0.id] }
     }
 
     private var importedCodexSnapshots: [QuotaSnapshot] {
-        appState.importedCodexAccounts.filter { $0.showInMenuBar == true }.compactMap { appState.importedCodexQuota(for: $0) }
+        appState.importedCodexAccounts.filter {
+            $0.showInMenuBar == true && !(SettingsStore.shared.effectiveMenuBarVisibility(for: .codex) && appState.importedCodexAccountMirrorsPrimary($0))
+        }.compactMap { appState.importedCodexQuota(for: $0) }
     }
 
     private var deepSeekBalanceTexts: [String] {

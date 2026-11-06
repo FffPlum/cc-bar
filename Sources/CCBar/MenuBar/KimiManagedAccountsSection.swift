@@ -5,7 +5,8 @@ struct KimiManagedAccountsSection: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        let accounts = appState.kimiManagedAccounts.filter { $0.visibleInPopover && !appState.kimiManagedMirrorsCLI($0) }
+        let primaryVisible = SettingsStore.shared.effectiveFloatingVisibility(for: .kimi) && appState.kimiAccount != nil
+        let accounts = appState.kimiManagedAccounts.filter { $0.showsInFloatingSurfaces && !(primaryVisible && appState.kimiManagedMirrorsCLI($0)) }
         VStack(spacing: 0) {
             ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
                 if index > 0 { Divider().padding(.leading, 28).padding(.trailing, 16) }
@@ -23,7 +24,7 @@ struct KimiManagedAccountsSection: View {
                     showsCost: false,
                     accountEdition: account.region.displayName,
                     isKimiCurrentAccount: appState.kimiManagedMirrorsCLI(account),
-                    followsVendorHeader: index == 0 && appState.kimiAccount == nil
+                    followsVendorHeader: index == 0 && !primaryVisible
                 )
             }
         }

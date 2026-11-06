@@ -31,8 +31,8 @@ struct DeepSeekAccountsSettingsView: View {
                         set: { value in appState.updateDeepSeekAccount(id: account.id) { $0.showInMenuBar = value } }
                     )).frame(width: ServiceRowMetrics.destination)
                     DisplayDestinationCheckbox(title: "Floating HUD", isOn: Binding(
-                        get: { account.showInFloatingHUD },
-                        set: { value in appState.updateDeepSeekAccount(id: account.id) { $0.showInFloatingHUD = value } }
+                        get: { account.showsInFloatingSurfaces },
+                        set: { value in appState.updateDeepSeekAccount(id: account.id) { $0.visibleInPopover = value; $0.showInFloatingHUD = value } }
                     )).frame(width: ServiceRowMetrics.destination)
                     Menu {
                         Button(tr("Refresh", "刷新")) {
@@ -44,8 +44,8 @@ struct DeepSeekAccountsSettingsView: View {
                     .menuStyle(.button).buttonStyle(.borderless).menuIndicator(.hidden)
                     .frame(width: ServiceRowMetrics.info)
                     Toggle(account.id, isOn: Binding(
-                        get: { account.visibleInPopover },
-                        set: { value in appState.updateDeepSeekAccount(id: account.id) { $0.visibleInPopover = value } }
+                        get: { account.showsInFloatingSurfaces },
+                        set: { value in appState.updateDeepSeekAccount(id: account.id) { $0.visibleInPopover = value; $0.showInFloatingHUD = value } }
                     ))
                     .labelsHidden().toggleStyle(.switch).controlSize(.small).tint(.green)
                     .help(tr("Show in popover", "在弹出面板中显示"))

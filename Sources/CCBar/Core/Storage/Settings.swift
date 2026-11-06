@@ -97,24 +97,18 @@ struct ProviderDisplaySettings: Sendable, Codable, Equatable {
         floatingHUD: true
     )
 
-    /// Cursor、Command Code 与 OpenCode Go 首次出现时保持关闭；只有用户主动开启后，
-    /// 才会进入远端刷新链路，避免未配置的机器产生后台失败状态。
-    /// Antigravity 默认开启（云端凭据直连，无本地进程依赖）。
-    ///
-    /// Command Code 与 OpenCode Go 的 `menuBar` / `floatingHUD` 刻意留 true，与 Cursor 的三项全 false 不同：
-    /// 子开关只在 `enabled` 为真时才生效（见 `effectiveMenuBarVisibility` /
-    /// `effectiveFloatingVisibility`），所以关闭状态下两者行为完全一致；差别在用户后来打开
-    /// 总开关的那一刻——Command Code 直接出现在菜单栏和悬浮窗，Cursor 还要再开两个子开关。
-    /// 这是有意的：Cursor 默认不替用户决定菜单栏和悬浮窗展示位。
-    /// 改这两个值会改变已装机用户开启 Provider 后的首屏，不要当成笔误「对齐」掉。
+    /// Kimi / Cursor initially have no selected destination. API-key providers
+    /// retain legacy storage defaults but never participate in quota display.
     static func defaults(for app: QuotaApp) -> ProviderDisplaySettings {
         switch app {
         case .codex, .claude, .antigravity:
             enabledByDefault
         case .cursor:
             ProviderDisplaySettings(enabled: false, menuBar: false, floatingHUD: false)
-        case .commandCode, .opencodeGo, .kimi:
+        case .commandCode, .opencodeGo:
             ProviderDisplaySettings(enabled: false, menuBar: true, floatingHUD: true)
+        case .kimi:
+            ProviderDisplaySettings(enabled: false, menuBar: false, floatingHUD: false)
         }
     }
 }
@@ -188,8 +182,8 @@ final class SettingsStore {
 
     private let defaults: UserDefaults
 
-    // 主 Provider 的全局 / 菜单栏 / 悬浮窗显示配置。
-    // 统一按 QuotaApp 索引，新增 Provider 时不再扩三组平行字段。
+    // Primary account destinations. `enabled` is persisted for older readers,
+    // and is kept equal to menuBar || floatingHUD by the mutation methods.
     var providerDisplaySettings: [QuotaApp: ProviderDisplaySettings] {
         didSet {
             saveProviderDisplaySettings()
@@ -497,6 +491,18 @@ final class SettingsStore {
             Self.mergeServiceSwitches(providers: &providerDisplaySettings, usage: &usageServiceVisibility)
             defaults.set(true, forKey: "ccbar.settings.separateAuthorizations.v1")
         }
+        if !defaults.bool(forKey: "ccbar.settings.quotaDestinations.v1") {
+            for app in QuotaApp.allCases where !app.usesAPIKey {
+                var display = providerDisplaySettings[app, default: .defaults(for: app)]
+                // Previously every enabled primary account appeared in the popover.
+                // Keep that selection while merging popover and desktop destinations.
+                display.menuBar = display.enabled && display.menuBar
+                display.floatingHUD = display.enabled
+                display.enabled = display.menuBar || display.floatingHUD
+                providerDisplaySettings[app] = display
+            }
+            defaults.set(true, forKey: "ccbar.settings.quotaDestinations.v1")
+        }
         saveProviderDisplaySettings()
         saveServiceOrder()
         saveUsageServiceVisibility()
@@ -585,7 +591,8 @@ final class SettingsStore {
     }
 
     func isProviderEnabled(_ app: QuotaApp) -> Bool {
-        !app.usesAPIKey && providerDisplaySettings[app, default: .defaults(for: app)].enabled
+        let display = providerDisplaySettings[app, default: .defaults(for: app)]
+        return !app.usesAPIKey && (display.menuBar || display.floatingHUD)
     }
 
     /// 设置页「开启」开关：一个服务一个开关，同时管额度（Provider）和用量（统计服务）。
@@ -618,7 +625,14 @@ final class SettingsStore {
 
     func setProviderEnabled(_ enabled: Bool, for app: QuotaApp) {
         var settings = providerDisplaySettings[app, default: .defaults(for: app)]
-        settings.enabled = enabled
+        if !enabled {
+            settings.menuBar = false
+            settings.floatingHUD = false
+        } else if !settings.menuBar && !settings.floatingHUD {
+            settings.menuBar = true
+            settings.floatingHUD = true
+        }
+        settings.enabled = settings.menuBar || settings.floatingHUD
         providerDisplaySettings[app] = settings
     }
 
@@ -629,6 +643,7 @@ final class SettingsStore {
     func setProviderShownInMenuBar(_ shown: Bool, for app: QuotaApp) {
         var settings = providerDisplaySettings[app, default: .defaults(for: app)]
         settings.menuBar = shown
+        settings.enabled = settings.menuBar || settings.floatingHUD
         providerDisplaySettings[app] = settings
     }
 
@@ -639,6 +654,7 @@ final class SettingsStore {
     func setProviderShownInFloatingHUD(_ shown: Bool, for app: QuotaApp) {
         var settings = providerDisplaySettings[app, default: .defaults(for: app)]
         settings.floatingHUD = shown
+        settings.enabled = settings.menuBar || settings.floatingHUD
         providerDisplaySettings[app] = settings
     }
 

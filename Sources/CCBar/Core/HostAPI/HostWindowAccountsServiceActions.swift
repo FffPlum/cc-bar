@@ -11,6 +11,7 @@ struct HostWindowAccountPatch {
 
 @MainActor
 struct HostWindowAccountsActions {
+    var discoverAccounts: () async -> Void
     var refresh: (HostWindowAccountTarget?) async -> Void
     var update: (HostWindowAccountTarget, HostWindowAccountPatch) throws -> Void
     var delete: (HostWindowAccountTarget) throws -> Void
@@ -31,6 +32,7 @@ struct HostWindowAccountsActions {
     static func live(state: AppState, settings: SettingsStore) -> Self {
         let failed = HostError(code: "operation_failed", message: tr("Account settings weren't saved. Try again.", "账号设置未保存，请重试。"))
         return Self(
+            discoverAccounts: { await state.reloadQuotaAccounts() },
             refresh: { target in
                 switch target {
                 case .kimi(let account): await state.loadKimiManagedQuota(account: account, reason: .userInitiated)
@@ -46,26 +48,23 @@ struct HostWindowAccountsActions {
                     if let value = patch.floating { settings.setProviderShownInFloatingHUD(value, for: app) }
                 case .imported(let account):
                     state.updateImportedCodexMetadata(id: account.id) {
-                        if let value = patch.enabled { $0.visibleInPopover = value }
+                        if let value = patch.floating ?? patch.enabled { $0.visibleInPopover = value; $0.showInFloatingHUD = value }
                         if let value = patch.menuBar { $0.showInMenuBar = value }
-                        if let value = patch.floating { $0.showInFloatingHUD = value }
                     }
                     guard let next = state.importedCodexAccounts.first(where: { $0.id == account.id }),
-                          patch.enabled.map({ next.visibleInPopover == $0 }) ?? true,
+                          (patch.floating ?? patch.enabled).map({ next.showsInFloatingSurfaces == $0 }) ?? true,
                           patch.menuBar.map({ next.showInMenuBar == $0 }) ?? true,
                           patch.floating.map({ next.showInFloatingHUD == $0 }) ?? true else { throw failed }
                 case .kimi(let account):
                     state.updateKimiManagedAccount(id: account.id) {
-                        if let value = patch.enabled { $0.visibleInPopover = value }
+                        if let value = patch.floating ?? patch.enabled { $0.visibleInPopover = value; $0.showInFloatingHUD = value }
                         if let value = patch.menuBar { $0.showInMenuBar = value }
-                        if let value = patch.floating { $0.showInFloatingHUD = value }
                     }
                     if state.kimiManagedOperationError != nil { throw failed }
                 case .deepSeek(let account):
                     state.updateDeepSeekAccount(id: account.id) {
-                        if let value = patch.enabled { $0.visibleInPopover = value }
+                        if let value = patch.floating ?? patch.enabled { $0.visibleInPopover = value; $0.showInFloatingHUD = value }
                         if let value = patch.menuBar { $0.showInMenuBar = value }
-                        if let value = patch.floating { $0.showInFloatingHUD = value }
                     }
                     if state.deepSeekOperationError != nil { throw failed }
                 }

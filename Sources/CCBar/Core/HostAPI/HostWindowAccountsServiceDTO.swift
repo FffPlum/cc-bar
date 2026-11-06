@@ -1,6 +1,10 @@
 import CCBarConfiguration
 import Foundation
 
+private enum QuotaManagementProvider: String {
+    case claude, chatgpt, kimi, xai, deepseekHarness, antigravity
+}
+
 extension HostWindowAccountsService {
     func accountsJSON() -> HostJSON {
         var rows: [HostJSON] = []
@@ -15,6 +19,7 @@ extension HostWindowAccountsService {
             rows.append(row(id: Self.accountID(app.rawValue, raw: login.id), kind: "localLogin", service: app.rawValue,
                 name: app.name, subtitle: settings.privacyMode ? privateName(login.id) : login.accountName ?? text("Local sign-in detected", "已识别本机登录"),
                 detected: true, sourceOwned: true, sourceApplication: app.rawValue, needsRefresh: login.needsRefresh,
+                management: app == .grok ? managementJSON(.xai, isDefault: true) : .null,
                 sources: [login.needsRefresh ? text("Open the application to refresh its login.", "请打开原应用刷新登录。")
                     : text("Login managed by the application · Quota unavailable", "登录由原应用管理 · 暂未接入额度查询")]))
         }
@@ -42,9 +47,9 @@ extension HostWindowAccountsService {
         switch app {
         case .codex: identity = (state.codexAccount?.email, state.codexPlanName, state.codexAccount != nil)
         case .claude: identity = (state.claudeDisplayEmail, state.claudePlanName, state.claudeAccount != nil)
-        case .antigravity: identity = (state.antigravityAccount?.email, state.antigravityAccount?.planType ?? state.antigravityQuota?.planType, state.antigravityAccount != nil)
+        case .antigravity: identity = (nonemptyAccountText(state.antigravityAccount?.email) ?? state.antigravityAccount?.displayName, state.antigravityAccount?.planType ?? state.antigravityQuota?.planType, state.antigravityAccount != nil)
         case .cursor: identity = (state.cursorAccount?.email, state.cursorQuota?.planType, state.cursorAccount != nil)
-        case .kimi: identity = (state.kimiNickname, state.kimiPlanName, state.kimiAccount != nil)
+        case .kimi: identity = (nonemptyAccountText(state.kimiNickname) ?? state.kimiEmail, state.kimiPlanName, state.kimiAccount != nil)
         case .commandCode: identity = (state.commandCodeAccount?.email, state.commandCodeQuota?.planType, state.commandCodeAccount != nil)
         case .opencodeGo: identity = (nil, nil, state.opencodeGoAccount != nil)
         }
@@ -52,21 +57,25 @@ extension HostWindowAccountsService {
             : app == .cursor && state.cursorKeychainAccessRequired ? "cursor" : nil
         let detected = identity.signedIn || authorization != nil || (app == .codex && !state.importedCodexAccounts.isEmpty)
             || (app == .kimi && !state.kimiManagedAccounts.isEmpty)
+        let name = if identity.signedIn {
+            settings.privacyMode ? privateName("primary:" + app.rawValue) : nonemptyAccountText(identity.name) ?? provider.title
+        } else { provider.title }
         let subtitle: String
         if authorization != nil && !identity.signedIn {
             subtitle = text("Authorize access to the application's sign-in.", "请授权读取应用的登录状态。")
         } else if identity.signedIn {
-            subtitle = settings.privacyMode ? privateName("primary:" + app.rawValue)
-                : [identity.name, identity.plan].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+            subtitle = nonemptyAccountText(identity.plan) ?? text("Signed in", "已登录")
         } else { subtitle = connectHint(app) }
         return row(id: Self.accountID(app.rawValue), kind: "primary", service: app.rawValue,
-            name: provider.title, subtitle: subtitle.isEmpty ? text("Signed in", "已登录") : subtitle,
+            name: name, subtitle: subtitle,
             plan: identity.plan, region: app == .kimi ? state.kimiCLIRegion?.rawValue : nil,
             detected: detected, current: identity.signedIn, pat: app == .codex && state.codexAccount?.isPersonalAccessToken == true,
             enabled: settings.isProviderEnabled(app), menuBar: settings.isProviderShownInMenuBar(app),
             floating: settings.isProviderShownInFloatingHUD(app), supportsMenuBar: provider.supportsMenuBar,
             supportsFloating: provider.supportsFloatingHUD, authorization: authorization, sourceOwned: true,
-            sourceApplication: AgentApplication(rawValue: app.rawValue)?.rawValue, sources: [sourceHelp(app)],
+            sourceApplication: AgentApplication(rawValue: app.rawValue)?.rawValue,
+            management: primaryManagementProvider(app).map { managementJSON($0, isDefault: true) } ?? .null,
+            sources: [sourceHelp(app)],
             snapshot: state.quotaSnapshot(for: app), refresh: state.refreshState(for: app), error: state.quotaError(for: app))
     }
 
@@ -74,20 +83,22 @@ extension HostWindowAccountsService {
         let display = account.alias.isEmpty ? account.email ?? text("Codex account", "Codex 账号") : account.alias
         return row(id: Self.accountID("codex", raw: account.id), kind: "importedCodex", service: "codex",
             name: settings.privacyMode ? privateName(account.id) : display,
-            subtitle: text("Imported Codex account", "导入的 Codex 账号"), plan: CodexAccount.planName(account.planType),
+            subtitle: CodexAccount.planName(account.planType) ?? text("Signed in", "已登录"), plan: CodexAccount.planName(account.planType),
             detected: true, current: state.importedCodexAccountMirrorsPrimary(account), pat: account.isPersonalAccessToken == true,
-            enabled: account.visibleInPopover, menuBar: account.showInMenuBar == true, floating: account.showInFloatingHUD == true,
+            enabled: account.isVisible, menuBar: account.showInMenuBar == true, floating: account.showsInFloatingSurfaces,
             supportsMenuBar: true, supportsFloating: true, blocked: actions.keychainBlocked(.imported(account)),
+            management: account.isPersonalAccessToken == true ? .null : managementJSON(.chatgpt, isDefault: false),
             sources: [text("Credentials imported into CCBar's private local storage. Your Codex CLI sign-in is not changed.", "凭据导入 CCBar 的本机私有存储，不会更改 Codex CLI 登录。")],
             snapshot: state.importedCodexQuota(for: account), refresh: state.importedCodexRefreshState(for: account), error: state.importedCodexError(for: account))
     }
     private func kimiJSON(_ account: KimiManagedAccount) -> HostJSON {
         row(id: Self.accountID("kimi", raw: account.id), kind: "managedKimi", service: "kimi",
-            name: settings.privacyMode ? privateName(account.id) : account.nickname ?? text("Kimi account", "Kimi 账号"),
+            name: settings.privacyMode ? privateName(account.id) : nonemptyAccountText(account.nickname) ?? nonemptyAccountText(account.email) ?? text("Kimi account", "Kimi 账号"),
             subtitle: account.region.displayName, plan: account.userLevelName ?? state.kimiManagedQuotas[account.id]?.planType,
             region: account.region.rawValue, detected: true, current: state.kimiManagedMirrorsCLI(account),
-            enabled: account.visibleInPopover, menuBar: account.showInMenuBar, floating: account.showInFloatingHUD,
+            enabled: account.isVisible, menuBar: account.showInMenuBar, floating: account.showsInFloatingSurfaces,
             supportsMenuBar: true, supportsFloating: true, blocked: actions.keychainBlocked(.kimi(account)),
+            management: managementJSON(.kimi, isDefault: false),
             sources: [text("Official device authorization managed by CCBar. Your Kimi CLI sign-in is not changed.", "由 CCBar 管理官方设备授权，不会更改 Kimi CLI 登录。")],
             snapshot: state.kimiManagedQuotas[account.id], refresh: state.kimiManagedRefreshStates[account.id] ?? QuotaRefreshState(),
             error: state.kimiManagedErrors[account.id])
@@ -104,9 +115,10 @@ extension HostWindowAccountsService {
         return row(id: Self.accountID("deepSeek", raw: account.id), kind: "deepSeek", service: "deepSeek",
             name: settings.privacyMode ? privateName(account.id) : account.name,
             subtitle: text("Account authorization", "账号授权"), detected: true,
-            enabled: account.visibleInPopover, menuBar: account.showInMenuBar, floating: account.showInFloatingHUD,
+            enabled: account.isVisible, menuBar: account.showInMenuBar, floating: account.showsInFloatingSurfaces,
             supportsMenuBar: true, supportsFloating: true, sourceOwned: account.sourceApplication != nil,
             sourceApplication: account.sourceApplication.flatMap { AgentApplication(rawValue: $0)?.rawValue },
+            management: managementJSON(.deepseekHarness, isDefault: account.sourceApplication != nil),
             sources: [account.sourceApplication != nil
                 ? text("Detected in an application. Removing the CCBar copy leaves the original application signed in.", "从应用自动识别。删除 CCBar 副本后，原应用保持登录。")
                 : text("Credentials saved by CCBar. Removing a browser authorization also requests sign-out from DeepSeek.", "凭据由 CCBar 保存。删除浏览器授权账号时也会向 DeepSeek 请求退出登录。")],
@@ -118,7 +130,7 @@ extension HostWindowAccountsService {
                      pat: Bool = false, enabled: Bool = false, menuBar: Bool = false, floating: Bool = false,
                      supportsMenuBar: Bool = false, supportsFloating: Bool = false, blocked: Bool = false,
                      authorization: String? = nil, sourceOwned: Bool = false, sourceApplication: String? = nil,
-                     needsRefresh: Bool = false, sources: [String] = [], snapshot: QuotaSnapshot? = nil,
+                     needsRefresh: Bool = false, management: HostJSON = .null, sources: [String] = [], snapshot: QuotaSnapshot? = nil,
                      refresh: QuotaRefreshState = QuotaRefreshState(), error: String? = nil, balance: HostJSON = .null) -> HostJSON {
         .object([
             "id": .string(id), "kind": .string(kind), "service": .string(service), "name": .string(name), "subtitle": .string(subtitle),
@@ -127,10 +139,40 @@ extension HostWindowAccountsService {
             "supportsMenuBar": .bool(supportsMenuBar), "supportsFloatingHUD": .bool(supportsFloating), "keychainAccessBlocked": .bool(blocked),
             "authorizationRequired": HostWindowJSON.string(authorization), "sourceLines": .array(sources.map(HostJSON.string)),
             "sourceOwned": .bool(sourceOwned), "sourceApplication": HostWindowJSON.string(sourceApplication), "needsRefresh": .bool(needsRefresh),
+            "quotaManagement": management,
             "snapshot": quotaSnapshotJSON(snapshot), "balance": balance,
             "refresh": refreshJSON(refresh, error: error == nil ? nil : text("Refresh failed. Try again after the retry period.", "刷新失败，请等待重试间隔后再试。"))
         ])
     }
+
+    // The shared account list also feeds statistics. Keep those accounts intact,
+    // and describe eligibility for the narrower account-management view separately.
+    private func primaryManagementProvider(_ app: QuotaApp) -> QuotaManagementProvider? {
+        switch app {
+        case .codex:
+            guard let account = state.codexAccount, !account.isPersonalAccessToken else { return nil }
+            return .chatgpt
+        case .claude:
+            return state.claudeAccount != nil || state.claudeDesktopAccessDenied ? .claude : nil
+        case .kimi:
+            guard let account = state.kimiAccount, account.source != .apiKey else { return nil }
+            return .kimi
+        case .antigravity:
+            return state.antigravityAccount != nil ? .antigravity : nil
+        case .cursor, .commandCode, .opencodeGo:
+            return nil
+        }
+    }
+
+    private func managementJSON(_ provider: QuotaManagementProvider, isDefault: Bool) -> HostJSON {
+        .object(["provider": .string(provider.rawValue), "isDefault": .bool(isDefault)])
+    }
+
+    private func nonemptyAccountText(_ value: String?) -> String? {
+        guard let text = value?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return text
+    }
+
     private func connectHint(_ app: QuotaApp) -> String {
         switch app {
         case .codex: text("Sign in with the Codex CLI to detect it", "用 Codex CLI 登录后自动识别")

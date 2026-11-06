@@ -37,6 +37,9 @@ final class FloatingPanelController: NSObject {
         guard let appState else { return }
         if panel == nil {
             buildPanel(appState: appState)
+        } else {
+            // 选择变更与窗口测量发生在同一调用中，先提交新内容，不能等下一次 SwiftUI 重绘。
+            hostingView?.rootView = makeContent(appState: appState)
         }
         resizeToFitContent()
         panel?.orderFrontRegardless()
@@ -53,6 +56,7 @@ final class FloatingPanelController: NSObject {
 
     private func applyFitOnce() {
         guard let panel, let hosting = hostingView else { return }
+        hosting.needsLayout = true
         hosting.layoutSubtreeIfNeeded()
         let fit = hosting.fittingSize
         guard fit.width > 1, fit.height > 1 else { return }
@@ -90,13 +94,16 @@ final class FloatingPanelController: NSObject {
         openSettingsHandler?()
     }
 
-    private func buildPanel(appState: AppState) {
-        let settings = SettingsStore.shared
-        let content = AnyView(
-            FloatingContentView(settings: settings)
+    private func makeContent(appState: AppState) -> AnyView {
+        AnyView(
+            FloatingContentView(settings: SettingsStore.shared)
                 .environment(appState)
         )
-        let hosting = DraggableHostingView(rootView: content)
+    }
+
+    private func buildPanel(appState: AppState) {
+        let settings = SettingsStore.shared
+        let hosting = DraggableHostingView(rootView: makeContent(appState: appState))
         hosting.contextMenuProvider = { [weak self] in self?.makeContextMenu() }
         hosting.translatesAutoresizingMaskIntoConstraints = false
         // hosting view 的 layer 默认会用系统底色填满矩形 content,会在 SwiftUI 圆角外露出"直角边"。

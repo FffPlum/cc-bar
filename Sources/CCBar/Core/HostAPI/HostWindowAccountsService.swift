@@ -67,13 +67,16 @@ final class HostWindowAccountsService: HostWindowPresenter {
             }
             try actions.update(account, patch)
             actions.syncFloating(); didChange?()
-            if patch.enabled == true { await actions.refresh(account); didChange?() }
+            if patch.enabled == true || patch.menuBar == true || patch.floating == true {
+                await actions.refresh(account); didChange?()
+            }
             return accountsJSON()
         case "quota.reorder": return try reorder(params)
         case "window.quota.refresh":
             try keys(params, ["id"])
             let raw = try HostWindowValidation.string(params, "id", required: false)
             let account = try raw.map { try target($0) }
+            if raw == nil { await actions.discoverAccounts() }
             await actions.refresh(account); didChange?(); return accountsJSON()
         case "quota.resetCredits":
             try keys(params, ["id"])

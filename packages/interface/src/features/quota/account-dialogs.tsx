@@ -51,7 +51,18 @@ export function CodexImportDialog({
     setPending("preview");
     setError(null);
     try {
-      setPreview(await api.codexPreview(payload));
+      const result = await api.codexPreview(payload);
+      if (result.kind !== "oauth") {
+        setPreview(null);
+        setError(
+          t(
+            "Add a ChatGPT account using OAuth auth.json credentials.",
+            "请使用 OAuth auth.json 凭据添加 ChatGPT 账号。",
+          ),
+        );
+        return;
+      }
+      setPreview(result);
     } catch (reason) {
       setPreview(null);
       setError(errorMessage(reason));
@@ -60,7 +71,7 @@ export function CodexImportDialog({
     }
   };
   const save = async () => {
-    if (pending || !preview) return;
+    if (pending || preview?.kind !== "oauth") return;
     setPending("save");
     setError(null);
     try {
@@ -101,11 +112,13 @@ export function CodexImportDialog({
         showCloseButton={pending === null}
       >
         <DialogHeader>
-          <DialogTitle>{t("Add Codex Account", "添加 Codex 账号")}</DialogTitle>
+          <DialogTitle>
+            {t("Add ChatGPT Account", "添加 ChatGPT 账号")}
+          </DialogTitle>
           <DialogDescription>
             {t(
-              "Supports one auth.json, a JSON account array, or a personal access token. Your Codex CLI sign-in is not changed.",
-              "支持单个 auth.json、多账号 JSON 数组或 Personal access token，不会切换 Codex CLI 登录。",
+              "Import OAuth credentials from auth.json or a JSON account array. Your Codex sign-in is not changed.",
+              "支持 OAuth auth.json 或多账号 JSON 数组，不会切换 Codex 登录。",
             )}
           </DialogDescription>
         </DialogHeader>
@@ -140,17 +153,6 @@ export function CodexImportDialog({
               : t("Preview", "预览")}
           </Button>
         )}
-        {preview?.kind === "personalAccessToken" && (
-          <div className="rounded-lg bg-green-500/[0.07] p-3">
-            <p className="font-medium">Personal access token</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              {t(
-                "Identity is verified online on save.",
-                "身份将在保存时联网验证。",
-              )}
-            </p>
-          </div>
-        )}
         {preview && preview.accounts.length > 0 && (
           <div className="max-h-40 space-y-2 overflow-auto rounded-lg bg-green-500/[0.07] p-3">
             {preview.accounts.map((account) => (
@@ -178,7 +180,7 @@ export function CodexImportDialog({
         )}
         {preview && (
           <label className="flex items-center justify-between text-[12.5px]">
-            <span>{t("Show in popover", "在弹出面板中显示")}</span>
+            <span>{t("Show in floating panels", "在悬浮窗中显示")}</span>
             <Switch
               disabled={pending !== null}
               checked={visible}
@@ -204,7 +206,7 @@ export function CodexImportDialog({
           </Button>
           <PendingButton
             pending={pending === "save"}
-            disabled={!preview || pending !== null}
+            disabled={preview?.kind !== "oauth" || pending !== null}
             onClick={() => void save()}
           >
             {preview && preview.accounts.length > 1

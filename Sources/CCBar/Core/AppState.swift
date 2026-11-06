@@ -173,7 +173,7 @@ final class AppState {
     // 允许重复出现,token 存入私有文件 (见 ImportedCodexStore)。
     // - `importedCodexAccounts` 元数据列表,保持添加顺序。
     // - `importedCodexQuotas / Sources / Errors / RefreshStates` 按 account.id 索引,
-    //   只在该账号 `visibleInPopover` 为 true 时才刷新与展示。
+    //   只在该账号选择了菜单栏或悬浮窗展示位时自动刷新。
     var importedCodexAccounts: [ImportedCodexAccount] = []
     var importedCodexQuotas: [String: QuotaSnapshot] = [:]
     var importedCodexSources: [String: QuotaSnapshotSource] = [:]
@@ -436,7 +436,7 @@ final class AppState {
         }
         guard app == .codex else { return nil }
         guard let account = importedCodexAccounts.first(where: { $0.id == observation.entry }),
-              account.visibleInPopover, importedAlertEntryVersions[account.id, default: 0] == observation.entryVersion,
+              account.isVisible, importedAlertEntryVersions[account.id, default: 0] == observation.entryVersion,
               importedAlertIdentities[account.id] == observation.identity else { return nil }
         let alias = account.alias.trimmingCharacters(in: .whitespacesAndNewlines)
         return QuotaAlertDisplayContext(name: alias.isEmpty ? (account.email ?? "Codex") : alias, privacyKey: account.id)
@@ -656,6 +656,18 @@ final class AppState {
         refreshInFlight = nil
     }
 
+    /// Explicit account discovery is independent of quota visibility. Reuse the
+    /// local readers without changing preferences or requesting remote quota.
+    func reloadQuotaAccounts() async {
+        guard beginStateOperation() else { return }
+        defer { activeStateOperations -= 1 }
+        await loadCodex()
+        await loadClaude()
+        handleClaudeDesktopAccessRequest()
+        await loadAntigravity()
+        await loadKimi()
+    }
+
     /// 每次刷新(手动 / Scheduler 定时)只重读已启用主 Provider 的本地凭据,
     /// 以便用户在外部(如 cc-switch)切换账号后 ccbar 能感知到。
     /// loadCodex / loadClaude 内部会比较 accountId / email,若身份变化则清掉
@@ -725,8 +737,8 @@ final class AppState {
                 await loadKimiQuota(reason: reason)
                 await loadKimiProfileIfNeeded()
             }
-            await loadAllKimiManagedQuotas(reason: reason)
         }
+        await loadAllKimiManagedQuotas(reason: reason)
         if plan.refreshImported {
             await loadAllImportedCodexQuotas(
                 reason: reason,
@@ -1049,6 +1061,7 @@ final class AppState {
             existing.email = parsed.email ?? existing.email
             existing.planType = parsed.planType ?? existing.planType
             existing.visibleInPopover = visibleInPopover
+            existing.showInFloatingHUD = visibleInPopover
             list[idx] = existing
         } else {
             list.append(ImportedCodexAccount(
@@ -1100,6 +1113,7 @@ final class AppState {
             existing.email = fetched.email ?? existing.email
             existing.planType = fetched.snapshot.planType ?? existing.planType
             existing.visibleInPopover = visibleInPopover
+            existing.showInFloatingHUD = visibleInPopover
             existing.isPersonalAccessToken = true
             list[idx] = existing
         } else {
@@ -1140,7 +1154,13 @@ final class AppState {
         guard !isPreparingForTermination else { return }
         var list = ImportedCodexStore.loadAll()
         guard let idx = list.firstIndex(where: { $0.id == id }) else { return }
+        let previous = list[idx]
         mutate(&list[idx])
+        if list[idx].showInFloatingHUD != previous.showInFloatingHUD {
+            list[idx].visibleInPopover = list[idx].showInFloatingHUD == true
+        } else if list[idx].visibleInPopover != previous.visibleInPopover {
+            list[idx].showInFloatingHUD = list[idx].visibleInPopover
+        }
         do { try ImportedCodexStore.saveAll(list) } catch {
             AppLog.error(.credentials, "imported codex save metadata failed: \(Redact.error(error))")
             return
@@ -1197,7 +1217,7 @@ final class AppState {
         return importedCodexRefreshStates[account.id] ?? QuotaRefreshState()
     }
 
-    /// 对所有 `visibleInPopover` 为 true 的导入账号并发拉一遍配额,并发上限 3。
+    /// 对所有选中任一展示位的导入账号并发拉一遍配额,并发上限 3。
     private func loadAllImportedCodexQuotas(
         reason: QuotaRefreshReason,
         canMirrorPrimary: Bool

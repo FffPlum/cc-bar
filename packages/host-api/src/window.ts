@@ -119,6 +119,7 @@ export interface RefreshState {
 export interface BalanceWallet { currency: string; total: DecimalString; toppedUp: DecimalString; granted: DecimalString; displayTotal: string }
 export interface AccountBalance { wallets: BalanceWallet[]; available: boolean | null; fetchedAt: ISODateTime }
 export type QuotaAccountKind = "primary" | "importedCodex" | "managedKimi" | "deepSeek" | "moonshot" | "localLogin";
+export type QuotaManagementProvider = "claude" | "chatgpt" | "kimi" | "xai" | "deepseekHarness" | "antigravity";
 export interface QuotaAccount {
   id: string;
   kind: QuotaAccountKind;
@@ -130,6 +131,7 @@ export interface QuotaAccount {
   detected: boolean;
   current: boolean;
   personalAccessToken: boolean;
+  quotaManagement?: { provider: QuotaManagementProvider; isDefault: boolean } | null;
   enabled: boolean;
   showInMenuBar: boolean;
   showInFloatingHUD: boolean;
@@ -160,7 +162,13 @@ export interface QuotaAccountsResult {
   deepSeekAuthorization: DeviceAuthorizationState;
   operationError: string | null;
 }
-export interface AccountDisplayPatch { enabled?: boolean; showInMenuBar?: boolean; showInFloatingHUD?: boolean }
+export interface AccountDisplayPatch {
+  /** Legacy enable input; new clients control destinations independently. */
+  enabled?: boolean;
+  showInMenuBar?: boolean;
+  /** Shared selection for the menu bar panel and desktop floating window. */
+  showInFloatingHUD?: boolean;
+}
 export interface QuotaResetCredit {
   id: string;
   title: string;
@@ -661,7 +669,7 @@ const quotaLimitSchema = object({ id: string, kind: enumeration(["fiveHour", "we
 const quotaSnapshotSchema = object({ fetchedAt: isoDate, planType: nullable(string), unlimited: nullable(boolean), limits: array(quotaLimitSchema) });
 const refreshStateSchema = object({ inFlight: boolean, backoffUntil: nullable(isoDate), lastSuccessAt: nullable(isoDate), lastAttemptAt: nullable(isoDate), failed: boolean, source: nullable(string), error: nullable(string) });
 const accountBalanceSchema = object({ wallets: array(object({ currency: string, total: decimal, toppedUp: decimal, granted: decimal, displayTotal: string })), available: nullable(boolean), fetchedAt: isoDate });
-const quotaAccountSchema = object({ id: string, kind: enumeration(["primary", "importedCodex", "managedKimi", "deepSeek", "moonshot", "localLogin"] as const), service: enumeration(["codex", "claude", "antigravity", "cursor", "commandCode", "opencodeGo", "kimi", "deepSeek", "moonshot", "gemini", "grok"] as const), name: string, subtitle: string, plan: nullable(string), region: nullable(enumeration(["china", "global"] as const)), detected: boolean, current: boolean, personalAccessToken: boolean, enabled: boolean, showInMenuBar: boolean, showInFloatingHUD: boolean, supportsMenuBar: boolean, supportsFloatingHUD: boolean, keychainAccessBlocked: boolean, authorizationRequired: nullable(enumeration(["claudeDesktop", "cursor"] as const)), sourceLines: array(string), sourceOwned: boolean, sourceApplication: nullable(applicationID), needsRefresh: boolean, snapshot: nullable(quotaSnapshotSchema), balance: nullable(accountBalanceSchema), refresh: refreshStateSchema });
+const quotaAccountSchema = object({ id: string, kind: enumeration(["primary", "importedCodex", "managedKimi", "deepSeek", "moonshot", "localLogin"] as const), service: enumeration(["codex", "claude", "antigravity", "cursor", "commandCode", "opencodeGo", "kimi", "deepSeek", "moonshot", "gemini", "grok"] as const), name: string, subtitle: string, plan: nullable(string), region: nullable(enumeration(["china", "global"] as const)), detected: boolean, current: boolean, personalAccessToken: boolean, quotaManagement: optional(nullable(object({ provider: enumeration(["claude", "chatgpt", "kimi", "xai", "deepseekHarness", "antigravity"] as const), isDefault: boolean }))), enabled: boolean, showInMenuBar: boolean, showInFloatingHUD: boolean, supportsMenuBar: boolean, supportsFloatingHUD: boolean, keychainAccessBlocked: boolean, authorizationRequired: nullable(enumeration(["claudeDesktop", "cursor"] as const)), sourceLines: array(string), sourceOwned: boolean, sourceApplication: nullable(applicationID), needsRefresh: boolean, snapshot: nullable(quotaSnapshotSchema), balance: nullable(accountBalanceSchema), refresh: refreshStateSchema });
 const deviceAuthorizationSchema = object({ inProgress: boolean, awaitingBrowser: boolean, error: nullable(string), region: nullable(enumeration(["china", "global"] as const)), replacingAccountID: nullable(string) });
 const quotaAccountsSchema = object({ accounts: array(quotaAccountSchema), serviceOrder: array(quotaService), floatingEnabled: boolean, kimiAuthorization: deviceAuthorizationSchema, deepSeekAuthorization: deviceAuthorizationSchema, operationError: nullable(string) });
 const quotaResetCreditsSchema = object({ accountID: string, availableCount: integer, credits: array(object({ id: string, title: string, status: string, grantedAt: nullable(isoDate), expiresAt: nullable(isoDate) })), error: nullable(string) });
