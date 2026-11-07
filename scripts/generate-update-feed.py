@@ -13,6 +13,7 @@ import plistlib
 import re
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 
 
@@ -118,12 +119,16 @@ def main():
             decode_key(signature, (64,), f"{path.name} 签名")
         return signature
 
+    def verify(path, signature):
+        subprocess.run(
+            ["xcrun", "swift", str(root / "scripts/verify-update-signature.swift"), public_key, signature, str(path)],
+            check=True, env=child_env,
+        )
+
     archive_signature = sign(archive)
-    subprocess.run(
-        ["xcrun", "swift", str(root / "scripts/verify-update-signature.swift"), public_key, archive_signature, str(archive)],
-        check=True, env=child_env,
-    )
+    verify(archive, archive_signature)
     notes_signature = sign(release_notes)
+    verify(release_notes, notes_signature)
 
     feed = ET.Element("rss", {"version": "2.0"})
     channel = ET.SubElement(feed, "channel")
@@ -165,6 +170,12 @@ def main():
     require(signing_block is not None and int(signing_block[2]) == unsigned_feed_length,
             "appcast 签名长度不匹配")
     decode_key(signing_block[1].decode("ascii"), (64,), "appcast 签名")
+    # The feed signature covers the XML bytes before the appended signing block.
+    # Verify that exact prefix without modifying the final signed asset.
+    with tempfile.TemporaryDirectory(prefix="ccbar-feed-verification-") as directory:
+        unsigned_feed = Path(directory) / "appcast.xml"
+        unsigned_feed.write_bytes(signed_feed[:unsigned_feed_length])
+        verify(unsigned_feed, signing_block[1].decode("ascii"))
     (args.dist / "version.json").write_text(json.dumps({
         "tag": args.tag,
         "version": version,

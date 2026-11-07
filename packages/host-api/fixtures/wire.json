@@ -1,0 +1,6 @@
+{
+  "request": { "version": 1, "id": "fixture-1", "method": "settings.get", "params": {} },
+  "success": { "version": 1, "id": "fixture-1", "result": { "privacyMode": false, "useInstalledAppIcons": true } },
+  "error": { "version": 1, "id": "fixture-1", "error": { "code": "invalid_params", "message": "Invalid parameters" } },
+  "event": { "version": 1, "event": "state.changed", "revision": "1", "domains": ["settings"] }
+}

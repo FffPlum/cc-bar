@@ -1,42 +1,124 @@
-name: Release Build
+name: Validate
 
-# 在发布 tag 之前检查 Release 编译与打包，使用与正式发布相同的 runner 和脚本。
 on:
+  pull_request:
+    branches: [main, develop]
   push:
-    branches: [develop, 'feature/**', 'release/**']
+    branches: [main, develop, 'feature/**', 'release/**', 'codex/**']
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  NODE_VERSION: '22.23.2'
+  XCODE_VERSION: '26.6'
+  CI: 'true'
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  build:
-    # ARM hosted runner 容量不足时会在编译前失败；Intel runner 交叉编译 arm64。
-    runs-on: macos-15-intel
-    timeout-minutes: 30
+  web:
+    name: Host API and React
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: 选择最新 Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          xcode-version: latest-stable
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            packages/host-api/package-lock.json
+            packages/interface/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm --prefix packages/host-api ci
+          npm --prefix packages/interface ci
+      - name: Validate release tooling
+        run: |
+          python3 scripts/validate-release.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          bash -n scripts/build.sh scripts/build-web-interface.sh
+      - name: Test Host API contract
+        run: npm --prefix packages/host-api test
+      - name: Test React interface
+        run: npm --prefix packages/interface test
+      - name: Build and validate bundled web resources
+        run: ./scripts/build-web-interface.sh
 
-      - name: 构建并打包 Release
-        env:
-          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
-          CCBAR_SIGN_IDENTITY: '-'
-          CCBAR_BUILD_ARCH: arm64
-        run: ./scripts/build.sh
-
-      - name: 保存验证产物
-        uses: actions/upload-artifact@v4
+  native:
+    name: macOS native validation
+    # Run native tests on Intel; release.yml separately cross-compiles arm64.
+    runs-on: macos-26-intel
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: CCBar-Release-Build-${{ github.run_number }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            packages/host-api/package-lock.json
+            packages/interface/package-lock.json
+      - name: Select pinned Xcode
+        run: |
+          touch "$RUNNER_TEMP/ccbar-diagnostics-start"
+          sudo xcode-select --switch "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          {
+            sw_vers
+            uname -m
+            xcodebuild -version
+            swift --version
+          } | tee "$RUNNER_TEMP/toolchain.log"
+      - name: Install and build web resources
+        run: ./scripts/build-web-interface.sh --install
+      - name: Run native unit tests
+        run: |
+          set -o pipefail
+          swift test --disable-automatic-resolution --jobs 4 2>&1 | tee "$RUNNER_TEMP/swift-tests.log"
+      - name: Build Debug app without signing credentials
+        run: |
+          set -o pipefail
+          xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug \
+            -destination 'platform=macOS,arch=x86_64' \
+            -derivedDataPath "$RUNNER_TEMP/ccbar-debug" \
+            -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY='' \
+            CCBAR_WEB_INTERFACE_BUILT=1 build 2>&1 | tee "$RUNNER_TEMP/xcode-debug.log"
+      - name: Collect this job's CCBar and XCTest crash reports
+        if: failure()
+        run: |
+          if [[ -f "$RUNNER_TEMP/ccbar-diagnostics-start" ]]; then
+            mkdir -p "$RUNNER_TEMP/ccbar-crashes"
+            for reports_dir in "$HOME/Library/Logs/DiagnosticReports" /Library/Logs/DiagnosticReports; do
+              if [[ -d "$reports_dir" ]]; then
+                find "$reports_dir" -type f -newer "$RUNNER_TEMP/ccbar-diagnostics-start" \
+                  \( -iname '*ccbar*.ips' -o -iname '*ccbar*.crash' -o -iname '*xctest*.ips' -o -iname '*xctest*.crash' \) \
+                  -exec cp '{}' "$RUNNER_TEMP/ccbar-crashes/" \;
+              fi
+            done
+          fi
+      - name: Preserve native failure logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-validation-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            dist/CCBar.dmg
-            dist/CCBar.app.zip
-          if-no-files-found: error
+            ${{ runner.temp }}/swift-tests.log
+            ${{ runner.temp }}/xcode-debug.log
+            ${{ runner.temp }}/toolchain.log
+            ${{ runner.temp }}/ccbar-crashes/
+          if-no-files-found: ignore
           retention-days: 7

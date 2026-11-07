@@ -1,0 +1,32 @@
+import SwiftUI
+
+/// Account content under the shared Kimi vendor header, without extra inset.
+struct KimiManagedAccountsSection: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        let primaryVisible = SettingsStore.shared.effectiveFloatingVisibility(for: .kimi) && appState.kimiAccount != nil
+        let accounts = appState.kimiManagedAccounts.filter { $0.showsInFloatingSurfaces && !(primaryVisible && appState.kimiManagedMirrorsCLI($0)) }
+        VStack(spacing: 0) {
+            ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
+                if index > 0 { Divider().padding(.leading, 28).padding(.trailing, 16) }
+                ServiceBlockView(
+                    app: .kimi,
+                    subtitle: SettingsStore.shared.privacyMode
+                        ? "\(appState.kimiManagedDisplayName(account)) · \(appState.kimiManagedSubtitle(account))"
+                        : appState.kimiManagedSubtitle(account),
+                    tint: QuotaApp.kimi.tintColor,
+                    snapshot: appState.kimiManagedQuotas[account.id],
+                    error: appState.kimiManagedErrors[account.id],
+                    periodSpend: nil,
+                    periodIsBillingCycle: false,
+                    todayCost: nil,
+                    showsCost: false,
+                    accountEdition: account.region.displayName,
+                    isKimiCurrentAccount: appState.kimiManagedMirrorsCLI(account),
+                    followsVendorHeader: index == 0 && !primaryVisible
+                )
+            }
+        }
+    }
+}

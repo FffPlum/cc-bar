@@ -16,6 +16,7 @@ build/
 build-dev/
 dist/
 DerivedData/
+Sources/CCBar/Resources/WebInterface/
 *.xcuserstate
 *.xcuserdatad/
 xcuserdata/
@@ -28,6 +29,10 @@ Resources/AppIcon.icns
 .swiftpm/
 # Package.resolved 刻意入库：App 用它锁定依赖的具体 revision（当前为 zstd 1.5.7），
 # 保证本机、CI 与发布流程拿到同一份源码；升级依赖时把该文件一起提交。
+
+# Python release-tool checks
+__pycache__/
+*.pyc
 
 # CocoaPods / Carthage (预留)
 Pods/
@@ -62,3 +67,6 @@ usage-rollup.json
 *.cer
 *.key
 *.pem
+.build/
+Sources/CCBar/Resources/AppIcon.iconset/
+Sources/CCBar/Resources/AppIcon.icns

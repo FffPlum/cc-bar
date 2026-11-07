@@ -1,0 +1,67 @@
+.cc-chart-view-transition,
+.cc-chart-view-transition-content {
+  min-width: 0;
+}
+
+.cc-chart-view-transition {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cc-chart-view-transition-content {
+  grid-area: 1 / 1;
+  align-self: start;
+}
+
+/* Hide the incoming layer before its first animation frame. */
+.cc-chart-view-transition-content[data-phase="enter"] {
+  opacity: 0;
+  clip-path: inset(0 100% 0 0);
+}
+
+.cc-chart-view-transition-content[inert] {
+  pointer-events: none;
+}
+
+.cc-chart-view-transition-content[data-motion-fallback][data-phase="exit"] {
+  animation: cc-chart-crossfade-exit var(--cc-chart-crossfade-duration) linear
+    both;
+}
+
+.cc-chart-view-transition-content[data-motion-fallback][data-phase="enter"] {
+  animation: cc-chart-crossfade-enter var(--cc-chart-crossfade-duration) linear
+    both;
+}
+
+@keyframes cc-chart-crossfade-exit {
+  from {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+  to {
+    opacity: 0;
+    clip-path: inset(0 0 0 100%);
+  }
+}
+
+@keyframes cc-chart-crossfade-enter {
+  from {
+    opacity: 0;
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-chart-view-transition-content[data-phase="enter"] {
+    clip-path: none;
+  }
+
+  .cc-chart-view-transition-content[data-motion-fallback] {
+    animation-duration: var(--cc-chart-crossfade-duration) !important;
+    clip-path: none !important;
+  }
+}

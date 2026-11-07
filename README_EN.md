@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Resources/Assets.xcassets/AppIcon.appiconset/icon_256.png" width="128" alt="cc-bar Logo">
+  <img src="Sources/CCBar/Resources/Assets.xcassets/AppIcon.appiconset/icon_256.png" width="128" alt="cc-bar Logo">
 </p>
 
 <h1 align="center">cc-bar</h1>
@@ -197,3 +197,5 @@ Thanks to the [LINUX DO](https://linux.do/) community for the discussions and fe
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
+
+Sources follow Swift Package layout: `Sources/CCBar/` for the native app, `Sources/CCBarConfiguration/` for the configuration library, and `Tests/` for tests. Xcode links the same local package; use the Xcode app target and repository script for running and distribution.

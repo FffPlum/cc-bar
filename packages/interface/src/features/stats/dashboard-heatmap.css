@@ -1,0 +1,12 @@
+.cc-token-chart-window {
+  container-type: inline-size;
+  width: 100%;
+  max-width: 1004px;
+  min-width: 0;
+}
+
+/* Share the heatmap's seven square rows across all views and the skeleton.
+   53 columns, 52 horizontal gaps and six vertical gaps, each 3px. */
+.cc-token-chart-plot {
+  height: calc((100cqw - 156px) / 53 * 7 + 18px);
+}
