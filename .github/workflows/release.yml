@@ -162,17 +162,32 @@ jobs:
             dist/release-notes.md dist/version.json
       - name: Verify uploaded assets before making the release visible
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
+          set -euo pipefail
+          # The REST tag endpoint only finds published releases. gh resolves
+          # drafts through GraphQL and exposes the numeric REST database ID.
+          CCBAR_RELEASE_ID="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
+          [[ "$CCBAR_RELEASE_ID" =~ ^[0-9]+$ ]] || { echo 'Invalid release ID' >&2; exit 1; }
+          export CCBAR_RELEASE_ID
+          gh api "repos/$GITHUB_REPOSITORY/releases/$CCBAR_RELEASE_ID" > "$RUNNER_TEMP/release.json"
           python3 - <<'PY'
           import json, os
           from pathlib import Path
           release = json.loads((Path(os.environ['RUNNER_TEMP']) / 'release.json').read_text())
           expected = {'CCBar.dmg', 'CCBar.app.zip', 'appcast.xml', 'release-notes.md', 'version.json'}
           assets = release['assets']
+          assert release['id'] == int(os.environ['CCBAR_RELEASE_ID']), 'Release ID changed'
           assert release['draft'] and release['tag_name'] == os.environ['TAG'], 'Release is not the expected draft'
           assert len(assets) == len(expected) and {a['name'] for a in assets} == expected, 'Release asset set is incomplete'
           for asset in assets:
               size = (Path('dist') / asset['name']).stat().st_size
               assert size > 0 and asset['state'] == 'uploaded' and asset['size'] == size, 'Release asset upload is incomplete'
           PY
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$CCBAR_RELEASE_ID" \
+            -f tag_name="$TAG" -F draft=false -f make_latest=true > "$RUNNER_TEMP/published-release.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          release = json.loads((Path(os.environ['RUNNER_TEMP']) / 'published-release.json').read_text())
+          assert release['id'] == int(os.environ['CCBAR_RELEASE_ID']), 'Published release ID changed'
+          assert release['tag_name'] == os.environ['TAG'] and release['draft'] is False, 'Release was not published'
+          PY
