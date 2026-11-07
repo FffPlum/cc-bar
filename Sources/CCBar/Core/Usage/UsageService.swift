@@ -21,17 +21,28 @@ nonisolated struct UsageRequestIndexStatus: Sendable {
 nonisolated enum UsageRequestIndex {
     /// Identical records remain distinct; the ordinal is stable for an unchanged multiset.
     static func records(from entries: [UsageEntry]) -> [UsageRequestRecord] {
-        let keyed = entries.filter { $0.requestCount >= 0 }.map { entry in
-            let parts = [entry.app.rawValue, entry.conversationKey, entry.model, entry.speed.rawValue,
+        var keyed: [(digest: String, entry: UsageEntry)] = []
+        keyed.reserveCapacity(entries.count)
+        for entry in entries where entry.requestCount >= 0 {
+            let cost: String = entry.costUSD.map { NSDecimalNumber(decimal: $0).stringValue } ?? "nil"
+            let timing: String
+            if let value = entry.timing {
+                let firstToken: String = value.firstTokenMs.map { String($0) } ?? "nil"
+                timing = "\(firstToken):\(value.generationMs):\(value.isEstimated)"
+            } else {
+                timing = "nil"
+            }
+            let parts: [String] = [entry.app.rawValue, entry.conversationKey, entry.model, entry.speed.rawValue,
                 String(entry.timestamp.timeIntervalSince1970.bitPattern),
                 String(entry.inputTokens), String(entry.outputTokens), String(entry.cacheReadTokens),
                 String(entry.cacheCreationTokens), String(entry.requestCount),
-                entry.costUSD.map { NSDecimalNumber(decimal: $0).stringValue } ?? "nil",
-                entry.timing.map { "\($0.firstTokenMs.map(String.init) ?? "nil"):\($0.generationMs):\($0.isEstimated)" } ?? "nil"]
+                cost, timing]
             let canonical = parts.map { "\($0.utf8.count):\($0)" }.joined()
-            let digest = SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
-            return (digest, entry)
-        }.sorted { $0.0 < $1.0 }
+            let hash = SHA256.hash(data: Data(canonical.utf8))
+            let digest = hash.map { String(format: "%02x", $0) }.joined()
+            keyed.append((digest: digest, entry: entry))
+        }
+        keyed.sort { $0.digest < $1.digest }
         var counts: [String: Int] = [:]
         return keyed.map { digest, entry in
             let ordinal = counts[digest, default: 0]

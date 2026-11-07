@@ -761,10 +761,14 @@ final class HostWindowUsageTests: XCTestCase {
         defer { fixture.cleanup() }
         fixture.show([.codex])
         let day = Calendar.current.startOfDay(for: fixture.now)
-        let entries = (1...31).map { n in
-            UsageEntry(app: n == 31 ? .claude : .codex, conversationKey: "private", model: n <= 20 ? "first" : "second", speed: .standard,
-                day: day, timestamp: fixture.now.addingTimeInterval(Double(-n * 60)), inputTokens: n, outputTokens: 0,
-                cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: Decimal(n), costBreakdown: nil)
+        let entries: [UsageEntry] = (1...31).map { (n: Int) -> UsageEntry in
+            let app: UsageApp = n == 31 ? .claude : .codex
+            let model = n <= 20 ? "first" : "second"
+            let timestamp = fixture.now.addingTimeInterval(Double(-n * 60))
+            let cost = Decimal(n)
+            return UsageEntry(app: app, conversationKey: "private", model: model, speed: .standard,
+                day: day, timestamp: timestamp, inputTokens: n, outputTokens: 0,
+                cacheReadTokens: 0, cacheCreationTokens: 0, costUSD: cost, costBreakdown: nil)
         }
         fixture.state.usageService.aggregator.ingestLocal(entries)
         let records = entries.enumerated().map { UsageRequestRecord(id: String($0.offset + 1), entry: $0.element) }

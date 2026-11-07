@@ -63,25 +63,34 @@ extension AppState {
     }
 
     var apiKeyProviders: [APIKeyProvider] {
-        authorizations.accounts.map {
+        var providers: [APIKeyProvider] = authorizations.accounts.map {
             APIKeyProvider(id: $0.id, name: PrivacyDisplay.isEnabled ? PrivacyDisplay.account($0.id) : $0.name,
                                          supplier: $0.supplier, endpoint: $0.endpoint, sourceApplications: $0.sourceApplications)
-        } + deepSeekAccounts.filter { $0.kind == .apiKey }.map {
-            APIKeyProvider(id: "deepseek:" + $0.id, name: deepSeekDisplayName($0),
+        }
+        for account in deepSeekAccounts where account.kind == .apiKey {
+            let application = account.sourceApplication.flatMap { AgentApplication(rawValue: $0) }
+            let sources: Set<AgentApplication> = application.map { [$0] } ?? []
+            providers.append(APIKeyProvider(id: "deepseek:" + account.id, name: deepSeekDisplayName(account),
                                          supplier: .deepseek, endpoint: ModelSupplier.deepseek.defaultEndpoint,
-                                         sourceApplications: Set([$0.sourceApplication.flatMap(AgentApplication.init(rawValue:))].compactMap { $0 }))
-        } + moonshotAccounts.map {
+                                         sourceApplications: sources))
+        }
+        providers += moonshotAccounts.map {
             APIKeyProvider(id: "moonshot:" + $0.id, name: PrivacyDisplay.isEnabled ? PrivacyDisplay.account($0.id) : $0.name,
                                          supplier: .kimi, endpoint: $0.region == .china ? "https://api.moonshot.cn/v1" : "https://api.moonshot.ai/v1")
-        } + (opencodeGoAccount.map {
-            [APIKeyProvider(id: "opencode-go", name: "OpenCode Go", supplier: .custom,
+        }
+        if let account = opencodeGoAccount {
+            let sources: Set<AgentApplication> = account.source == .pi ? [.pi] : account.source == .opencode ? [.opencode] : []
+            providers.append(APIKeyProvider(id: "opencode-go", name: "OpenCode Go", supplier: .custom,
                                          endpoint: "https://opencode.ai/zen/go/v1",
-                                         sourceApplications: $0.source == .pi ? [.pi] : $0.source == .opencode ? [.opencode] : [])]
-        } ?? []) + (commandCodeAccount.map { account in
-            return [APIKeyProvider(id: "command-code-key", name: "Command Code", supplier: .custom,
+                                         sourceApplications: sources))
+        }
+        if let account = commandCodeAccount {
+            let sources: Set<AgentApplication> = account.source == .pi ? [.pi] : account.source == .opencode ? [.opencode] : account.source == .commandCodeCLI ? [.commandCode] : []
+            providers.append(APIKeyProvider(id: "command-code-key", name: "Command Code", supplier: .custom,
                                                 endpoint: "https://api.commandcode.ai",
-                                                sourceApplications: account.source == .pi ? [.pi] : account.source == .opencode ? [.opencode] : account.source == .commandCodeCLI ? [.commandCode] : [])]
-        } ?? [])
+                                                sourceApplications: sources))
+        }
+        return providers
     }
     func providerCredential(for provider: ApplicationProvider) throws -> String {
         guard let id = provider.authorizationID,
