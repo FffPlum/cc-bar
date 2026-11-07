@@ -25,11 +25,11 @@ jobs:
   package:
     name: Build and sign arm64 release
     needs: validate
-    runs-on: macos-15-intel
+    runs-on: macos-26-intel
     timeout-minutes: 40
     env:
       NODE_VERSION: '22.23.2'
-      XCODE_VERSION: '26.3'
+      XCODE_VERSION: '26.6'
       TAG: ${{ github.ref_name }}
       CI: 'true'
     steps:
@@ -53,8 +53,14 @@ jobs:
           package-manager-cache: false
       - name: Select pinned Xcode
         run: |
+          touch "$RUNNER_TEMP/ccbar-diagnostics-start"
           sudo xcode-select --switch "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
-          xcodebuild -version
+          {
+            sw_vers
+            uname -m
+            xcodebuild -version
+            swift --version
+          } | tee "$RUNNER_TEMP/toolchain.log"
       - name: Install locked dependencies
         run: |
           npm --prefix packages/host-api ci
@@ -94,12 +100,28 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
+      - name: Collect this job's CCBar and XCTest crash reports
+        if: failure()
+        run: |
+          if [[ -f "$RUNNER_TEMP/ccbar-diagnostics-start" ]]; then
+            mkdir -p "$RUNNER_TEMP/ccbar-crashes"
+            for reports_dir in "$HOME/Library/Logs/DiagnosticReports" /Library/Logs/DiagnosticReports; do
+              if [[ -d "$reports_dir" ]]; then
+                find "$reports_dir" -type f -newer "$RUNNER_TEMP/ccbar-diagnostics-start" \
+                  \( -iname '*ccbar*.ips' -o -iname '*ccbar*.crash' -o -iname '*xctest*.ips' -o -iname '*xctest*.crash' \) \
+                  -exec cp '{}' "$RUNNER_TEMP/ccbar-crashes/" \;
+              fi
+            done
+          fi
       - name: Preserve packaging failure log
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-build-log-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/release-build.log
+          path: |
+            ${{ runner.temp }}/release-build.log
+            ${{ runner.temp }}/toolchain.log
+            ${{ runner.temp }}/ccbar-crashes/
           if-no-files-found: ignore
           retention-days: 7
 
