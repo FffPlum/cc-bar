@@ -17,8 +17,15 @@ final class DeepSeekAuthorization {
     private var connections: [ObjectIdentifier: NWConnection] = [:]
     private var browserConnection: NWConnection?
     private var timeout: Task<Void, Never>?
-    private var ended = false
-    private var waitingForBrowser = false
+    /// State-only notifications; browser URLs, codes and credentials stay in this owner.
+    var onStateChange: (() -> Void)?
+    var isWaitingForBrowser: Bool { waitingForBrowser && !ended }
+    private var ended = false {
+        didSet { if ended != oldValue { onStateChange?() } }
+    }
+    private var waitingForBrowser = false {
+        didSet { if waitingForBrowser != oldValue { onStateChange?() } }
+    }
     private var verifier = ""
     private var state = ""
     private var authorizeID: String?

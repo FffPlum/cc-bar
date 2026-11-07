@@ -17,9 +17,12 @@ struct FloatingContentView: View {
                 && ($0.app != .kimi || appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty)
         }
 
-        let managed = settings.isProviderEnabled(.kimi)
-            ? appState.kimiManagedAccounts.filter { $0.showInFloatingHUD && !(appState.kimiManagedMirrorsCLI($0) && settings.effectiveFloatingVisibility(for: .kimi)) }
-            : []
+        let managed = appState.kimiManagedAccounts.filter {
+            $0.showsInFloatingSurfaces && !(appState.kimiManagedMirrorsCLI($0) && settings.effectiveFloatingVisibility(for: .kimi))
+        }
+        let imported = appState.importedCodexAccounts.filter {
+            $0.showsInFloatingSurfaces && !(settings.effectiveFloatingVisibility(for: .codex) && appState.importedCodexAccountMirrorsPrimary($0))
+        }
 
         VStack(alignment: .leading, spacing: 7) {
             ForEach(providers) { provider in
@@ -30,7 +33,7 @@ struct FloatingContentView: View {
                     snapshot: appState.quotaSnapshot(for: provider.app)
                 )
             }
-            ForEach(appState.importedCodexAccounts.filter { $0.showInFloatingHUD == true }) { account in
+            ForEach(imported) { account in
                 FloatingRow(logoName: "codex", fallback: "C", tint: QuotaApp.codex.tintColor,
                             snapshot: appState.importedCodexQuota(for: account))
             }
@@ -39,7 +42,7 @@ struct FloatingContentView: View {
                             snapshot: appState.kimiManagedQuotas[account.id])
                     .help("\(account.region.displayName) · \(appState.kimiManagedSubtitle(account))")
             }
-            ForEach(appState.deepSeekQuotaAccounts.filter(\.showInFloatingHUD)) { account in
+            ForEach(appState.deepSeekQuotaAccounts.filter(\.showsInFloatingSurfaces)) { account in
                 HStack(spacing: 8) {
                     ServiceTile(logoName: "deepseek", fallback: "D", tint: .blue, size: 18)
                     Spacer(minLength: 56)
@@ -49,8 +52,8 @@ struct FloatingContentView: View {
             }
             if providers.isEmpty
                 && managed.isEmpty
-                && !appState.importedCodexAccounts.contains(where: { $0.showInFloatingHUD == true })
-                && !appState.deepSeekQuotaAccounts.contains(where: \.showInFloatingHUD) {
+                && imported.isEmpty
+                && !appState.deepSeekQuotaAccounts.contains(where: \.showsInFloatingSurfaces) {
                 Text(tr("No services", "未启用任何服务"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)

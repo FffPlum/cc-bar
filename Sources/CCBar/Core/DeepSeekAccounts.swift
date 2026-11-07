@@ -63,6 +63,11 @@ extension AppState {
         guard let index = deepSeekAccounts.firstIndex(where: { $0.id == id }) else { return }
         var accounts = deepSeekAccounts
         update(&accounts[index])
+        if accounts[index].showInFloatingHUD != deepSeekAccounts[index].showInFloatingHUD {
+            accounts[index].visibleInPopover = accounts[index].showInFloatingHUD
+        } else if accounts[index].visibleInPopover != deepSeekAccounts[index].visibleInPopover {
+            accounts[index].showInFloatingHUD = accounts[index].visibleInPopover
+        }
         do {
             try DeepSeekAccountStore.save(accounts, to: accountStorageURL("deepseek_accounts.json"))
             deepSeekAccounts = accounts

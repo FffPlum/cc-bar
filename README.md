@@ -5,197 +5,164 @@
 <h1 align="center">cc-bar</h1>
 
 <p align="center">
-  <b>macOS 原生 AI 额度监控与用量分析工具</b><br>
-  在菜单栏实时监控 Codex、Claude Code、Cursor、Antigravity 配额与重置时间，本地离线分析 Tokens、费用与对话。
+  <b>在 Mac 上管理 AI 编程工具、账号与用量</b><br>
+  检查和更新应用，管理账号授权，在菜单栏查看额度，按对话与项目分析 Tokens 和费用。
 </p>
-
-本项目基于 [nanvon/cc-bar](https://github.com/nanvon/cc-bar) 独立维护；下载、更新与问题反馈均以当前仓库为准。
 
 <p align="center">
   <a href="https://github.com/FffPlum/cc-bar/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/v/release/FffPlum/cc-bar?color=brightgreen"></a>
-  <img alt="Downloads" src="https://img.shields.io/github/downloads/FffPlum/cc-bar/total?color=blue">
-  <a href="https://github.com/FffPlum/cc-bar/releases/latest"><img alt="Latest Downloads" src="https://img.shields.io/github/downloads/FffPlum/cc-bar/latest/total?label=latest%20downloads&color=blue"></a>
+  <a href="https://github.com/FffPlum/cc-bar/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/FffPlum/cc-bar/total?color=blue"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/FffPlum/cc-bar/releases/latest">下载安装</a> ·
-  <a href="#-服务支持矩阵">服务支持</a> ·
-  <a href="#-核心特性">核心特性</a> ·
-  <a href="#-数据与隐私安全">安全说明</a> ·
-  <a href="#-从源码构建">从源码构建</a> ·
-  <a href="https://github.com/FffPlum/cc-bar/issues">问题反馈</a> ·
-  <a href="README_EN.md">English</a>
+  <a href="https://github.com/FffPlum/cc-bar/releases/latest">下载</a> ·
+  <a href="#应用管理">应用管理</a> ·
+  <a href="#账号授权与额度">账号与额度</a> ·
+  <a href="#用量统计">用量统计</a> ·
+  <a href="#数据与隐私">数据与隐私</a> ·
+  <a href="#从源码构建">从源码构建</a> ·
+  <a href="https://github.com/FffPlum/cc-bar/issues">问题反馈</a>
 </p>
 
-<p align="center">
-  <img src="docs/Screenshots/popover-light.png" width="360" alt="Popover 总览 - 浅色模式">
-  <img src="docs/Screenshots/popover-dark.png" width="360" alt="Popover 总览 - 深色模式"><br>
-  <sub>菜单栏、桌面悬浮窗与 Popover · 浅色 / 深色模式</sub>
-</p>
+cc-bar 是常驻 macOS 菜单栏的 AI 工具管理与用量分析应用。主窗口集中展示已安装工具、账号、供应商和统计数据；菜单栏、展开面板与桌面悬浮窗用于随时查看额度和重置时间。
 
----
+应用由 **Swift / AppKit / SwiftUI 原生宿主**与 **React / TypeScript 主窗口**组成。React 界面随安装包打包，在本地 WKWebView 中运行；凭据访问、网络请求、安装操作、日志扫描、计费与持久化由 Swift 通过统一 Host API 提供。
 
-## ⚡ 服务支持矩阵
+## 安装
 
-cc-bar 展示两类数据：**订阅额度**直连各服务官方接口获取剩余比例与重置时间；**本机用量**由本地日志解析或服务端计量汇总，不上传任何代码、项目数据或会话内容。
+- **系统**：macOS 14 Sonoma 或更新版本。
+- **架构**：当前发布的安装包面向 Apple Silicon（arm64）。
+- **运行**：安装包自带界面资源，无需安装 Node.js 或启动开发服务。
 
-| 服务 / 工具 | 订阅额度监控 | 额度耗尽提醒 | 本地用量 / 费用统计 | 多账号同屏 | 凭据来源 |
-| :--- | :--- | :---: | :--- | :---: | :--- |
-| **Codex** | 5 小时 / 周额度、重置倒计时 | 支持 | 本地会话（含 `.zst` 压缩日志） | 支持 | `~/.codex/auth.json`（自动续期） |
-| **Claude Code** | 5 小时 / 周 / 模型专属额度 | 支持 | 本地会话日志 | — | Keychain / 本地只读凭据 |
-| **Antigravity** | Gemini 5 小时与周、Claude 辅助 | 支持 | — | — | Google Cloud OAuth（自动续期） |
-| **Cursor** | Total / Auto / API（含 Unlimited） | 支持 | 账号全设备远端计量（今日 / 本期） | — | 本地 state.vscdb（严格只读） |
-| **Command Code** | 5 小时 / 周额度、GOAT 月度 Credits | 支持 | — | — | 本地 5 级只读探测 / Keychain Key |
-| **OpenCode Go** | 5 小时 / 周 / 月额度 | 支持 | — | — | OpenCode / Pi 本地只读探测 / Keychain Key |
-| **Pi / OpenCode / DSH** | — | — | 本地会话日志（Pi / OpenCode / DSH 多帧 zstd） | — | 严格只读本地日志与数据库 |
-| **Kimi Code** | 5 小时 / 周 / 月额度（依账号返回） | 支持 | 本机新旧 CLI 会话（含子任务）；可靠模型按 API 价估算 | — | 本地 CLI OAuth（自动续期）/ 官方 API Key |
+在 [最新发布页](https://github.com/FffPlum/cc-bar/releases/latest) 下载 `CCBar.dmg`，打开后将 `CCBar.app` 拖入「应用程序」；也可以下载 `CCBar.app.zip` 解压安装。后续可在「设置 → 通用」检查并安装更新。
 
----
+当前发布包采用 ad-hoc 签名，未经过 Apple 公证。首次打开如被系统拦截，请在确认下载来源后，前往「系统设置 → 隐私与安全性」查看并允许打开。
 
-## ✨ 核心特性
+启动后可先到「应用」查看安装情况，再到「额度管理」选择需要展示的账号。已有 Codex、Claude Code 等工具的登录通常可自动识别；需要读取系统钥匙串时，应用会说明用途并请求授权。Kimi Code 和 DeepSeek Harness 也支持下文所述的应用内授权入口。
 
-### ⚡ 实时配额与状态监控
-* **常驻菜单栏与桌面悬浮窗** — 支持主要窗口、周窗口或双窗口模式；桌面悬浮窗边缘吸附、位置记忆，不抢占键盘焦点。
-* **低额度系统通知** — 当 5 小时、周或计费周期额度低于设定阈值时发送 macOS 系统通知，同一周期仅提醒一次，点击通知直达用量统计。
-* **低开销后台调度** — 额度查询、日志扫描与服务状态合并调度；锁屏与息屏降频，睡眠暂停、唤醒补刷，接口 429 自动退避。
-* **多账号无缝并存** — Codex 支持粘贴 `auth.json` 或 PAT 导入多个账号同屏查看剩余额度与额外重置次数，不影响 CLI 登录状态。
+## 应用管理
 
-### 📊 本地离线用量与项目分析
-* **多维度统计分析** — 概览、对话、项目与额度四个页面，支持日 / 周 / 月粒度与自定义时间范围：
-  * **用量概览**：堆叠图展示总 Tokens、费用与同期变化，按服务、Provider、模型或项目分析构成，统计缓存命中率。
-  * **对话明细**：检索历史会话，查看输入、输出、缓存读写明细、请求数、模型构成与 Standard / Fast 速度档位费用拆分。
-  * **项目分析**：按项目汇总用量趋势、高消耗对话与分支分布；Git worktree 自动归入主仓库。
-  * **额度对比与预估**：对比当前周期的本机用量、用满预估与官方已用比例；支持开启「包含其他 Agent 中的 Codex 订阅用量」，将 Pi、OpenCode、DSH 中消耗的 Codex 额度合并计入。
-* **规则变更自动重算** — 价格表或统计规则变化后自动重新计费；会话日志已清理的对话自动保留历史用量，不影响统计连续性。
+在一页中查看工具是否安装、当前版本和安装来源，检查更新，并在支持的来源上执行安装、升级或卸载。同一工具的多处安装分别识别，当前 PATH 中生效的 CLI 与其他安装分开展示。
 
-<p align="center">
-  <img src="docs/Screenshots/statistics-overview.png" width="720" alt="用量概览">
-</p>
+| 类型 | 当前应用目录 |
+| --- | --- |
+| 命令行工具 | Claude Code、Codex CLI、Gemini CLI、Grok Build、OpenCode、OpenClaw、Hermes Agent、Pi、MiniMax Code、Kimi Code、DeepSeek Harness、Antigravity CLI、Oh My Pi、Command Code |
+| 桌面应用 | Claude Desktop、Cursor、Antigravity、Codex Desktop |
 
-<details>
-  <summary><b>展开查看对话明细、项目分析与额度监控截图</b></summary>
-  <br>
-  <p align="center">
-    <img src="docs/Screenshots/statistics-conversations.png" width="720" alt="对话明细"><br><br>
-    <img src="docs/Screenshots/statistics-projects.png" width="720" alt="项目分析"><br><br>
-    <img src="docs/Screenshots/statistics-quota.png" width="720" alt="额度监控">
-  </p>
-</details>
+- **安装与配置分开识别**：只发现配置目录时，不会直接判定应用已经安装；无法确认版本或管理来源时，明确显示未知或不可用原因。
+- **按实际来源管理**：根据已识别的包管理器或官方安装来源提供操作；安装、升级、卸载前展示确认，完成后重新检测结果。
+- **保留配置与历史**：卸载针对程序本身，桌面应用移入废纸篓。任务进度由原生宿主持有，切换页面或关闭主窗口后仍可继续查看。
+- **独立选择展示内容**：为支持的应用选择是否加入侧栏、是否显示用量统计；这些选择不等于启用账号额度，也不会删除已有统计。
 
-### 💻 原生体验与隐私控制
-* **一页管理与拖拽排序** — 「设置 → 服务与账号」一页开关所有服务，可整行拖拽自定义服务在菜单栏、Popover、悬浮窗与统计页的全局展示顺序。
-* **截图隐私模式** — 一键匿名遮挡账号邮箱、项目路径、Git 分支与会话 ID，保留真实金额与图表，截图分享无负担。
-* **应用内平滑升级** — 集成 Sparkle 更新器，直接在应用内查看更新说明、一键下载安装并自动重启。
-* **本地诊断与零追踪** — 日志自动轮转且关键字段全脱敏；可手动导出诊断包，应用不含任何用户行为遥测。
+应用详情展示当前安装、登录身份和已识别的供应商连接。供应商目录可收纳已有或手动添加的 API Key，包括 OpenAI、Anthropic、Kimi / Moonshot、DeepSeek、Grok、Gemini 和自定义地址。添加供应商条目只保存到 CCBar；当前界面不提供替换外部工具配置或切换其供应商的操作。
 
-<p align="center">
-  <img src="docs/Screenshots/settings.png" width="720" alt="服务与账号设置">
-</p>
+**安装目录不等于额度或统计支持列表。** 不同工具能够提供的数据见下文。
 
----
+## 账号授权与额度
 
-## 📦 快速安装
+订阅额度来自服务端，本机 Tokens 与费用来自日志分析，两者分别展示，不把本机估算当作官方账单。
 
-> **运行环境**：macOS 14 (Sonoma) 或更新版本。<br>
-> **前置条件**：相关 AI 编程工具需已在终端或桌面端完成至少一次登录。
+| 服务 | 当前能力 |
+| --- | --- |
+| Codex / ChatGPT | 自动识别本机 Codex 登录；支持导入单个或多个 OAuth `auth.json` 账号，独立查看额度与重置时间，不切换 Codex CLI 登录 |
+| Claude | 识别 Claude Code 与 Claude Desktop 的本机登录，按服务返回展示订阅额度、重置时间及模型专项额度 |
+| Kimi Code | 识别 CLI 登录；支持国内 / 海外官方设备授权及多个独立订阅账号，不覆盖 CLI 登录 |
+| Antigravity | 识别本机登录，查询官方 CLI / 云端返回的模型额度与重置时间 |
+| Cursor | 保留 Total / Auto / API 额度及远端计量支持；不限量状态单独展示，数据按 Cursor 账号统计 |
+| DeepSeek Harness | 识别 DSH 登录，或通过系统浏览器完成官方账号授权；展示钱包余额、充值与赠金，不换算成订阅百分比 |
+| Grok / xAI | 识别本机登录身份与状态，暂未接入额度查询 |
 
-1. 进入 [Releases 页面](https://github.com/FffPlum/cc-bar/releases/latest) 下载最新的 `CCBar.dmg`（或 `CCBar.app.zip`）。
-2. 打开 DMG，将 `CCBar.app` 拖入 `/Applications` 文件夹即可。
+「额度管理」按 Claude、ChatGPT、Kimi Code、xAI、DeepSeek Harness、Antigravity 六组组织账号。每个可展示账号分别选择「菜单栏 / 悬浮窗」；悬浮窗选项同时控制菜单栏展开面板，桌面窗口另有总开关。关闭两个展示位置后停止该账号的自动额度刷新，保留凭据与历史。
 
-首次升级到含应用内更新器的版本，需要按上述步骤手动安装一次。此后可在「设置 → 通用 → 检查更新」查看更新内容，点击「下载并安装」后自动完成安装并重新启动。
+API Key 在应用的供应商目录管理，与 OAuth / 官方账号授权分开。Moonshot、Command Code、OpenCode Go 等 API Key 当前不用于自动余额或额度查询；Cursor 保留已有额度与统计能力，但不列入上述六组管理页。
 
-> [!NOTE]
-> **首次启动安全提示 (Gatekeeper)**
->
-> 发布的构建为 ad-hoc 签名（未走付费 Apple 公证）。首次启动若被系统拦截：
-> 1. 打开 **系统设置 → 隐私与安全性**，向下滑动找到 CCBar 的拦截提示，点击 **「仍要打开」**；
-> 2. 若系统提示「应用程序已损坏」，可在终端执行以下命令清除隔离标记：
->    ```bash
->    xattr -dr com.apple.quarantine /Applications/CCBar.app
->    ```
-> 3. 若本机不存在明文 credentials 文件，应用会在说明后请求 Keychain 读取权限，请选择 **「始终允许」**。
+菜单栏可显示主要额度、周额度或两者；展开面板补充详情，桌面悬浮窗支持拖动、位置记忆与边缘吸附。额度不足时可发送系统通知。后台刷新在睡眠时暂停，锁屏时降频；网络失败保留已有快照，手动刷新同样遵守服务限流后的退避。
 
----
+## 用量统计
 
-## 🔒 数据与隐私安全
+| 视图 | 可以查看的内容 |
+| --- | --- |
+| 概览 | Tokens、请求数、费用、缓存命中率与趋势；按应用、来源和模型筛选，查看历史活跃情况 |
+| 对话 | 检索会话，查看输入 / 输出 / 缓存明细、模型构成与费用；日志有可靠计时时显示首字延迟和输出速度 |
+| 项目 | 汇总项目用量、趋势、高消耗对话与分支分布；识别 Git worktree 与主仓库的关系 |
+| 额度 | 对比官方额度与可归属的本机周期消耗，查看历史周期及用满估算；不同账号、周期和额度窗口分别计算 |
 
-用量日志在本机解析与保存；额度、Cursor 远端计量、服务状态及价格目录通过对应服务的网络接口查询。应用不上传本机会话日志或项目数据。
+**本地日志来源**：Codex、Claude Code、Antigravity、Pi、OpenCode、DeepSeek Harness（DSH）、Kimi Code。**远端计量来源**：Cursor，覆盖该账号的多设备用量，不代表只在这台 Mac 上发生的活动。
 
-### 凭据读取与刷新策略
+- **切换图表样式**：在显示设置中选择柱状图或曲线面积图。Tokens、请求数与费用的柱图按应用堆叠，面积图按应用独立绘制；缓存命中率展示各应用真实比率，全部应用的柱图并排比较，提示同时保留总体加权比率。
+- **控制自动扫描**：用量设置抽屉提供自动扫描开关、1 / 2 / 3 / 5 / 10 分钟周期和「立刻同步」。默认开启、每 5 分钟扫描；关闭后保留历史，仍可手动同步或重新计算，已开始的扫描会完成。此开关不停止订阅额度或 Cursor 远端计量刷新。
+- **保留历史、更新估算**：价格或统计规则变化后可重新计算；源日志已清理的历史记录尽量保留。部分模型没有可靠价格、日志字段缺失或远端数据未覆盖时，会保留相应的不完整状态。
 
-| 服务 / 目标 | 凭据存储位置 | 读写权限 | 行为机制与安全保障 |
-| :--- | :--- | :---: | :--- |
-| **Codex** | `~/.codex/auth.json`<br>导入的其他账号：CCBar 自己的 Keychain 条目 | 读 / 写 | 临期时使用 `refresh_token` 自动续期，新令牌写回原存储位置。续期前二次确认本地文件，避免与 `codex` CLI 冲突抢刷。 |
-| **Claude Code** | `~/.claude/.credentials.json`<br>或 macOS Keychain | **严格只读** | **绝不刷新或篡改凭据**。因 Anthropic 刷新令牌为一次性，第三方刷新会导致 CLI 被踢下线。过期时保留快照并提示终端重登；必要时提供安全 CLI 兜底。 |
-| **Antigravity** | `~/.gemini/jetski-standalone-oauth-token`<br>`~/.gemini/oauth_creds.json` (兜底) | 读 / 写 | 优先读取独立 OAuth Token，临期自动续期回写。Cloud Mode 直连 Google 云端 API，无需本地 IDE 运行。 |
-| **Cursor** | `~/Library/Application Support/Cursor`<br>`/User/globalStorage/state.vscdb` | **严格只读** | 仅读 `cursorAuth/accessToken` 构造 Cookie 查询用量，绝不碰 refresh token/OAuth，不写回 Cursor SQLite 或 Keychain。 |
-| **Command Code** | 5 级本地来源或 macOS Keychain | 读 / Keychain | 只读自动探测按 `~/.commandcode/auth.json` → `~/.pi/agent/auth.json` → `~/.local/share/opencode/auth.json` → 环境变量 → Keychain 依次尝试；也可在设置中切换为手动 API Key，由 macOS Keychain 保存。 |
-| **OpenCode Go** | OpenCode / Pi 的 `auth.json` 或 macOS Keychain | 读 / Keychain | 只读自动探测按 OpenCode `auth.json` → `~/.pi/agent/auth.json` → 环境变量 `OPENCODE_API_KEY` → Keychain 依次尝试，读取其中的 `opencode-go` API Key；也可在设置中切换为手动 API Key，由 macOS Keychain 保存。 |
-| **本地会话日志** | `~/.codex/sessions`、`~/.claude/projects`<br>`~/.pi/agent/sessions`、OpenCode SQLite<br>`~/.dsh/sessions` | **严格只读** | 解析用量、模型及项目元数据，读取标题索引或从日志提取对话标题；标题缺失时可能使用用户消息摘要。不上传会话内容，不改写源日志。 |
+本机费用按日志和模型价格估算，可能与订阅扣量、折扣或实际账单不同。跨工具的 Codex 订阅用量可按设置合并到周期统计；没有可靠账号归属的数据不会复制成多个账号各自的用量。
 
-### 系统权限与零遥测承诺
-* **无受保护文件夹访问**：对桌面、文稿、下载、音乐、图片、影片等受保护目录，以及家目录以外的路径，项目归组仅做**纯文本路径分词**，绝不调用文件系统接口，因此**不会触发系统的隐私权限弹窗**。
-* **零外部遥测**：应用不采集或上报用户行为遥测；Sparkle 更新器只用于检查和安装更新，不发送系统画像。
-* **截图隐私与本地数据**：隐私模式只隐藏界面中的身份信息，真实标题、路径与统计仍保存在本机；分享截图前可检查画面，导出文件和剪贴板需自行确认。
-* **诊断日志只在本机**：运行日志写在 `~/Library/Logs/CCBar/`（约 8 MB 上限，自动轮转），默认脱敏——不含登录令牌、明文邮箱、对话内容、文件内容或项目名，账号只以单向哈希出现。App 不会上传任何日志。
+## 数据与隐私
 
-> [!TIP]
-> 如果你对预编译二进制包有所顾虑，欢迎审阅完整源码并[从源码自主构建](#-从源码构建)。
+- **统计保存在本机**：会话日志、外部应用数据库按只读方式解析，汇总与可重建索引保存在 CCBar 的 Application Support 目录。统计包含会话标题、模型、项目路径、分支和标识等元数据；标题缺失时可能从用户消息中提取摘要，不应将本地统计文件视为已匿名化数据。
+- **网络访问有明确用途**：账号授权与续期、额度和 Cursor 计量查询、价格与服务状态、应用版本检查和下载、CCBar 更新会联网。本机会话日志和项目内容不上传用于统计；诊断日志也不自动上报。
+- **凭据不都存于钥匙串**：原工具的登录按各服务规则读取，部分 OAuth 续期会更新其原登录文件。CCBar 托管的账号凭据、API Key 及验证后的部分应用解密密钥保存在本机私有文件中，目录权限为 `0700`、凭据文件为 `0600`；旧钥匙串凭据在成功读取后迁移。这是文件权限保护，同一 macOS 用户下的其他进程仍可能读取。
+- **界面与原生能力分开**：React 通过有类型和运行时校验的 Host API 请求数据及操作，不获得任意文件读取或命令执行接口。凭据原文只用于明确的保存输入，不出现在返回快照、事件、错误或日志中。
+- **隐私模式用于展示**：开启后隐藏界面中的账号身份、会话标题、项目路径等敏感信息，不改写本机原始记录。导出或分享内容前仍应检查。
 
-> [!NOTE]
-> **遇到问题怎么反馈**：打开「设置 → 通用 → 诊断 → 导出诊断日志」，确认提示后会生成一个 zip 并在 Finder 中选中，把它附在 [Issue](https://github.com/FffPlum/cc-bar/issues) 里即可。包内的 `summary.txt` 是纯文本，发送前可以自己先打开看一眼。
+排查问题时，可从「设置 → 通用」导出诊断日志，检查内容后自行附到 [Issue](https://github.com/FffPlum/cc-bar/issues)。应用不自动发送诊断包、行为遥测或崩溃报告。
 
----
+## 从源码构建
 
-## 🔧 从源码构建
+需要 **Xcode 26 或更新版本（Swift 6.2+）**、**Node.js 22.12 或更新的兼容版本**及 npm。只有 Command Line Tools 不足以完成应用构建。
 
-需要完整版 Xcode（仅 Command Line Tools 无法构建 SwiftUI 资产）。
-
-### 本地日常调试
-在 Xcode 中打开 `ccbar.xcodeproj`，Scheme 选择 `ccbar`，目标设备选「My Mac」，按下 <kbd>⌘</kbd> + <kbd>R</kbd> 运行。
-
-### 打包正式 Release
 ```bash
-# 1. 确保命令行工具指向完整 Xcode (一次性)
+git clone https://github.com/FffPlum/cc-bar.git
+cd cc-bar
+
+# 一次性选择完整 Xcode
 sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-# 2. 执行本地打包脚本 (产物输出至 dist/ 目录)
-SPARKLE_PUBLIC_ED_KEY="你的更新公钥" ./scripts/build.sh
+# 首次构建或前端 lockfile 变化后，安装锁定依赖并构建主窗口资源
+./scripts/build-web-interface.sh --install
 ```
 
-构建前需按 [更新签名配置](docs/打包发布.md#首次配置更新签名密钥) 设置 `SPARKLE_PUBLIC_ED_KEY` 公钥。构建脚本使用 `CODE_SIGNING_ALLOWED=NO` 编译，再逐层签名，产出 `dist/CCBar.dmg` 与 `dist/CCBar.app.zip`。默认使用 ad-hoc；本机自用可先运行一次 `python3 scripts/setup-local-signing.py`，后续打包自动复用固定的自签名证书，详见 [本机签名配置](docs/打包发布.md#本机固定自签名仅本机自用)。默认 ad-hoc 安装包不绑定本机开发证书；支持的 CPU 架构以实际构建产物为准，首次启动的系统提示见上方安装说明。
+之后在 Xcode 打开 `ccbar.xcodeproj`，选择 `ccbar` Scheme 与「My Mac」，运行即可。也可以仅做 Debug 构建：
 
-> [!WARNING]
-> 请勿使用 Xcode 菜单中的 **Product → Archive** 导出分发，该方式会绑定个人开发证书，导致构建包无法在其他设备运行。
+```bash
+xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destination 'platform=macOS' build
+```
 
----
+后续 Xcode 构建会更新 React 资源，不会自动联网安装 npm 依赖。
 
-## 🔗 相关项目
+### 打包
 
-上游作者的相关项目：
+分发使用仓库脚本，不使用 Xcode Archive / Export 替代：
 
-| 项目 | 平台形态 | 技术栈 |
-| :--- | :--- | :--- |
-| **cc-bar**（本仓库） | macOS 原生菜单栏工具 | Swift / SwiftUI |
-| [**CC Trace**](https://github.com/nanvon/cc-trace) | 桌面客户端（macOS 菜单栏 / Windows 托盘） | Tauri / Web |
-| [**CC Trace Mobile**](https://github.com/nanvon/cc-trace-mobile) | 移动端伴侣（iOS / Android） | 移动端框架 |
+```bash
+SPARKLE_PUBLIC_ED_KEY="你的 Ed25519 更新公钥" ./scripts/build.sh
+```
 
----
+脚本构建 Release、嵌入界面资源并完成签名，默认输出 `dist/CCBar.dmg` 和 `dist/CCBar.app.zip`。默认采用 ad-hoc 签名；本机自用可运行 `python3 scripts/setup-local-signing.py` 配置固定自签名身份。脚本默认使用工程构建架构，也可通过 `CCBAR_BUILD_ARCH=arm64` 或 `x86_64` 指定；仓库发布流程当前指定 `arm64`。
 
-## 🙏 致谢
+`SPARKLE_PUBLIC_ED_KEY` 是 Base64 编码的 32 字节 Ed25519 公钥，打包时必填。发布流程另需 repository secret `SPARKLE_PRIVATE_ED_KEY` 为更新包签名，私钥不能放入应用或提交到仓库。密钥配置、签名和发布步骤见 [打包发布](docs/打包发布.md)。
 
-在架构设计与额度解析思路上，本项目参考并汲取了以下开源项目的优秀经验：
+### 代码与文档
 
-* [cc-switch](https://github.com/farion1231/cc-switch) — 多 Provider 账号切换器，启发了多账号管理与切换流
-* [cockpit-tools](https://github.com/jlcodes99/cockpit-tools) — 多平台 AI 辅助看板，在额度计算与刷新机制上提供了参考
-* [CodexBar](https://github.com/steipete/CodexBar) — macOS 菜单栏用量监控，在本地日志解析与原生菜单栏交互上多有借鉴
+| 目录 | 内容 |
+| --- | --- |
+| `Sources/CCBar/` | 原生宿主、菜单栏与悬浮窗、账号、调度、扫描、计费和存储 |
+| `Sources/CCBarConfiguration/` | 应用目录与可独立测试的配置核心 |
+| `packages/interface/` | React / TypeScript 主窗口 |
+| `packages/host-api/` | 前端使用的统一 Host API 类型、校验与客户端 |
+| `Tests/` | Swift 测试 |
+| `docs/` | 产品、布局、技术实现、接口和发布文档 |
 
-感谢 [LINUX DO](https://linux.do/) 社区的交流与反馈。
+开发入口见 [文档索引](docs/README.md)、[技术实现](docs/技术实现.md) 与 [React 主窗口接口契约](docs/React主窗口接口契约.md)。
 
----
+## 参考与致谢
 
-## 📄 许可证
+- [nanvon/cc-bar](https://github.com/nanvon/cc-bar)：本项目最初 fork 自该仓库，并在此基础上独立维护和演进。感谢原作者提供的原生菜单栏与用量监控基础。
+- [CC Switch](https://github.com/farion1231/cc-switch)：应用目录、工具检测、版本检查与卸载行为的重要参考，也为配置交互提供了参考。
+- [CodexBar](https://github.com/steipete/CodexBar)：额度监控、本地日志解析与原生菜单栏交互的参考。
+- [cockpit-tools](https://github.com/jlcodes99/cockpit-tools)：多平台账号、额度与刷新机制的参考。
 
-本项目基于 [MIT License](LICENSE) 开源。
+感谢 [LINUX DO](https://linux.do/) 社区的交流与反馈。本项目的下载、更新与问题反馈均以 [FffPlum/cc-bar](https://github.com/FffPlum/cc-bar) 为准。
 
-源码按 Swift Package 组织：App 位于 `Sources/CCBar/`，可独立测试的配置核心位于 `Sources/CCBarConfiguration/`，测试位于 `Tests/`。Xcode 工程链接同一份本地 package；日常运行和打包仍使用 Xcode 与仓库脚本。
+## 许可证
+
+本项目按 [MIT License](LICENSE) 开源，保留原项目的 `Copyright (c) 2026 nanvon` 及许可声明。使用、修改或分发时请一并保留相应版权与许可信息。

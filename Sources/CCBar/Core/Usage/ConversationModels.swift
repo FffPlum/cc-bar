@@ -260,6 +260,9 @@ nonisolated struct ConversationQueryRequest: Sendable, Hashable {
     var to: Date
     var search: String
     var sort: ConversationQuerySort
+    /// Optional caller scope. Window hosts use this to exclude disabled statistics sources
+    /// before computing project options, counts, sorting and pagination.
+    var apps: Set<UsageApp>? = nil
 }
 
 nonisolated struct ConversationQueryResult: Sendable {

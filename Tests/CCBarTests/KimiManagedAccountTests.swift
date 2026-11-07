@@ -1,4 +1,5 @@
 import Security
+import Testing
 import XCTest
 @testable import CCBar
 
@@ -856,4 +857,105 @@ private final class RegressionMoonshotStore: MoonshotAPIKeyStore, @unchecked Sen
     func load(accountID: String) -> String? { values.withLock { $0[accountID] } }
     func save(_ key: String, accountID: String) throws { values.withLock { $0[accountID] = key } }
     func delete(accountID: String) { values.withLock { $0[accountID] = nil } }
+}
+
+@Suite(.serialized)
+@MainActor
+struct KimiQuotaDestinationTests {
+    @Test func menuBarOnlyManagedAccountRefreshesWhilePrimaryAndUsageAreDisabled() async throws {
+        try await withPrimaryDisabled {
+            let (state, root, store) = try isolatedState()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let selected = KimiManagedAccount(id: "selected", region: .china, userID: "selected-user", visibleInPopover: false, showInMenuBar: true, showInFloatingHUD: false)
+            let hidden = KimiManagedAccount(id: "hidden", region: .china, userID: "hidden-user", visibleInPopover: false, showInMenuBar: false, showInFloatingHUD: false)
+            state.kimiManagedAccounts = [hidden, selected]
+            for account in state.kimiManagedAccounts {
+                try store.save(freshTokens(), accountID: account.id)
+            }
+            let snapshot = try #require(KimiQuotaClient.parse(root: ["usages": ["limit_5h": ["used_ratio": 0.25]]]))
+            let requested = Locked<[String]>([])
+            await state.loadAllKimiManagedQuotas(reason: .periodic,
+                fetch: { auth in
+                    requested.withLock { $0.append(auth.userID ?? "missing") }
+                    return .success(snapshot)
+                }, profile: { _ in nil })
+            #expect(requested.withLock { $0 } == [selected.userID])
+            #expect(state.kimiManagedQuotas[selected.id] == snapshot)
+            #expect(state.kimiManagedRefreshStates[selected.id]?.lastSuccessAt != nil)
+            #expect(state.kimiManagedQuotas[hidden.id] == nil)
+            #expect(state.kimiManagedRefreshStates[hidden.id] == nil)
+            #expect(!SettingsStore.shared.isProviderEnabled(.kimi))
+            #expect(!SettingsStore.shared.isUsageServiceVisible(.kimi))
+        }
+    }
+
+    @Test func managedAccountBackoffStillBlocksManualAndPeriodicRefreshWithPrimaryOff() async throws {
+        try await withPrimaryDisabled {
+            let (state, root, store) = try isolatedState()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let account = KimiManagedAccount(id: "limited", region: .china, userID: "limited-user", visibleInPopover: false, showInMenuBar: true, showInFloatingHUD: false)
+            state.kimiManagedAccounts = [account]
+            try store.save(freshTokens(), accountID: account.id)
+            let previous = try #require(KimiQuotaClient.parse(root: ["usages": ["limit_5h": ["used_ratio": 0.4]]]))
+            state.kimiManagedQuotas[account.id] = previous
+            let requests = Locked(0)
+            for reason in [QuotaRefreshReason.userInitiated, .userInitiated, .periodic] {
+                await state.loadAllKimiManagedQuotas(reason: reason,
+                    fetch: { _ in
+                        requests.withLock { $0 += 1 }
+                        return .failure(.http(429, "limited"))
+                    }, profile: { _ in nil })
+            }
+            #expect(requests.withLock { $0 } == 1)
+            let until = try #require(state.kimiManagedRefreshStates[account.id]?.backoffUntil)
+            #expect(until > Date())
+            #expect(state.kimiManagedQuotas[account.id] == previous)
+        }
+    }
+
+    @Test func savingManagedLoginDoesNotTurnOnPrimaryDestinationsOrUsage() async throws {
+        try await withPrimaryDisabled {
+            let (state, root, store) = try isolatedState()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let loginID = UUID()
+            state.kimiDeviceLoginID = loginID
+            try await state.completeKimiDeviceLogin(region: .china, tokens: freshTokens(), loginID: loginID,
+                profile: { _ in KimiUserInfo(userID: "new-user", nickname: "New account") },
+                refreshAfterSave: false)
+            let saved = try #require(state.kimiManagedAccounts.first)
+            #expect(saved.userID == "new-user")
+            #expect(store.load(accountID: saved.id) != nil)
+            #expect(KimiManagedAccountStore.loadAll(from: root.appendingPathComponent("kimi_subscription_accounts.json")) == [saved])
+            #expect(!SettingsStore.shared.effectiveMenuBarVisibility(for: .kimi))
+            #expect(!SettingsStore.shared.effectiveFloatingVisibility(for: .kimi))
+            #expect(!SettingsStore.shared.isUsageServiceVisible(.kimi))
+        }
+    }
+
+    private func withPrimaryDisabled(_ operation: @MainActor () async throws -> Void) async throws {
+        let settings = SettingsStore.shared
+        let originalDisplay = settings.providerDisplaySettings[.kimi]
+        let originalUsage = settings.usageServiceVisibility[.kimi]
+        defer {
+            settings.providerDisplaySettings[.kimi] = originalDisplay
+            settings.usageServiceVisibility[.kimi] = originalUsage
+        }
+        settings.setProviderEnabled(false, for: .kimi)
+        settings.setUsageServiceVisible(false, for: .kimi)
+        try await operation()
+    }
+
+    private func isolatedState() throws -> (AppState, URL, RegressionKimiStore) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ccbar-kimi-destinations-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let state = AppState()
+        let store = RegressionKimiStore()
+        state.accountPersistenceDirectory = root
+        state.kimiTokenStore = store
+        return (state, root, store)
+    }
+
+    private func freshTokens() -> KimiManagedTokens {
+        KimiManagedTokens(accessToken: "fixture-access", refreshToken: "fixture-refresh", expiresAt: Date().addingTimeInterval(3600))
+    }
 }

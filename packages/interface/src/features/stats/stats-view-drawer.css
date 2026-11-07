@@ -1,0 +1,37 @@
+.cc-stats-drawer {
+  transform: translateX(0);
+  transition: transform 240ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.cc-stats-drawer[data-starting-style],
+.cc-stats-drawer[data-ending-style] {
+  transform: translateX(100%);
+}
+
+.cc-stats-drawer-backdrop {
+  opacity: 1;
+  transition: opacity 240ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.cc-stats-drawer-backdrop[data-starting-style],
+.cc-stats-drawer-backdrop[data-ending-style] {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-stats-drawer,
+  .cc-stats-drawer-backdrop {
+    transition: opacity 160ms ease !important;
+  }
+
+  .cc-stats-drawer[data-starting-style],
+  .cc-stats-drawer[data-ending-style] {
+    transform: none;
+    opacity: 0;
+  }
+}
+
+.cc-stats-drawer[data-instant],
+.cc-stats-drawer-backdrop[data-instant] {
+  transition-duration: 0ms !important;
+}

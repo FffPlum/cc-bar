@@ -9,7 +9,7 @@ struct OtherCodexAccountsSection: View {
 
     private var visible: [ImportedCodexAccount] {
         appState.importedCodexAccounts.filter {
-            $0.visibleInPopover && !(dedupPrimary && appState.importedCodexAccountMirrorsPrimary($0))
+            $0.showsInFloatingSurfaces && !(dedupPrimary && appState.importedCodexAccountMirrorsPrimary($0))
         }
     }
 

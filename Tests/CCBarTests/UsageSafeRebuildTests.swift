@@ -20,6 +20,73 @@ final class UsageSafeRebuildTests: XCTestCase {
         environment = nil
     }
 
+    func testPausingAutomaticScansPreservesHistoryAndAllowsManualSyncAndRecalculation() async throws {
+        let env = try XCTUnwrap(environment)
+        let firstLine = env.claudeLine(id: "auto-first", session: "auto-scan", model: model,
+            timestamp: timestamp(-1, from: Date()), input: 100, output: 10)
+        let secondLine = env.claudeLine(id: "auto-second", session: "auto-scan", model: model,
+            timestamp: timestamp(-0.5, from: Date()), input: 200, output: 20)
+        _ = try env.writeClaudeLog(session: "auto-scan", lines: [firstLine])
+        let service = env.makeService()
+        await env.bootstrap(service)
+        await service.scanNow()
+        let preserved = service.aggregator.snapshotLocal()
+        service.setAutomaticScanningEnabled(false)
+        _ = try env.writeClaudeLog(session: "auto-scan", lines: [firstLine, secondLine])
+        var scansStarted = 0
+        service.scanStartedForIndexTesting = { scansStarted += 1 }
+        await service.scanPeriodically()
+        await service.scanNow(automatically: true)
+        await service.rebuildCycleUsageIfNeeded()
+        await service.rebuildCycleUsageForRecentChanges(reasons: ["paused fixture"])
+        XCTAssertEqual(scansStarted, 0)
+        XCTAssertEqual(service.aggregator.snapshotLocal(), preserved)
+        await service.scanNow()
+        XCTAssertEqual(scansStarted, 1)
+        XCTAssertNotEqual(service.aggregator.snapshotLocal(), preserved)
+        let synchronized = service.aggregator.snapshotLocal()
+        _ = await service.forceRescan()
+        XCTAssertEqual(UsageHistoryConsistency.dayVector(service.aggregator.snapshotLocal()),
+            UsageHistoryConsistency.dayVector(synchronized))
+        service.setAutomaticScanningEnabled(true)
+        await service.scanNow(automatically: true)
+        XCTAssertEqual(scansStarted, 2)
+        service.scanStartedForIndexTesting = nil
+    }
+
+    func testManualSyncRepairsInitialAndChangedQuotaCyclesWhileAutomaticScanningIsPaused() async throws {
+        let env = try XCTUnwrap(environment)
+        let now = Date()
+        let service = try await seed(env, reference: now)
+        let preservedDay = UsageHistoryConsistency.dayVector(result(service).day)
+        service.setAutomaticScanningEnabled(false)
+        env.appState.quotaCycles.accountSegments = [QuotaCycleAccountSegment(id: "manual-account",
+            accountKey: "a", app: .claude, startAt: now.addingTimeInterval(-86400 * 30), endAt: nil)]
+        env.appState.quotaCycles.records = [makeCycle(id: "manual-cycle", app: .claude, accountKey: "a",
+            kind: .fiveHour, startAt: now.addingTimeInterval(-3600), endAt: now.addingTimeInterval(3600))]
+        service.requestCycleUsageRebuild(reasons: ["new quota cycle while paused"])
+        await service.scanNow(automatically: true)
+        XCTAssertTrue(result(service).cycle.isEmpty)
+
+        // No new log lines: manual sync still has to backfill the newly discovered cycle.
+        await service.scanNow()
+        XCTAssertEqual(result(service).cycle.filter { $0.cycleID == "manual-cycle" }
+            .reduce(0) { $0 + $1.inputTokens }, 500)
+        env.appState.quotaCycles.records = [makeCycle(id: "manual-cycle", app: .claude, accountKey: "a",
+            kind: .fiveHour, startAt: now.addingTimeInterval(-4 * 3600), endAt: now.addingTimeInterval(3600))]
+        service.requestCycleUsageRebuild(reasons: ["quota cycle start changed while paused"])
+        await service.scanNow()
+        XCTAssertEqual(result(service).cycle.filter { $0.cycleID == "manual-cycle" }
+            .reduce(0) { $0 + $1.inputTokens }, 2_500)
+        XCTAssertEqual(UsageHistoryConsistency.dayVector(result(service).day), preservedDay)
+        XCTAssertFalse(service.automaticScanningEnabled)
+
+        // A second manual sync must preserve totals after consuming the pending repair.
+        let repaired = UsageHistoryConsistency.cycleVector(result(service).cycle)
+        await service.scanNow()
+        XCTAssertEqual(UsageHistoryConsistency.cycleVector(result(service).cycle), repaired)
+    }
+
     // MARK: - fixture
 
     private let model = "ccbar-safe-model"
@@ -1414,6 +1481,85 @@ final class UsageSafeRebuildTests: XCTestCase {
     }
 
     // MARK: - 自动重建
+
+    /// 规则 v3 已把文件扫到末尾，却只计 token_count：升级必须重读旧范围补账，不能只等新增行。
+    func testCodexRuleUpgradeBackfillsCompactionAndPreservesDeletedConversation() async throws {
+        let env = environment!
+        env.installPricing(model: model, input: 10, output: 50, cacheRead: 1)
+        let reference = Date()
+        let liveID = "01990000-0000-7000-8000-000000000001"
+        let deletedID = "01990000-0000-7000-8000-000000000002"
+        let normalAt = timestamp(-1, from: reference)
+        let compactAt = timestamp(-0.5, from: reference)
+        let live = try env.writeCodexLog(id: liveID, lines: env.codexLines(
+            id: liveID, model: model, timestampPrefix: String(normalAt.dropLast()),
+            input: 1_000, cachedInput: 800, output: 100
+        ))
+        let deleted = try env.writeCodexLog(id: deletedID, lines: env.codexLines(
+            id: deletedID, model: model, timestampPrefix: String(timestamp(-48, from: reference).dropLast()),
+            input: 2_000, cachedInput: 1_000, output: 200
+        ))
+        let original = env.makeService()
+        await env.bootstrap(original)
+        await original.scanNow()
+        await original.flushPendingRollupChangesForTesting()
+        await original.synchronizeRequestIndexForTesting()
+        let before = result(original)
+        XCTAssertEqual(env.totals(before.day, app: .codex).requestCount, 2)
+        let deletedBefore = before.conversation.filter { $0.conversationKey == "codex:\(deletedID)" }
+        XCTAssertEqual(deletedBefore.count, 1)
+
+        let compaction = [
+            #"{"timestamp":"\#(compactAt)","type":"token_usage_record","payload":{"thread_id":"\#(liveID)","response_id":"resp-upgrade-compaction","usage":{"input_tokens":245017,"cached_input_tokens":244864,"output_tokens":3544,"total_tokens":248561},"thread_token_usage":{"input_tokens":246017,"cached_input_tokens":245664,"output_tokens":3644,"total_tokens":249661}}}"#,
+            #"{"timestamp":"\#(compactAt)","type":"compacted","payload":{"compaction_response_id":"resp-upgrade-compaction","message":"summary"}}"#,
+            #"{"timestamp":"\#(compactAt)","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":800,"output_tokens":100,"reasoning_output_tokens":0,"total_tokens":1100},"last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":40000}}}}"#,
+        ]
+        for line in compaction { try env.append(line, to: live) }
+
+        // 模拟真实旧规则已消费这段压缩日志的快照：只推进旧 watermark，桶和账本仍只有普通请求。
+        var legacy = try committed(env)
+        let stateKey = try XCTUnwrap(legacy.scanState.codex.first { $0.value.conversationID == liveID }?.key)
+        legacy.scanState.codex[stateKey]?.offset = UInt64(try Data(contentsOf: live).count)
+        legacy.scanState.codex[stateKey]?.mtime = try XCTUnwrap(
+            live.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        ).timeIntervalSince1970
+        XCTAssertNotNil(legacy.rebuildBasis)
+        legacy.rebuildBasis?.statsRules[UsageApp.codex.rawValue] = 3
+        try env.store.commit(legacy)
+        try FileManager.default.removeItem(at: deleted)
+
+        let restarted = env.makeService()
+        restarted.automaticRebuildEnabled = true
+        await env.bootstrap(restarted)
+        XCTAssertEqual(env.totals(result(restarted).day, app: .codex).requestCount, 2)
+        await restarted.scanNow()
+        let after = result(restarted)
+        let counts = env.totals(after.day, app: .codex)
+        XCTAssertEqual(counts.requestCount, 3)
+        XCTAssertEqual(counts.inputTokens, 1_353)
+        XCTAssertEqual(counts.outputTokens, 3_844)
+        XCTAssertEqual(counts.cacheReadTokens, 246_664)
+        XCTAssertEqual(dayCost(after.day, model: model) - dayCost(before.day, model: model),
+                       Decimal(string: "0.423594")!)
+        XCTAssertEqual(after.conversation.filter { $0.conversationKey == "codex:\(deletedID)" }, deletedBefore,
+                       "被删除日志的对话必须保留，不得因补计压缩用量而清空")
+        let snapshot = try committed(env)
+        XCTAssertEqual(snapshot.rebuildBasis?.statsRules[UsageApp.codex.rawValue], 4)
+        try assertSameDayVector(after.day, snapshot.usageRollup.buckets, env: env)
+
+        await restarted.synchronizeRequestIndexForTesting()
+        let indexed = try restarted.requestIndexStore.query(
+            .init(apps: [.codex], from: reference.addingTimeInterval(-2 * 3_600), to: reference,
+                  page: .init(offset: 0, limit: 10)), canonical: after.day
+        )
+        XCTAssertEqual(indexed.totalCount, 2, "现存日志的普通请求与压缩请求都应进入重建后的明细")
+        XCTAssertTrue(indexed.rows.contains { $0.input == 153 && $0.output == 3_544 && $0.cacheRead == 244_864 })
+        let commits = env.stats.commitCount
+        await restarted.scanNow()
+        XCTAssertEqual(env.stats.commitCount, commits, "规则升级只重建一次")
+        try assertSameDayVector(after.day, result(restarted).day, env: env)
+        XCTAssertEqual(dayCost(after.day, model: model), dayCost(result(restarted).day, model: model))
+    }
 
     /// 旧版本快照没有基准：升级后第一次扫描自动重建一次，补齐账本；之后不再重复。
     func testAutomaticRebuildRunsOnceAfterUpgrade() async throws {

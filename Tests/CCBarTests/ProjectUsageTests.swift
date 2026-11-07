@@ -327,6 +327,52 @@ final class ProjectUsageTests: XCTestCase {
         XCTAssertEqual(vector.values.first?.inputTokens, 40)
     }
 
+    // MARK: - 对话模型分档计时
+
+    func testConversationDetailPreservesTimingPerModelAndSpeedTier() throws {
+        let aggregator = ConversationAggregator(worktreeResolver: ProjectWorktreeResolver(home: tempRoot.path))
+        let conversation = info("timed", app: .codex, project: "/x/alpha")
+        var firstStandard = bucket("timed", .codex, day(2026, 3, 1), tokens: 100, cost: 1)
+        firstStandard.outputTokens = 200
+        firstStandard.cacheReadTokens = 50
+        firstStandard.timing.add(RequestTiming(firstTokenMs: 1000, generationMs: 2000), outputTokens: 200)
+        var secondStandard = bucket("timed", .codex, day(2026, 3, 2), tokens: 100, cost: 2)
+        secondStandard.outputTokens = 400
+        secondStandard.cacheReadTokens = 50
+        secondStandard.timing.add(RequestTiming(firstTokenMs: 3000, generationMs: 2000), outputTokens: 400)
+        var fast = bucket("timed", .codex, day(2026, 3, 2), tokens: 200, cost: 3)
+        fast.speed = .fast
+        fast.outputTokens = 600
+        fast.cacheReadTokens = 100
+        fast.timing.add(RequestTiming(firstTokenMs: 500, generationMs: 1000), outputTokens: 600)
+        aggregator.load(infos: [conversation], buckets: [firstStandard, secondStandard, fast])
+
+        let detail = try XCTUnwrap(aggregator.detail(key: conversation.key))
+        let model = try XCTUnwrap(detail.models.first)
+        XCTAssertEqual(detail.models.count, 1)
+        XCTAssertEqual(model.model, "m")
+        XCTAssertEqual(model.speed.standard.timing.averageFirstTokenSeconds, 2)
+        XCTAssertEqual(model.speed.standard.timing.outputTokensPerSecond, 150)
+        XCTAssertEqual(model.speed.fast.timing.averageFirstTokenSeconds, 0.5)
+        XCTAssertEqual(model.speed.fast.timing.outputTokensPerSecond, 600)
+        XCTAssertEqual(model.speed.standard.totalTokens, 900)
+        XCTAssertEqual(model.speed.fast.totalTokens, 900)
+        XCTAssertEqual(model.speed.standard.requestCount, 2)
+        XCTAssertEqual(model.speed.fast.requestCount, 1)
+        XCTAssertNil(model.speed.unknown.timing.averageFirstTokenSeconds)
+        XCTAssertNil(model.speed.unknown.timing.outputTokensPerSecond)
+
+        // 总计仍按请求数平均首字、按总输出时长计算速度，不对分档均值再平均。
+        XCTAssertEqual(detail.totals.timing.averageFirstTokenSeconds, 1.5)
+        XCTAssertEqual(detail.totals.timing.outputTokensPerSecond, 240)
+        XCTAssertEqual(detail.totals.totalTokens, 1800)
+        XCTAssertEqual(detail.totals.requestCount, 3)
+        XCTAssertEqual(detail.totals.costUSD, 6)
+        XCTAssertEqual(detail.costs.total, 6)
+        XCTAssertEqual(model.totals, detail.totals)
+        XCTAssertEqual(model.speed, detail.speed)
+    }
+
     // MARK: - Codex 分支
 
     func testCodexSessionMetaBranch() {

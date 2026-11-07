@@ -181,11 +181,14 @@ nonisolated struct CycleUsageSummary: Sendable, Equatable, Identifiable {
     }
 
     var estimatedFullAllowanceTokens: Int? {
-        guard forecastObservedPercent > 0,
-              currentAllowanceTotals.totalTokens > 0
+        Self.estimatedFullAllowanceTokens(tokens: currentAllowanceTotals.totalTokens, observedPercent: forecastObservedPercent)
+    }
+
+    static func estimatedFullAllowanceTokens(tokens: Int, observedPercent: Double) -> Int? {
+        guard observedPercent > 0, tokens > 0
         else { return nil }
-        let estimate = Double(currentAllowanceTotals.totalTokens) * 100 / forecastObservedPercent
-        guard estimate.isFinite, estimate <= Double(Int.max) else { return nil }
+        let estimate = Double(tokens) * 100 / observedPercent
+        guard estimate.isFinite, estimate >= 1, estimate < Double(Int.max) else { return nil }
         return Int(estimate.rounded())
     }
 
@@ -334,20 +337,20 @@ final class CycleUsageAggregator {
         var changed = false
         for entry in entries {
             guard let cycleApp = Self.cycleApp(for: entry),
-                  let accountKey = accountKey(
+                  let accountKey = Self.accountKey(
                       for: entry.timestamp,
                       app: cycleApp,
                       segments: accountSegments
                   ) else { continue }
             for kind in [QuotaLimitKind.weekly, .fiveHour] {
-                guard let cycle = bestCycle(
+                guard let cycle = Self.bestCycle(
                     for: entry.timestamp,
                     app: cycleApp,
                     accountKey: accountKey,
                     kind: kind,
                     cycles: cycles
                 ) else { continue }
-                let allowanceSegmentID = bestAllowanceSegment(for: entry.timestamp, cycle: cycle)?.id
+                let allowanceSegmentID = Self.bestAllowanceSegment(for: entry.timestamp, cycle: cycle)?.id
                 add(
                     cycleID: cycle.id,
                     allowanceSegmentID: allowanceSegmentID,
@@ -476,7 +479,7 @@ final class CycleUsageAggregator {
             .sorted { $0.cycle.endAt > $1.cycle.endAt }
     }
 
-    private func bestAllowanceSegment(
+    nonisolated static func bestAllowanceSegment(
         for date: Date,
         cycle: QuotaCycleRecord
     ) -> QuotaCycleAllowanceSegment? {
@@ -485,7 +488,7 @@ final class CycleUsageAggregator {
             .max { $0.startAt < $1.startAt }
     }
 
-    private func bestCycle(
+    nonisolated static func bestCycle(
         for date: Date,
         app: UsageApp,
         accountKey: String,
@@ -506,7 +509,7 @@ final class CycleUsageAggregator {
             .first
     }
 
-    private func accountKey(
+    nonisolated static func accountKey(
         for date: Date,
         app: UsageApp,
         segments: [QuotaCycleAccountSegment]
@@ -594,7 +597,7 @@ final class CycleUsageAggregator {
 }
 
 private extension CycleUsageBucket {
-    var usageTotals: UsageTotals {
+    nonisolated var usageTotals: UsageTotals {
         UsageTotals(
             inputTokens: inputTokens,
             outputTokens: outputTokens,
@@ -604,5 +607,179 @@ private extension CycleUsageBucket {
             requestCount: requestCount,
             hasUnpricedUsage: hasUnpricedUsage
         )
+    }
+}
+
+/// A daily estimate from indexed local requests. This is not the provider's daily
+/// bill or an official quota percentage; account/cycle gaps remain unknown.
+nonisolated struct CycleDailyUsage: Sendable {
+    enum State: String, Sendable { case ready, loading, unavailable }
+    struct Point: Sendable {
+        let day: Date
+        let tokens: Int?
+        let estimatedUsedPercent: Double?
+        let partial: Bool
+    }
+    var state: State
+    var points: [Point]
+
+    struct Slice: Sendable {
+        let from: Date
+        let to: Date
+        let accountKnown: Bool
+        let selectedAccount: Bool
+        let fullTokens: Int?
+        let partialBasis: Bool
+    }
+    struct Plan: Sendable {
+        let app: UsageApp
+        let apps: Set<UsageApp>
+        let days: [Date]
+        let slices: [Slice]
+        let calendar: Calendar
+        let now: Date
+
+        var queries: [UsageRequestIndexStore.Query] {
+            slices.map { .init(apps: apps, from: $0.from, to: $0.to, calendar: calendar) }
+        }
+        func empty(_ state: State) -> CycleDailyUsage {
+            CycleDailyUsage(state: state, points: days.map {
+                Point(day: $0, tokens: nil, estimatedUsedPercent: nil, partial: true)
+            })
+        }
+        func includes(_ bucket: UsageBucket) -> Bool {
+            apps.contains(bucket.app)
+                && CycleUsageAggregator.cycleApp(app: bucket.app, model: bucket.model) == app
+                && CycleUsageAggregator.isSubscriptionUsage(app: bucket.app, model: bucket.model)
+        }
+    }
+
+    static func plan(app: UsageApp, accountKey: String, payload: QuotaCyclePayload,
+                     buckets: [CycleUsageBucket], includeOtherAgents: Bool,
+                     now: Date, calendar: Calendar = .current) -> Plan {
+        let today = calendar.startOfDay(for: now)
+        let days = (-13...0).compactMap { calendar.date(byAdding: .day, value: $0, to: today) }
+        let from = days.first ?? today
+        let apps: Set<UsageApp> = app == .codex && includeOtherAgents
+            ? CycleUsageAggregator.otherAgentSourceApps.union([app]) : [app]
+        let cycles = payload.records.filter {
+            $0.app == app && $0.limitKind == .weekly && $0.endAt > from && $0.startAt < now
+        }
+        let accountSegments = payload.accountSegments.filter {
+            $0.app == app && ($0.endAt ?? .distantFuture) > from && $0.startAt < now
+        }
+        let grouped = Dictionary(grouping: buckets.filter {
+            apps.contains($0.app) && CycleUsageAggregator.isSubscriptionUsage(app: $0.app, model: $0.model)
+        }, by: \.cycleID)
+        var boundaries: Set<Date> = [from, now]
+        for segment in accountSegments {
+            boundaries.insert(max(from, segment.startAt))
+            boundaries.insert(min(now, segment.endAt ?? now))
+        }
+        for cycle in cycles {
+            boundaries.insert(max(from, cycle.startAt))
+            boundaries.insert(min(now, cycle.endAt))
+            for segment in cycle.allowanceSegments {
+                if segment.startAt > from && segment.startAt < now { boundaries.insert(segment.startAt) }
+                if let end = segment.endAt, end > from && end < now { boundaries.insert(end) }
+            }
+        }
+        let sorted = boundaries.sorted()
+        let slices = zip(sorted, sorted.dropFirst()).map { start, end -> Slice in
+            let owner = CycleUsageAggregator.accountKey(for: start, app: app, segments: accountSegments)
+            let cycle = owner.flatMap {
+                CycleUsageAggregator.bestCycle(for: start, app: app, accountKey: $0, kind: .weekly, cycles: cycles)
+            }
+            let allowance = cycle.flatMap { CycleUsageAggregator.bestAllowanceSegment(for: start, cycle: $0) }
+            var totals = UsageTotals.zero
+            var partialBasis = false
+            if let cycle, let allowance {
+                for bucket in grouped[cycle.id] ?? [] where bucket.allowanceSegmentID == allowance.id {
+                    totals.add(bucket.usageTotals)
+                    partialBasis = partialBasis || bucket.quality == .incomplete
+                }
+                partialBasis = partialBasis
+                    || allowance.firstSampleAt.timeIntervalSince(allowance.startAt) > 600
+                    || (min(cycle.endAt, allowance.endAt ?? cycle.endAt) <= now
+                        && min(cycle.endAt, allowance.endAt ?? cycle.endAt).timeIntervalSince(allowance.lastSampleAt) > 600)
+            }
+            let full = allowance.flatMap {
+                CycleUsageSummary.estimatedFullAllowanceTokens(tokens: totals.totalTokens, observedPercent: $0.observedUsedPercent)
+            }
+            return Slice(from: start, to: end, accountKnown: owner != nil,
+                         selectedAccount: owner == accountKey, fullTokens: full, partialBasis: partialBasis)
+        }
+        return Plan(app: app, apps: apps, days: days, slices: slices, calendar: calendar, now: now)
+    }
+
+    static func resolve(_ plan: Plan, results: [UsageRequestIndexStore.QueryResult],
+                        canonical: [UsageBucket], status: UsageRequestIndexStatus) -> CycleDailyUsage {
+        guard results.count == plan.slices.count else { return plan.empty(.loading) }
+        typealias Partition = UsageRequestIndexStore.Partition
+        func partition(_ bucket: UsageBucket) -> Partition {
+            Partition(app: bucket.app, model: bucket.model, speed: bucket.speed, day: bucket.day)
+        }
+        // Each SQL result's partitions describe full days, even when its exact query
+        // interval starts at a mid-day account switch. Deduplicate, never add them.
+        var verified: [Partition: UsageBucket] = [:]
+        var pending: Set<Partition> = []
+        var incompleteApps = status.incompleteApps
+        for result in results {
+            for bucket in result.partitions { verified[partition(bucket)] = bucket }
+            pending.formUnion(result.pendingPartitions)
+            incompleteApps.formUnion(result.metadata.incompleteApps)
+        }
+        var dailyCanonical: [Partition: UsageTotals] = [:]
+        for bucket in canonical where plan.includes(bucket) && plan.days.contains(bucket.day) {
+            dailyCanonical[partition(bucket), default: .zero].add(bucket)
+        }
+        var incompleteDays: Set<Date> = []
+        for (key, expected) in dailyCanonical {
+            // DSH has no request-index implementation. Its nonzero authoritative
+            // daily buckets identify the dates we cannot safely attribute.
+            if key.app == .dsh && expected.totalTokens == 0 && expected.requestCount == 0 { continue }
+            var actual = UsageTotals.zero
+            if let bucket = verified[key] { actual.add(bucket) }
+            if incompleteApps.contains(key.app) || pending.contains(key)
+                || actual.inputTokens != expected.inputTokens || actual.outputTokens != expected.outputTokens
+                || actual.cacheReadTokens != expected.cacheReadTokens || actual.cacheCreationTokens != expected.cacheCreationTokens
+                || actual.requestCount != expected.requestCount {
+                incompleteDays.insert(key.day)
+            }
+        }
+        // Supported sources still loading cannot confirm an otherwise empty day.
+        // DSH's structural lack of detail is handled per day above, not as a
+        // permanent failure of every Codex day when other agents are included.
+        let unavailableIndexedApps = incompleteApps.intersection(plan.apps).subtracting([.dsh])
+        if !unavailableIndexedApps.isEmpty { incompleteDays.formUnion(plan.days) }
+
+        let points = plan.days.map { day -> Point in
+            let end = min(plan.calendar.date(byAdding: .day, value: 1, to: day) ?? plan.now, plan.now)
+            var tokens = 0
+            var percent = 0.0
+            var selected = false
+            var unknown = incompleteDays.contains(day)
+            var missingBasis = false
+            var partialBasis = false
+            for (index, slice) in plan.slices.enumerated() where slice.from < end && slice.to > day {
+                if !slice.accountKnown { unknown = true }
+                guard slice.selectedAccount else { continue }
+                selected = true
+                partialBasis = partialBasis || slice.partialBasis
+                var totals = UsageTotals.zero
+                for bucket in results[index].buckets where bucket.day == day && plan.includes(bucket) { totals.add(bucket) }
+                tokens += totals.totalTokens
+                if let full = slice.fullTokens {
+                    percent += Double(totals.totalTokens) / Double(full) * 100
+                } else {
+                    missingBasis = true
+                }
+            }
+            let knownTokens = selected && !unknown ? tokens : nil
+            let knownPercent = knownTokens != nil && !missingBasis && percent.isFinite ? percent : nil
+            return Point(day: day, tokens: knownTokens, estimatedUsedPercent: knownPercent,
+                         partial: unknown || !selected || missingBasis || partialBasis)
+        }
+        return CycleDailyUsage(state: .ready, points: points)
     }
 }

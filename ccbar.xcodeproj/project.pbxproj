@@ -7,6 +7,28 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4B7A96A6A905843BAA8D2920 /* HostWindowAccountsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A2C8F3D4CFA4A42F638CB94 /* HostWindowAccountsTests.swift */; };
+		D122367247EA5A154D437BF2 /* HostWindowAccountsServiceDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B7A218050D66BA2B862DFAB /* HostWindowAccountsServiceDTO.swift */; };
+		2212CD7217BCA830D554F3B9 /* HostWindowAccountsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FA68993B37A431E22772FE /* HostWindowAccountsService.swift */; };
+		B9182E50B39B024F2DFC27D8 /* HostWindowUsageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9D6E64AB59A031A44FF4FF /* HostWindowUsageTests.swift */; };
+		9FB3F1145802205FE7DA6C93 /* HostWindowSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69C1FA601F1288AD1C882413 /* HostWindowSettingsTests.swift */; };
+		614A1BBC829B58B7EB0554D8 /* HostWindowApplicationsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D3E5B4ABC1324685FB2F10A /* HostWindowApplicationsTests.swift */; };
+		D95A11203B9F4C5082D38211 /* HostWindowDashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D95A11213B9F4C5082D38211 /* HostWindowDashboard.swift */; };
+		347717EE74BC44E5712EC2B8 /* HostWindowUsageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C23FF7D2FEF3E22869F9C9A1 /* HostWindowUsageService.swift */; };
+		58F215C69A5C496922935EA1 /* HostWindowUsageDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3313951B7C67D852FDF46488 /* HostWindowUsageDTO.swift */; };
+		CBB18B86A5CBE3C53E861522 /* HostWindowSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4A57A0F3F84C7645EBFB53E /* HostWindowSupport.swift */; };
+		7194EA061826F18D16CA093E /* HostWindowSettingsServiceActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BACABEB63D0FF5199CD5CA08 /* HostWindowSettingsServiceActions.swift */; };
+		F08432E4F816F5A3BCC9F66A /* HostWindowSettingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ECB4A25B9F06B2509E75095 /* HostWindowSettingsService.swift */; };
+		8DCC2E666C8B10614253EE96 /* HostWindowApplicationsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 896A839D986459122BB73E30 /* HostWindowApplicationsService.swift */; };
+		89BE81F0A686CFF522FDD3CB /* HostWindowAccountsServiceActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF258A59273C3F5F82E1DD7F /* HostWindowAccountsServiceActions.swift */; };
+		A027ABCD0000000000000008 /* HostAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A027ABCD0000000000000007 /* HostAPITests.swift */; };
+		A027ABCD000000000000000B /* ReactWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A027ABCD0000000000000009 /* ReactWindow.swift */; };
+		A027ABCD000000000000000C /* WebInterfaceBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A027ABCD000000000000000A /* WebInterfaceBundle.swift */; };
+		A027ABCD000000000000000E /* WebInterface in Resources */ = {isa = PBXBuildFile; fileRef = A027ABCD000000000000000D /* WebInterface */; };
+		A027ABCD0000000000000010 /* WebInterfaceBundleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A027ABCD000000000000000F /* WebInterfaceBundleTests.swift */; };
+		A027ABCD0000000000000006 /* MacOSWebKitTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A027ABCD0000000000000004 /* MacOSWebKitTransport.swift */; };
+		A027ABCD0000000000000005 /* MacOSHostService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A027ABCD0000000000000003 /* MacOSHostService.swift */; };
+		A027ABCD0000000000000001 /* HostWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = A027ABCD0000000000000002 /* HostWire.swift */; };
 		4931AC592FC02A4200EE598C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4931AC522FC02A4200EE598C /* Assets.xcassets */; };
 		4931AC622FC02A4200EE598C /* MenuBarLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4931AC4F2FC02A4200EE598C /* MenuBarLabel.swift */; };
 		4931AC632FC02A4200EE598C /* CCBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4931AC412FC02A4200EE598C /* CCBarApp.swift */; };
@@ -54,6 +76,8 @@
 		49C1B153000000000001AABB /* ClaudeJSONLScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B153000000000001AAAA /* ClaudeJSONLScanner.swift */; };
 		49C1B154000000000001AABB /* CodexJSONLScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B154000000000001AAAA /* CodexJSONLScanner.swift */; };
 		49C1B155000000000001AABB /* UsageAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B155000000000001AAAA /* UsageAggregator.swift */; };
+		D95A11223B9F4C5082D38211 /* UsageRequestIndexStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D95A11233B9F4C5082D38211 /* UsageRequestIndexStore.swift */; };
+		B27463251D1A44598801A201 /* UsageRequestIndexQueries.swift in Sources */ = {isa = PBXBuildFile; fileRef = B27463251D1A44598801A202 /* UsageRequestIndexQueries.swift */; };
 		49C1B156000000000001AABB /* UsageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B156000000000001AAAA /* UsageService.swift */; };
 		49C1B157000000000001AABB /* PricingCatalogModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B157000000000001AAAA /* PricingCatalogModels.swift */; };
 		49C1B158000000000001AABB /* LiteLLMPricingDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1B158000000000001AAAA /* LiteLLMPricingDecoder.swift */; };
@@ -209,6 +233,7 @@
 		BC81D36E776619EF84627362 /* CCBarConfiguration in Frameworks */ = {isa = PBXBuildFile; productRef = 8656D1D9D9E287641B21522C /* CCBarConfiguration */; };
 		6BBD22B18BD75D4F758DB70E /* CCBarConfiguration in Frameworks */ = {isa = PBXBuildFile; productRef = B042EFACDCB8EEDD3ED9AD02 /* CCBarConfiguration */; };
 		B3706D00092E53C8819C7D63 /* ApplicationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EA48DBE3CE0169892276B66 /* ApplicationStore.swift */; };
+		A611C0DE0000000000000001 /* ApplicationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A611C0DE0000000000000002 /* ApplicationManager.swift */; };
 		AA647DCD366BE1CEE149E342 /* ApplicationDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85DC31A6477E757AE33AEF68 /* ApplicationDetailView.swift */; };
 		4CA180D6FA32A3AD7341F43C /* AppState+Applications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56AC93E11428D9309A4E4051 /* AppState+Applications.swift */; };
 		75DFBA64C2A0CA642099B709 /* QuotaManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF631B228F554EAC5A7C4EC /* QuotaManagementView.swift */; };
@@ -236,6 +261,28 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		8A2C8F3D4CFA4A42F638CB94 /* HostWindowAccountsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostWindowAccountsTests.swift; sourceTree = "<group>"; };
+		7B7A218050D66BA2B862DFAB /* HostWindowAccountsServiceDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/HostWindowAccountsServiceDTO.swift; sourceTree = "<group>"; };
+		A3FA68993B37A431E22772FE /* HostWindowAccountsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/HostWindowAccountsService.swift; sourceTree = "<group>"; };
+		6A9D6E64AB59A031A44FF4FF /* HostWindowUsageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostWindowUsageTests.swift; sourceTree = "<group>"; };
+		69C1FA601F1288AD1C882413 /* HostWindowSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostWindowSettingsTests.swift; sourceTree = "<group>"; };
+		6D3E5B4ABC1324685FB2F10A /* HostWindowApplicationsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostWindowApplicationsTests.swift; sourceTree = "<group>"; };
+		D95A11213B9F4C5082D38211 /* HostWindowDashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/HostWindowDashboard.swift; sourceTree = "<group>"; };
+		C23FF7D2FEF3E22869F9C9A1 /* HostWindowUsageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/HostWindowUsageService.swift; sourceTree = "<group>"; };
+		3313951B7C67D852FDF46488 /* HostWindowUsageDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/HostWindowUsageDTO.swift; sourceTree = "<group>"; };
+		A4A57A0F3F84C7645EBFB53E /* HostWindowSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/HostWindowSupport.swift; sourceTree = "<group>"; };
+		BACABEB63D0FF5199CD5CA08 /* HostWindowSettingsServiceActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/HostWindowSettingsServiceActions.swift; sourceTree = "<group>"; };
+		1ECB4A25B9F06B2509E75095 /* HostWindowSettingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/HostWindowSettingsService.swift; sourceTree = "<group>"; };
+		896A839D986459122BB73E30 /* HostWindowApplicationsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/HostWindowApplicationsService.swift; sourceTree = "<group>"; };
+		EF258A59273C3F5F82E1DD7F /* HostWindowAccountsServiceActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/HostWindowAccountsServiceActions.swift; sourceTree = "<group>"; };
+		A027ABCD0000000000000007 /* HostAPITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPITests.swift; sourceTree = "<group>"; };
+		A027ABCD0000000000000009 /* ReactWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactWindow.swift; sourceTree = "<group>"; };
+		A027ABCD000000000000000A /* WebInterfaceBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebInterfaceBundle.swift; sourceTree = "<group>"; };
+		A027ABCD000000000000000D /* WebInterface */ = {isa = PBXFileReference; lastKnownFileType = folder; path = WebInterface; sourceTree = "<group>"; };
+		A027ABCD000000000000000F /* WebInterfaceBundleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebInterfaceBundleTests.swift; sourceTree = "<group>"; };
+		A027ABCD0000000000000004 /* MacOSWebKitTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/MacOSWebKitTransport.swift; sourceTree = "<group>"; };
+		A027ABCD0000000000000003 /* MacOSHostService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/MacOSHostService.swift; sourceTree = "<group>"; };
+		A027ABCD0000000000000002 /* HostWire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAPI/HostWire.swift; sourceTree = "<group>"; };
 		4931AC302FC029A000EE598C /* CCBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CCBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4931AC3E2FC02A4200EE598C /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/CCBar/AppDelegate.swift; sourceTree = "<group>"; };
 		4931AC3F2FC02A4200EE598C /* ccbar.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ccbar.xcodeproj; sourceTree = "<group>"; };
@@ -287,6 +334,8 @@
 		49C1B153000000000001AAAA /* ClaudeJSONLScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeJSONLScanner.swift; sourceTree = "<group>"; };
 		49C1B154000000000001AAAA /* CodexJSONLScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexJSONLScanner.swift; sourceTree = "<group>"; };
 		49C1B155000000000001AAAA /* UsageAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageAggregator.swift; sourceTree = "<group>"; };
+		D95A11233B9F4C5082D38211 /* UsageRequestIndexStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageRequestIndexStore.swift; sourceTree = "<group>"; };
+		B27463251D1A44598801A202 /* UsageRequestIndexQueries.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageRequestIndexQueries.swift; sourceTree = "<group>"; };
 		49C1B156000000000001AAAA /* UsageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageService.swift; sourceTree = "<group>"; };
 		49C1B157000000000001AAAA /* PricingCatalogModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PricingCatalogModels.swift; sourceTree = "<group>"; };
 		49C1B158000000000001AAAA /* LiteLLMPricingDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiteLLMPricingDecoder.swift; sourceTree = "<group>"; };
@@ -437,6 +486,7 @@
 		8708930278E97B785F2B7AAC /* favicon-grok.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = favicon-grok.png; sourceTree = "<group>"; };
 		A6889AE6BB21B1523BF34197 /* favicon-gemini.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = favicon-gemini.png; sourceTree = "<group>"; };
 		4EA48DBE3CE0169892276B66 /* ApplicationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationStore.swift; sourceTree = "<group>"; };
+		A611C0DE0000000000000002 /* ApplicationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationManager.swift; sourceTree = "<group>"; };
 		85DC31A6477E757AE33AEF68 /* ApplicationDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationDetailView.swift; sourceTree = "<group>"; };
 		56AC93E11428D9309A4E4051 /* AppState+Applications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Applications.swift"; sourceTree = "<group>"; };
 		3BF631B228F554EAC5A7C4EC /* QuotaManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaManagementView.swift; sourceTree = "<group>"; };
@@ -511,6 +561,19 @@
 		4931AC432FC02A4200EE598C /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				A027ABCD0000000000000002 /* HostWire.swift */,
+				A027ABCD0000000000000004 /* MacOSWebKitTransport.swift */,
+				A027ABCD0000000000000003 /* MacOSHostService.swift */,
+				7B7A218050D66BA2B862DFAB /* HostWindowAccountsServiceDTO.swift */,
+				A3FA68993B37A431E22772FE /* HostWindowAccountsService.swift */,
+				D95A11213B9F4C5082D38211 /* HostWindowDashboard.swift */,
+				C23FF7D2FEF3E22869F9C9A1 /* HostWindowUsageService.swift */,
+				3313951B7C67D852FDF46488 /* HostWindowUsageDTO.swift */,
+				A4A57A0F3F84C7645EBFB53E /* HostWindowSupport.swift */,
+				BACABEB63D0FF5199CD5CA08 /* HostWindowSettingsServiceActions.swift */,
+				1ECB4A25B9F06B2509E75095 /* HostWindowSettingsService.swift */,
+				896A839D986459122BB73E30 /* HostWindowApplicationsService.swift */,
+				EF258A59273C3F5F82E1DD7F /* HostWindowAccountsServiceActions.swift */,
 				49C2AD10000000000001AAAA /* Notifications */,
 				4931AC422FC02A4200EE598C /* AppState.swift */,
 				49C1B131000000000001AAAA /* Scheduler.swift */,
@@ -549,6 +612,7 @@
 			children = (
 				4931AC522FC02A4200EE598C /* Assets.xcassets */,
 				49C1B142000000000001AAAA /* Logos */,
+				A027ABCD000000000000000D /* WebInterface */,
 			);
 			path = Sources/CCBar/Resources;
 			sourceTree = "<group>";
@@ -713,6 +777,8 @@
 				49C1B155000000000001AAAA /* UsageAggregator.swift */,
 				49C1BC14000000000001AAAA /* CursorUsageFetcher.swift */,
 				49C1B16A000000000001AAAA /* ModelProvider.swift */,
+				D95A11233B9F4C5082D38211 /* UsageRequestIndexStore.swift */,
+				B27463251D1A44598801A202 /* UsageRequestIndexQueries.swift */,
 				49C1B156000000000001AAAA /* UsageService.swift */,
 				49C2AA05000000000001AAAA /* UsageHistoryConsistency.swift */,
 				49C1B197000000000001AAAA /* UsageLogWatcher.swift */,
@@ -731,6 +797,8 @@
 				225DDDC0757FDC0D737DA566 /* WorkspaceComponents.swift */,
 				98EB68E73512FD6A248DCB34 /* AccountDisplayControls.swift */,
 				49C1B161000000000001AAAA /* MainWindowRootView.swift */,
+				A027ABCD0000000000000009 /* ReactWindow.swift */,
+				A027ABCD000000000000000A /* WebInterfaceBundle.swift */,
 				49C2AC03000000000001AAAA /* AppUpdateWindow.swift */,
 				49C1B162000000000001AAAA /* StatsView.swift */,
 				49C1B1F0000000000001AAAA /* StatsOverviewModel.swift */,
@@ -786,6 +854,12 @@
 				49C1BF04000000000001AAAA /* ScannerIncrementalTests.swift */,
 				49C1BF05000000000001AAAA /* UsageEquivalenceTests.swift */,
 				49C1BF30000000000001AAAA /* StatsOverviewModelTests.swift */,
+				A027ABCD0000000000000007 /* HostAPITests.swift */,
+				8A2C8F3D4CFA4A42F638CB94 /* HostWindowAccountsTests.swift */,
+				6A9D6E64AB59A031A44FF4FF /* HostWindowUsageTests.swift */,
+				69C1FA601F1288AD1C882413 /* HostWindowSettingsTests.swift */,
+				6D3E5B4ABC1324685FB2F10A /* HostWindowApplicationsTests.swift */,
+				A027ABCD000000000000000F /* WebInterfaceBundleTests.swift */,
 				49C1BF07000000000001AAAA /* QuotaPersistenceCoordinatorTests.swift */,
 				49C1BD04000000000001AAAA /* RedactTests.swift */,
 				49C1B31000000000000FAAAA /* PiJSONLScannerTests.swift */,
@@ -853,6 +927,7 @@
 				56AC93E11428D9309A4E4051 /* AppState+Applications.swift */,
 				85DC31A6477E757AE33AEF68 /* ApplicationDetailView.swift */,
 				4EA48DBE3CE0169892276B66 /* ApplicationStore.swift */,
+				A611C0DE0000000000000002 /* ApplicationManager.swift */,
 			);
 			path = Sources/CCBar/Applications;
 			sourceTree = "<group>";
@@ -878,6 +953,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 4931AC3B2FC029A100EE598C /* Build configuration list for PBXNativeTarget "ccbar" */;
 			buildPhases = (
+				A027ABCD0000000000000011 /* Build Web Interface */,
 				4931AC2C2FC029A000EE598C /* Sources */,
 				4931AC2D2FC029A000EE598C /* Frameworks */,
 				4931AC2E2FC029A000EE598C /* Resources */,
@@ -978,6 +1054,7 @@
 				C6A39F82B10A24C8E554E33A /* favicon-grok.png in Resources */,
 				12064E3759515118D5C0257D /* favicon-deepseek.ico in Resources */,
 				4931AC592FC02A4200EE598C /* Assets.xcassets in Resources */,
+				A027ABCD000000000000000E /* WebInterface in Resources */,
 				49C1B140000000000001AABB /* codex.svg in Resources */,
 				49C1B141000000000001AABB /* claude.svg in Resources */,
 				49C1B143000000000001AABB /* antigravity.svg in Resources */,
@@ -1010,6 +1087,28 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		A027ABCD0000000000000011 /* Build Web Interface */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Web Interface";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "if [[ \"${CCBAR_WEB_INTERFACE_BUILT:-0}\" == \"1\" ]]; then\n  exit 0\nfi\n\"$SRCROOT/scripts/build-web-interface.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		4931AC2C2FC029A000EE598C /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -1028,6 +1127,7 @@
 				4CA180D6FA32A3AD7341F43C /* AppState+Applications.swift in Sources */,
 				AA647DCD366BE1CEE149E342 /* ApplicationDetailView.swift in Sources */,
 				B3706D00092E53C8819C7D63 /* ApplicationStore.swift in Sources */,
+				A611C0DE0000000000000001 /* ApplicationManager.swift in Sources */,
 				20CF74506B369E7B76295F93 /* ResourceBundle.swift in Sources */,
 				49C2AD01000000000001AABB /* QuotaAlertModels.swift in Sources */,
 				49C2AD02000000000001AABB /* QuotaAlertPolicy.swift in Sources */,
@@ -1106,7 +1206,22 @@
 				49C2AA02000000000001AAAA /* UsageSnapshotStore.swift in Sources */,
 				49C2AA04000000000001AAAA /* LegacyUsageHistory.swift in Sources */,
 				49C1B155000000000001AABB /* UsageAggregator.swift in Sources */,
+				A027ABCD0000000000000001 /* HostWire.swift in Sources */,
+				A027ABCD0000000000000006 /* MacOSWebKitTransport.swift in Sources */,
+				A027ABCD0000000000000005 /* MacOSHostService.swift in Sources */,
+				D122367247EA5A154D437BF2 /* HostWindowAccountsServiceDTO.swift in Sources */,
+				2212CD7217BCA830D554F3B9 /* HostWindowAccountsService.swift in Sources */,
+				D95A11203B9F4C5082D38211 /* HostWindowDashboard.swift in Sources */,
+				347717EE74BC44E5712EC2B8 /* HostWindowUsageService.swift in Sources */,
+				58F215C69A5C496922935EA1 /* HostWindowUsageDTO.swift in Sources */,
+				CBB18B86A5CBE3C53E861522 /* HostWindowSupport.swift in Sources */,
+				7194EA061826F18D16CA093E /* HostWindowSettingsServiceActions.swift in Sources */,
+				F08432E4F816F5A3BCC9F66A /* HostWindowSettingsService.swift in Sources */,
+				8DCC2E666C8B10614253EE96 /* HostWindowApplicationsService.swift in Sources */,
+				89BE81F0A686CFF522FDD3CB /* HostWindowAccountsServiceActions.swift in Sources */,
 				49C1B16A000000000001AABB /* ModelProvider.swift in Sources */,
+				D95A11223B9F4C5082D38211 /* UsageRequestIndexStore.swift in Sources */,
+				B27463251D1A44598801A201 /* UsageRequestIndexQueries.swift in Sources */,
 				49C1B156000000000001AABB /* UsageService.swift in Sources */,
 				49C2AA06000000000001AAAA /* UsageHistoryConsistency.swift in Sources */,
 				49C1B197000000000001AABB /* UsageLogWatcher.swift in Sources */,
@@ -1118,6 +1233,8 @@
 				C0B10001000000000000AABB /* Currency.swift in Sources */,
 				C0B10002000000000000AABB /* PricingCatalogView.swift in Sources */,
 				49C1B161000000000001AABB /* MainWindowRootView.swift in Sources */,
+				A027ABCD000000000000000B /* ReactWindow.swift in Sources */,
+				A027ABCD000000000000000C /* WebInterfaceBundle.swift in Sources */,
 				49C1B162000000000001AABB /* StatsView.swift in Sources */,
 				49C1B1F0000000000001AABB /* StatsOverviewModel.swift in Sources */,
 				49C1B163000000000001AABB /* DesignSystem.swift in Sources */,
@@ -1185,6 +1302,12 @@
 				49C1BF04000000000001AABB /* ScannerIncrementalTests.swift in Sources */,
 				49C1BF05000000000001AABB /* UsageEquivalenceTests.swift in Sources */,
 				49C1BF30000000000001AABB /* StatsOverviewModelTests.swift in Sources */,
+				A027ABCD0000000000000008 /* HostAPITests.swift in Sources */,
+				4B7A96A6A905843BAA8D2920 /* HostWindowAccountsTests.swift in Sources */,
+				B9182E50B39B024F2DFC27D8 /* HostWindowUsageTests.swift in Sources */,
+				9FB3F1145802205FE7DA6C93 /* HostWindowSettingsTests.swift in Sources */,
+				614A1BBC829B58B7EB0554D8 /* HostWindowApplicationsTests.swift in Sources */,
+				A027ABCD0000000000000010 /* WebInterfaceBundleTests.swift in Sources */,
 				49C1BF07000000000001AABB /* QuotaPersistenceCoordinatorTests.swift in Sources */,
 				49C1BD04000000000001AABB /* RedactTests.swift in Sources */,
 				49C1BF09000000000001AABB /* UpdateCheckerTests.swift in Sources */,

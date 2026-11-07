@@ -12,7 +12,7 @@ struct ApplicationsManagementView: View {
                         Label(tr("Detect applications", "重新识别"), systemImage: "arrow.clockwise")
                     }
                 }
-                Text(tr("Installed applications", "已安装的应用")).font(.headline)
+                Text(tr("Detected applications and configurations", "已识别的应用与配置")).font(.headline)
                 ForEach(AgentApplication.allCases.filter { appState.applications.detected.contains($0) }) { application in
                     HStack(spacing: 14) {
                         ApplicationIcon(application: application, size: 32)

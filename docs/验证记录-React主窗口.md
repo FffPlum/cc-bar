@@ -1,0 +1,362 @@
+# React 主窗口 Debug 验证
+
+日期：2026-11-01。分支：`feature/react-main-window`。基线为 develop 与 unified-host-api 前置提交；开发在独立 worktree 进行，原工作区的 Xcode Scheme 调试改动保留。
+
+## 实施结果
+
+- 默认主窗口使用 React、TypeScript 和 shadcn/ui（Base UI），保留应用、供应商目录、额度管理、四类统计视图和三类设置的结构与能力。
+- Swift 保留菜单栏、Popover、悬浮窗、引导、权限/文件面板、更新器、凭据与业务数据。业务通过版本化 Host API 暴露；SDK 原有 v1 方法保持兼容，完整窗口类型放在 `/window` 子入口。
+- WKWebView 加载 App 内的静态资源，限制可信来源、资源目录和外链。构建脚本、Xcode 资源阶段、SwiftPM 与 CI 已接入同一前端产物；生产页面没有 mock 回退。
+- 增加响应数据校验、原生状态失效事件、导航同步、异步竞态隔离、隐私清理和授权取消。已接受的 PAT 导入、扫描、重算保持原业务任务生命周期；关闭窗口不等于撤销已接受的操作。
+- Windows 的页面与接口边界已保留，Windows 托盘、窗口宿主和业务适配未实施。
+
+## Debug 验证结果
+
+1. 指定 Xcode Debug 构建通过，日志为 `** BUILD SUCCEEDED **`：
+
+   ```bash
+   DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destination 'platform=macOS' build
+   ```
+
+2. Swift 定向回归 70 项通过：42 项 XCTest、12 项应用/授权等 Swift Testing、16 项配置层 Swift Testing。覆盖 Host API、窗口账号/设置/统计、资源信任与越界、统计模型、应用导航及供应商配置：
+
+   ```bash
+   DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --skip-update --disable-automatic-resolution --filter 'HostAPI|HostWindow|WebInterface|StatsOverview|ConversationAggregator|ProjectStats|ProviderConfiguration|ApplicationNavigation|AuthorizationStore'
+   ```
+
+   首次拉取依赖遇到 GitHub 连接超时，随后使用锁定版本和已有缓存完成。后续仅修改设置测试夹具以补齐 `historyNotice` 字段，设置模块 7 项单独复跑通过。
+
+3. TypeScript SDK 14 项通过（`npm test --prefix packages/host-api`）。其中窗口契约夹具由 Swift 隔离测试实际编码，涵盖非空统计周期、时间线、余额、授权状态和完整设置；全部通过 SDK 严格校验。格式化价格允许货币符号，金额原值仍要求十进制字符串。
+4. React 30 项行为测试通过，类型检查与生产构建通过。覆盖初始化/导航/请求竞态、隐私缓存、表单、授权取消、排序、设置动作、额度统计及显示标签。最后一轮修复了下拉框枚举标签、Kimi 账号标记/地区重复和日期刻度拥挤。
+5. `git diff --check`、构建脚本 `bash -n`、Xcode project `plutil -lint` 通过。
+
+## 视图审查边界
+
+在用户调整要求前，已在实际 WKWebView 中打开应用列表、应用详情、供应商目录及 API Key 取消表单、额度管理、统计概览/对话/项目和设置/价格目录，检查了 ⌘1 与 ⌘, 的导航同步，并复验了设置下拉框标签。没有保存、删除或重新授权用户的真实账号。
+
+用户明确要求「编写完成后仅完成 Debug 测试，后面的视图审查由我来做」，因此停止进一步视图审查，不将上述抽查等同于完整 UI 验收。窗口最小尺寸、完整键盘/弹层交互、全部额度时间线、浅深色、关窗重开、全屏菜单 tracking 及真实系统授权/导入/通知等仍由用户后续验收。
+
+本轮没有正式打包、发布、替换 `/Applications/CCBar.app`，也没有提交或推送。可用进程环境 `CCBAR_REACT_MAIN_WINDOW=0` 临时对比保留的原生窗口。
+
+## 2026-11-01 统计视图修正复验
+
+根据用户提供的四张原生/React 对照截图，由 GPT-6.1 Terra 修改前端，Codex 完成代码审查并要求补齐正占比归一、零用量服务提示、周期日期和展开行测试。修复占比条高度、图表提示框横向布局、实际柱体宽度、构成表格列宽及内容区分栏断点，并同步更新设计方案和界面布局。
+
+- 前端 TypeScript 类型检查通过；全部 10 个测试文件、36 项测试通过。新增覆盖柱宽分档、实际柱体宽度、零用量服务、费用与 Tokens 独立汇总、跨年周标题、占比归一、四种构成维度、长项目名称/路径，以及提供商/模型展开和折叠后的数值列。
+- 指定 Xcode Debug 构建通过，日志包含 `** BUILD SUCCEEDED **`。构建阶段同时完成 Host API 编译、前端类型检查和 Vite 静态资源生成；页面引用的产物均存在。
+- `git diff --check` 通过。仅前端与文档变更，本轮未重复运行未改动的 Swift 业务测试；未打包发布、提交或推送。
+- 日志：`/tmp/ccbar-react-stats-layout-tests.log`、`/tmp/ccbar-react-stats-layout-debug.log`。Xcode 仅报告未依赖 AppIntents 时跳过元数据提取的提示，无构建错误。
+- 验收边界：以上是代码、行为测试与编译验收。JSDOM 不计算实际窗口布局；本轮未启动或操作应用做视觉验收，浅深色和实际窗口宽度下的最终视图仍由用户审查。
+
+### 当前设备横向排列修正
+
+用户要求当前设备最大窗口下「用量构成 / 高消耗对话」保持同行。只读查询确认屏幕逻辑分辨率为 1280 × 832；扣除侧栏和水平边距后的内容区约 1040px，因此将下排断点从 1100px 降为 960px，保留 5:4 比例、现有紧凑列宽和上排 880px 断点。仅修改该样式断点及文档，没有新增或重复运行行为测试。复跑指定 Xcode Debug 构建（含 TypeScript 检查和静态资源构建）通过，日志为 `/tmp/ccbar-react-stats-row-debug.log`；`git diff --check` 通过。实际窗口的视觉审查仍由用户执行。
+
+### 占比条悬停与顶部间距
+
+按照后续要求，概览滚动内容顶部增加 20px 内边距，与左右及底部一致。四个构成维度恢复主行与占比条的悬停联动：图标缩放、对应条段缩放和同色柔光、其余条段淡化、圆角中性行背景；零占比行不影响其他条段。系统减少动态效果时不缩放。保留 960px 分栏断点及既有行点击/展开行为。
+
+GPT-6.1 Terra 编码，Codex 复查状态清理、样式作用范围及减少动态效果规则。前端全部 10 个测试文件、37 项测试通过，新增回归覆盖四维悬停、快速跨行、移出、零占比无动作行、范围与维度切换、行移除和后台刷新。指定 Xcode Debug 构建（含 TypeScript 检查和 Vite 构建）通过，`git diff --check` 通过。日志：`/tmp/ccbar-react-composition-hover-tests.log`、`/tmp/ccbar-react-composition-hover-debug.log`。本轮没有启动应用做视觉审查、提交或发布。
+
+### 占比条圆角与缩放过渡调整
+
+按用户调用的 animate 技能，将频繁悬停限定为轻微反馈：占比段改为固定 2px 圆角，缩放与透明度使用 160ms `ease` 双向 CSS transition；柔光使用固定阴影伪元素的透明度过渡，避免动画绘制阴影。增加细指针与可悬停设备限制，减少动态效果下只保留淡入淡出。没有新增动画依赖、改变比例数据或调整布局。
+
+本轮仅修改相关样式与条段 class，未新增或重复运行行为测试。静态审查与 `git diff --check` 通过，指定 Xcode Debug 构建（含 TypeScript 检查与 Vite 构建）通过；日志为 `/tmp/ccbar-react-share-motion-debug.log`。缩放节奏、柔光及快速移入移出的实际观感仍由用户在 Debug 应用中审查。
+
+## 2026-11-02 用量统计仪表盘
+
+按照用户提供的新布局，Codex 制定方案、协调接口和最终审查，GPT-6.1 Terra 实现前端、宿主查询与只读请求索引。工作区为 `/Users/meitounao/.codex/worktrees/react-main-window/cc-bar`，分支 `feature/react-main-window`；原主工作区的 Scheme 修改保留。
+
+已实现页头和时间/应用/来源/模型筛选、分钟级自定义范围与跟随当前时刻、四项 KPI 及小时/日/月趋势、可追加的 53 周热力图、请求/供应商/模型表及排序分页。全局侧栏和对话、项目、额度入口保留。旧概览及占比条 2px 圆角、160ms 悬停缩放仍保留在旧组件；新默认仪表盘使用新的全宽结构。
+
+审查修复了已接纳日汇总与请求明细的口径差异、首次索引读入尚未接纳日志尾部、同值请求身份、零请求附属用量、临时文件读取失败后的重试、隐藏来源与全局模型选项、过期游标回包干扰新筛选，以及热图后台刷新和跨周的连续性。移动终点范围在可见页面每分钟刷新；固定自定义区间不推进。没有对真实账号执行重算、写入、授权或删除操作。
+
+### 最终自动验证
+
+- Swift 定向回归 **68 项通过**：64 项 XCTest、4 项 Swift Testing。覆盖 Host API/窗口域、资源边界、原统计模型、Claude/Codex/Pi 扫描器及请求索引。命令：
+
+  ```bash
+  DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --skip-update --disable-automatic-resolution --filter 'HostAPI|HostWindow|WebInterface|StatsOverview|UsageRequestIndex|ClaudeJSONL|CodexJSONL|PiJSONL'
+  ```
+
+- 额外以独立进程环境 `TZ=America/New_York` 运行 `HostWindowUsageTests.testDashboardAbsoluteRangeAndFilterIntersection`，**1 项通过**。确认 Foundation 读取该时区；测试覆盖 2026-11-01 回拨时两个本地同名小时的不同绝对样本键、自定义半开区间、24 小时时长、筛选交集与隐藏服务。未修改设备系统时区。
+- React **12 个文件、54 项测试通过**，其中新仪表盘 17 项；TypeScript 检查通过。覆盖日期转换与不存在的 DST 时间、预设/自定义、级联筛选、排序、分页、异步过期响应、热力图更早页/刷新失败重试/跨周及移动范围时钟。
+- SDK **15 项测试通过**，包括新查询/响应的严格校验。指定 Xcode **Debug build 通过**（`** BUILD SUCCEEDED **`），同时完成 SDK 编译、前端类型检查及 Vite 静态资源构建。没有使用 Archive。
+- `git diff --check` 与 Xcode project `plutil -lint` 通过。最终构建仍报告 AppState 的未变变量和 actor 隔离警告，以及无 AppIntents 依赖的元数据跳过提示；初次完整编译也显示已有 JSONL 文件描述符 actor 隔离警告。本轮未把这些诊断扩展为无关重构。
+
+日志：`/tmp/ccbar-dashboard-swift-final-tests.log`、`/tmp/ccbar-dashboard-dst-tests.log`、`/tmp/ccbar-dashboard-frontend-final-tests.log`、`/tmp/ccbar-dashboard-sdk-final-tests.log`、`/tmp/ccbar-dashboard-final-debug.log`。
+
+### 已知边界与用户验收
+
+- 原日志被删除、日级补录、DSH 与 Cursor 远端数据可能没有可核验的逐请求时间；日汇总保留，小时/部分日和请求表显示覆盖缺口，不分摊或伪造事件。成功率没有完整失败分母，显示 `—`。
+- Cursor 全部时间仅含已加载远端历史；更早热图按页有限补拉并遵守既有去重和退避。OpenCode/Antigravity 数据库更新早于正常扫描时，相关分区事件可能暂缓，待扫描接纳后恢复。
+- 旧持久化日桶未保存原时区元数据，切换系统时区不能完整重映射旧历史；本轮没有改写用户历史。
+- 以上是静态审查、行为测试与 Debug 编译。按用户要求，未启动应用做本轮视觉验收；真实 1280×832 屏幕下的布局、浅深色、提示框及动画观感由用户检查。没有发布、替换已安装 App、提交或推送。
+
+### 筛选栏尺寸统一
+
+根据后续截图，将日期、全部/应用图标分段组、供应商/模型三组控件外框统一为 32px 高和相同圆角，文字 13px、图标 16px。应用按钮在固定组高内居中，消除原先图标行高及内边距撑高外框的问题；保留 8px 控件间距、内容宽度及窄窗口换行。
+
+GPT-6.1 Terra 仅修改 `dashboard-filters.tsx` 的相关样式，Codex 静态复核并同步布局文档。`git diff --check` 和指定 Xcode Debug 构建通过（含 TypeScript 检查与 Vite 资源构建）；日志为 `/tmp/ccbar-dashboard-filter-size-debug.log`。没有新增或重复运行行为测试，未启动应用做视觉审查。
+
+## 2026-11-02 统计缓存与后台更新
+
+Codex 对照 cc-switch 查询与日志同步源码制定方案，GPT-6.1 Terra 完成代码变更，Codex 复审并运行最终自动验证。具体参考及数据边界见 [缓存方案](草案-React统计缓存与后台更新.md)。
+
+- 新仪表盘使用 TanStack Query v5，按完整筛选缓存、合并请求，保留同查询的可用结果；切换到未缓存条件时保留并明确标注上一份数据。筛选栏持续挂载，按钮立即更新选中态，应用/来源选择与数据区采用短时透明度过渡并支持减少动态效果。
+- 前端缓存按隐私、语言、时区、可见服务、币种及汇率等语义隔离；宿主事件和可见页面的移动范围定时触发后台更新。离开统计页保留结果，回到页面立即显示并重验。
+- Swift 新增独立派生请求索引缓存，先后台恢复再更新，正常启动仍复用已有权威日桶和增量扫描进度。扫描或重建期间保留旧请求快照并合并后续更新；读取失败保留旧记录，Kimi 缓存身份不依赖本进程扫描标记。恢复、指纹和序列化移出主线程，串行原子写盘保留 0600 权限。
+- 审查修复了 records/revision 不一致造成宿主长期缓存空结果、失败来源旧记录被过滤、扫描期间重复重放、重启 Kimi 索引失效，以及磁盘恢复被启动扫描阻塞的问题。普通 scanning 文案改为同步，明细准备期间独立显示更新状态。
+
+验证结果：
+
+1. Swift 定向回归 **99 项通过**（71 项 XCTest、12 项 App Swift Testing、16 项配置 Swift Testing），包含 9 项请求索引测试。覆盖重启复用、Kimi 持久状态、扫描暂停时先展示 sidecar、临时读取失败保留旧记录、已接纳日志边界和损坏缓存。测试使用临时目录。命令：
+
+   ```bash
+   DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --skip-update --disable-automatic-resolution --filter 'HostAPI|HostWindow|WebInterface|StatsOverview|UsageRequestIndex|ClaudeJSONL|CodexJSONL|PiJSONL|ConversationAggregator|ProjectStats|ProviderConfiguration|ApplicationNavigation|AuthorizationStore'
+   ```
+
+   随后仅修正扫描暂停测试自身的事件订阅竞态和 continuation 释放兜底，该项单独复跑通过；业务代码未再变动。
+2. React **12 个文件、61 项测试通过**，TypeScript 检查通过；SDK **16 项测试通过**。覆盖缓存命中、同键去重、事件与时钟更新、隐私/汇率/可见服务隔离、按钮即时状态、旧游标和晚到响应、热图连续分页。
+3. 指定 Xcode **Debug build 通过**，日志包含 `** BUILD SUCCEEDED **`，同时完成 Host API 编译、前端类型检查和 Vite 静态资源构建。仅出现已有 AppState 未变变量、actor 隔离及 AppIntents 元数据提示，没有新增编译错误。
+4. `git diff --check`、构建脚本 `bash -n`、Xcode project `plutil -lint` 通过。原工作区的 Scheme 改动保持原样。
+
+日志：`/tmp/ccbar-react-cache-swift-tests.log`、`/tmp/ccbar-react-cache-frontend-tests.log`、`/tmp/ccbar-react-cache-sdk-tests.log`、`/tmp/ccbar-react-cache-debug.log`。
+
+首次升级尚无派生缓存时仍需后台建立一次索引；有效缓存之后可跨重启复用，变化来源仍会后台更新。按用户要求，本轮完成后创建一次本地检查点提交，不推送、打包或发布；未启动应用做视觉审查，真实窗口切换和动画观感交由用户验收。
+
+### 统计趋势窄柱与应用占比
+
+按后续截图要求，由 GPT-6.1 Terra 修改宿主、SDK 与前端，Codex 审查数据口径并完成最终 Debug 验证。小时/日/月样本增加逐应用分段，前端按主题色或自定义色堆叠，补充图例、悬停数值/占比及无障碍说明。柱宽复用原设计 28/18/10/5px 分档，保留整列命中区；去除固定列间距避免密集日期溢出。零贡献保留应用说明，不画虚假柱高。缓存命中率使用总体输入量加权的百分点贡献，不相加各应用自身命中率。
+
+- `HostWindowUsageTests` **14 项通过**，新增断言覆盖小时事件与自然日桶、四项指标分段合计、应用筛选/隐藏和零分母；SDK **16 项通过**，包含分段必填与非法服务校验，热力图结构不变。
+- 前端 `dashboard-stacked-chart`、`dashboard`、`dashboard-integration` 三组 **28 项通过**；新增测试覆盖分段比例、零值/单应用、图例顺序、浅深主题/自定义色、键盘提示与缓存贡献标签。最终仅调整提示数值区域宽度后，柱图 4 项单独复跑与 TypeScript 检查通过。
+- 指定 Xcode **Debug build 通过**（`** BUILD SUCCEEDED **`），同步完成 SDK、TypeScript 和静态资源构建；仅有既有 AppIntents 元数据跳过提示。`git diff --check` 通过。
+- 日志：`/tmp/ccbar-dashboard-stacks-swift-tests.log`、`/tmp/ccbar-dashboard-stacks-sdk-tests.log`、`/tmp/ccbar-dashboard-stacks-debug.log`。未启动应用做视觉验收；本次改动尚未提交或推送。
+
+### SQLite 用量明细缓存
+
+用户要求在 `feature/react-main-window` 引入 SQLite，随后明确忽略旧 JSON 明细，首次启动重建数据库。6.1 Terra 报告执行额度不足后，用户授权主代理接手；主代理完成存储和接线，独立子代理编写 SQLite 用例并静态复核。
+
+`UsageRequestIndexStore` 改用系统 SQLite3，在 `request-index.sqlite3` 中逐行保存明细，以事务同步来源指纹和记录；金额保持精确 Decimal，未变来源不重写请求行。旧 `request-index-v1.json` 从不读取或迁移，原历史汇总与扫描进度快照不变。缺库/确认损坏由后台索引链重建，锁占用、权限/I/O 或未来版本返回不可用并延迟重试，避免误发布空缓存。实现边界与故障策略见 [SQLite 缓存方案](草案-SQLite用量明细缓存.md)。
+
+- 首轮索引测试 18 项通过；补充加载结果分类后，最终 `UsageRequestIndex|HostWindowUsage` 定向回归 **32 项通过**，其中 SQLite 9 项、已有请求索引 9 项、宿主统计 14 项。
+- 真实 SQLite 测试覆盖文件格式/0600 权限、精确金额/NULL/计时、旧 JSON 忽略与保留、未来版本、外部排他锁、损坏隔离重建、空指纹来源、来源移除；通过数据库触发器验证未变来源不重写，以及事务中途失败回滚行和元数据。所有数据库与日志均为临时测试数据。
+- 指定 Xcode **Debug build 通过**，同时完成 Host API、TypeScript 和 Vite 资源编译。日志包含 `** BUILD SUCCEEDED **`，仅有既有 AppIntents 元数据跳过提示。`git diff --check` 通过。
+- 没有改变前端或窗口 DTO，因此没有重复运行前端/SDK 行为测试；没有启动 App 操作真实用量目录、迁移旧数据、打包或发布。新库将在用户下次启动本分支构建的 App 时由后台建立。验证通过后，按用户要求创建本地提交。
+
+日志：`/tmp/ccbar-sqlite-cache-tests.log`、`/tmp/ccbar-sqlite-cache-final-tests.log`、`/tmp/ccbar-sqlite-cache-debug.log`。
+
+
+### SQLite 查询与前端结果缓存
+
+日期：2026-11-02。用户要求进一步对齐 cc-switch：启动不恢复全量明细，明细筛选、排序、分页、计数与聚合由 SQL 完成，前端保留查询结果并后台更新。工作区仍为 `feature/react-main-window`。
+
+- `UsageService` 移除全量请求快照和请求到会话的常驻映射；启动只读取来源/事务元数据。后台逐来源解析、校验、事务提交后释放临时记录，失败来源保留旧行。
+- `UsageRequestIndexQueries` 用同一读事务处理关联查询，SQL 完成明细筛选和聚合，按 COUNT/ORDER/LIMIT/OFFSET 返回当前页。Decimal 聚合/排序保持精度，小时使用 Calendar 区间，分区与权威日桶核验。自然日汇总继续保留已清理日志的历史。
+- Host 移除内存明细筛选、排序、分区核验缓存；取消查询不误标数据库故障，数据库不可用返回错误，前端不会收到伪造空结果。
+- React 请求分页补上旧结果保留；筛选/分页失败保留可用内容、标记旧结果、禁用旧游标并提供重试。游标过期后先使首页缓存失效再重取，避免重复使用旧游标。
+
+验证结果：
+
+- Swift 定向回归 **43 项通过**（SQLite 18、请求索引生命周期 9、Host 16），日志 `/tmp/ccbar-sql-query-final-tests.log`。覆盖精确金额与排序、条件分页、计时聚合、覆盖缺口、夏令时重复小时、并发读取、取消、重启复用、来源局部写入与失败保留，以及畸形金额/计数隔离和合法金额溢出不误删库。测试只使用临时数据。
+- React 定向回归 **30 项通过**，日志 `/tmp/ccbar-sql-query-frontend-tests.log`；覆盖缓存返回、切换/翻页失败保留、后台事件刷新不卸载表格和失效游标恢复。TypeScript 静态检查通过。
+- 指定 Xcode Debug 构建 **BUILD SUCCEEDED**，日志 `/tmp/ccbar-sql-query-debug.log`；包含 SDK / 前端 TypeScript 与 Vite 构建。新 SQL 扩展显式标记 nonisolated，新增代码没有 actor 隔离警告。
+- `plutil -lint ccbar.xcodeproj/project.pbxproj` 与 `git diff --check` 通过。实际界面/动画观感仍由用户验收；未启动或替换安装的 App。验证通过后按用户要求创建本地提交，未推送。
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --skip-update --disable-automatic-resolution --filter 'UsageRequestIndex|HostWindowUsage'
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ccbar.xcodeproj -scheme ccbar -configuration Debug -destination 'platform=macOS' build
+```
+
+
+### 固定应用筛选与空数据布局
+
+日期：2026-11-02。先按用户要求提交 SQL 查询与前端缓存改动（`68c4f46`），随后单独实现本节更新。
+
+- 应用分段按钮读取 `bootstrap.visibleUsageServices`，按已启用用量应用的设置顺序显示，不随日期范围、查询数据或侧栏成员变化；关闭当前应用后回到全部。Host `facets.services` 同步为固定启用列表，缺少用量时计数为 0。
+- 确认空用量且索引就绪、覆盖完整时，KPI 为 `—`；空图保留网格、时间轴与合理基准纵轴，表格保留列头、页签数量 0，居中显示「暂无数据」。零费用但存在请求/Token 时仍显示真实值；索引准备、错误、历史覆盖缺口与旧占位数据不冒充空成功状态。
+- 前端定向 **40 项测试通过**，日志 `/tmp/ccbar-dashboard-empty-tests.log`；TypeScript 静态检查通过。覆盖启用应用稳定顺序、侧栏外应用、关闭选中应用、空表结构、错误/加载与真实零费用用量。
+- Host 定向 **19 项测试通过**，日志 `/tmp/ccbar-dashboard-empty-host-tests.log`；指定 Xcode Debug 构建 **BUILD SUCCEEDED**，日志 `/tmp/ccbar-dashboard-empty-debug.log`，包含最终前端资源编译。
+- `git diff --check` 通过。视觉效果由用户验收，未启动或替换安装的 App；本节验证通过后按用户要求创建本地提交，未推送。
+
+### 统计查询骨架与布局稳定
+
+日期：2026-11-02。按用户要求先提交上一轮固定应用筛选与空数据布局（`31ad7c1`），再实现本节更新。
+
+- 首次查询保留筛选栏、指标卡、图表与表格的结构，在数据位置渲染骨架；切换到未缓存筛选或请求页时，用局部骨架覆盖保留的内容，避免查询等待时卸载整块区域。已有缓存直接展示，同条件后台刷新仅显示细加载条。
+- 指标、页签、筛选和图表开关保持可操作；过期表格内容与分页操作在等待期间不可交互。查询失败恢复已有内容并保留错误、重试及覆盖缺口提示，不向查询缓存写入骨架数据。
+- 图表占位、热力图网格及表格分页区域保留相应尺寸；减少动态效果时停用骨架脉冲。读屏加载提示位于忙碌的数据区外，避免提示被延迟播报。
+- 全前端 **13 个文件、81 项测试通过**，日志 `/tmp/ccbar-dashboard-skeleton-interface-tests.log`；TypeScript 静态检查通过。覆盖首载、筛选、分页、热力图、缓存复用、后台刷新、失败恢复、组件状态保留和加载提示的可访问性。
+- 指定 Xcode Debug 构建 **BUILD SUCCEEDED**，日志 `/tmp/ccbar-dashboard-skeleton-debug.log`；包含 SDK / 前端类型检查和 Vite 资源构建。`git diff --check` 通过。本轮仅修改前端与文档，没有重复运行 Swift 行为测试。
+- 未启动或替换安装的 App，实际窗口布局和动画观感由用户验收；未测量真实窗口的布局偏移。本节验证通过后按用户要求创建本地提交，未推送。
+
+### 统计加载连续显示
+
+日期：2026-11-02。针对用户反馈的数据加载闪屏，复查查询缓存与实际渲染分支后实施本节修正。
+
+- 确认 `keepPreviousData` 已保留查询结果，闪屏来自展示层在新筛选或翻页等待时隐藏 KPI，并用不透明骨架覆盖图表和表格。现在只有没有任何可展示结果的首次查询使用骨架；已有结果在筛选、排序、翻页和后台刷新期间保持可读，以细加载条和 `aria-busy` 表示更新。
+- 移除热力图按完整筛选键设置的强制重挂载，使 `keepPreviousData` 和已展开块在应用等筛选变化时连续显示。旧结果的分页操作、隐私与展示上下文隔离、失败保留及重试行为不变。
+- Dashboard 定向 **2 个文件、41 项测试通过**；完整前端 **13 个文件、82 项测试通过**。新增/调整用例验证筛选 KPI 与面板 DOM 连续、请求翻页无遮盖骨架、热力图筛选保留原节点，以及首载骨架和缓存命中行为。
+- TypeScript 静态检查与 `npm run build`（含 Vite 生产资源构建）通过，`git diff --check` 通过。本轮仅修改 React 展示层、对应测试和文档，未运行 Swift 测试或完整 Xcode 构建，未启动 App 做真实窗口视觉验收。
+
+### 筛选控件视觉尺寸统一
+
+日期：2026-11-02。根据实际窗口中日期、应用与来源/模型三组选择框的大小差异，统一外框和内部选中区域。
+
+- 三组控件统一 32px 高，共用圆角、outline 边框、背景裁剪及浅深色底色，宽度均随完整内容自适应，不设置共同固定宽度；中间应用组四边均保留 2px 内边距，滑动选中背景使用相同的上下内缩并与按钮内容区对齐。项目外框 `rounded-md` 实际为 8px，指示器按 8px 减去 1px 边框和 2px 内边距使用 5px 同心圆角，应用按钮保持原始点击尺寸。
+- 应用选中指示器使用实际像素宽度，不再对带圆角的节点做 `scaleX`，避免横向缩放把圆角拉成椭圆；仅以 150ms `cubic-bezier(0.77,0,0.175,1)` 过渡 `translateX`，宽度随选中项直接更新。快速切换可接续，尺寸变化会重新测量，减少动态效果时直接落位。“全部”字重固定，避免选中变化引起文字宽度与图标位置跳动。
+- 来源/模型名称完整显示并自然撑开控件，下拉箭头跟随内容末尾；切换日期或选择长模型名只改变自身宽度，不改变三组统一的高度与外观。
+- 新增三组高度、边框、底色、内容自适应宽度和内边距检查，以及指示器实际宽度、平移、5px 圆角、同一 DOM 节点与减少动态效果回归用例；Dashboard 定向 **10 项通过**，完整前端 **13 个文件、84 项测试通过**。`npm run build`（含 TypeScript 检查与 Vite 生产资源构建）通过。
+- 未运行 Swift 测试或完整 Xcode 构建，未启动或替换安装的 App；真实窗口中的三组视觉对齐仍需手动验收。
+
+### 请求日志概览计数与页码分页
+
+日期：2026-11-03。用户确认运行分页相关测试、前端类型检查和指定 Xcode Debug 构建。
+
+- 概览返回可展示日志行数 `requestLogCount`，与明细共用 SQL 筛选及核验条件，只做 COUNT、不读取明细行。页签打开前即可显示数量，明细仍按需查询；索引未就绪返回 null，覆盖不完整仍显示已有日志数，不把只有历史汇总的请求计入日志条数。
+- 明细使用 `page/pageSize` 直接查询，默认每页 12 条，可选 12 / 24 / 48 / 96。底部左侧显示总数与每页条数，右侧显示上一页、可输入页码/总页数和下一页，复用 shadcn/ui 控件。筛选、排序和页大小变化回到第一页，数据库记录减少时收敛到最后有效页；翻页等待或失败保留已有内容。
+- React 定向 **2 个文件、43 项测试通过**，覆盖点击前不加载明细、缺口计数、任意页跳转、每页条数切换、筛选/排序重置、缓存复用、旧响应隔离、失败重试、页码收敛及空态/非法输入。首轮有 1 项因测试未完整模拟 Base UI 选项点击而失败，补上与既有 Select 测试一致的 pointerDown 与带 detail 的 click 后复跑通过，未修改控件实现。
+- Swift 定向 **48 项通过**（Host 20、SQLite 19、请求索引生命周期 9）。覆盖 COUNT 不返回明细行、计数与分页筛选一致、隐藏应用与模型过滤、默认 12 条、直接查询第三页、切换大小、记录减少收敛、空结果、无效参数，以及旧游标兼容。
+- SDK 窗口契约 **7 项通过**；前端 TypeScript 检查通过。指定 Xcode Debug 构建 **BUILD SUCCEEDED**，同时完成 SDK、TypeScript 和 Vite 资源构建。系统默认工具目录为 CommandLineTools，构建按既有流程临时指定 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`，未修改系统设置。`git diff --check` 通过。
+- 日志：`/tmp/ccbar-request-pagination-ui-tests.log`、`/tmp/ccbar-request-pagination-swift-tests.log`、`/tmp/ccbar-request-pagination-sdk-tests.log`、`/tmp/ccbar-request-pagination-debug.log`。Swift 测试编译有其他文件中的既有并发/测试警告，Xcode 有 AppIntents 元数据跳过提示；本次修改的 Swift 文件未报告编译警告。
+- 本轮仅完成自动测试与 Debug 编译，未启动 App 做真实窗口视觉验收，未替换安装的 App、提交、推送或发布。实际宽度下分页栏的排列与交互仍由用户在 Debug 应用中验收。
+
+### 供应商/模型悬停级联选择
+
+日期：2026-11-03。按用户要求，将来源/模型选择器从点击切换双栏改为 shadcn/ui DropdownMenu 子菜单。
+
+- 悬停供应商项展开该来源的模型列表，不改变筛选；直接点击供应商项选择其全部模型、清除已有模型限制并关闭菜单。「全部供应商」点击清除来源与模型限制，悬停展开跨来源模型；模型子菜单保留「全部模型」入口。
+- 复用 Base UI 子菜单的鼠标移入路径与键盘导航，右箭头进入子菜单，Enter/空格激活供应商选择全部模型，Escape 关闭；当前供应商与模型继续显示勾选标记，筛选按钮沿用原有高度与内容自适应宽度。
+- TypeScript 类型检查通过，Dashboard 定向 **2 个文件、51 项测试通过**，覆盖悬停不提交筛选、移入子菜单选模型、父项直接选择全部、跨来源模型、清空筛选、子菜单全部模型及键盘进入/关闭/激活；同时回归仪表盘缓存、分页和错误保留。日志：`/tmp/ccbar-provider-hover-tests.log`。
+- 同步产品需求与界面布局，`git diff --check` 通过。本轮只修改前端交互、相关测试与文档，未重复 Swift 测试或完整 Debug 构建，未启动 App 做真实窗口视觉验收，未提交或推送。
+
+### 图表吸附提示卡片
+
+日期：2026-11-03。按用户要求先将日志计数、分页、箭头按钮和供应商悬停级联提交为 `cfb0631`，再单独修改图表提示卡片；本节新改动保留在工作区。
+
+- 新增 `ChartDataTooltip`，外观采用 shadcn/ui ChartTooltipContent 的无箭头、圆角、浅边框、背景与阴影；保留现有 DOM 柱状图，复用 Base UI 的光标跟随、Portal、焦点与边界避让。
+- 趋势提示横向吸附柱列中心并留 10px 间隔，纵向跟随鼠标；热力图提示吸附日期格。窗口右边缘自动翻到左侧，底部自动调整位置，提示不拦截鼠标。键盘聚焦可查看，移出或 Escape 关闭。
+- 将两处提示组件内部 JSX 与提交前代码逐字比较，柱状图和热力图的日期、统计、应用贡献、占比与合计内容均完全相同；仅更换容器、外观和定位。
+- TypeScript 检查通过，图表与相关仪表盘定向 **3 个文件、25 项测试通过**。定位测试使用模拟元素尺寸验证横向吸附、纵向跟随、右侧换边、底部可见和键盘关闭；保留加权缓存贡献与合计内容回归。日志：`/tmp/ccbar-chart-tooltip-tests.log`。`git diff --check` 通过。
+- 本轮未运行完整 Debug 构建、未启动 App 做实际窗口视觉验收；未提交或推送新卡片改动。模拟布局测试不能替代真实 WKWebView 中的视觉检查。
+
+### 趋势图刻度与柱高归一化
+
+日期：2026-11-03。按用户要求对齐 cc-switch 的普通指标整齐刻度、费用先换算后取整及缓存命中率动态范围，保留工作区已有提示卡片改动。
+
+- 宿主新增 `DashboardAxisScale`，统一生成 `axisTicks` 和 `normalizedValue`。最大值 837 返回 0 / 450 / 900，最高柱为 837/900；费用先乘显示汇率再取 scale，刻度由 `formatDisplayCost` 直接格式化，避免反换算尾差和重复换算。
+- 命中率按最低有效值计算下限，98% / 95% / 90% / 60% 分别得到 95% / 90% / 85% / 0% 下限，上限均为 100%；无输入侧 Token 的样本不参与计算。柱高按相同动态范围归一化，最低柱比例分别为 60% / 50% / 33.3% / 60%。
+- 请求数、Tokens 使用本地化紧凑标签，最多一位小数；百分比最多一位小数。React 纵轴以隐藏的同字体最长标签测量层自动撑宽，保留三档位置和既有提示卡片。
+- Swift 定向 **5 项通过**：整齐刻度与柱高、费用显示币种、四档命中率与无效率样本隔离、可见服务堆叠、空数据基准轴。首轮新增测试有一处类型错误，第二轮修正命中率测试期望并移除费用反换算尾差后，最终全部通过。
+- 前端 **3 个文件、9 项测试通过**，包含新增纵轴测试及既有柱体、提示卡片回归；TypeScript `tsc --noEmit` 检查通过。`git diff --check` 通过。
+- 未运行完整 Xcode Debug 构建、Vite 生产构建或真实 App 视觉验收，未提交或推送。实际 WKWebView 中的轴宽、顶部留白和动态命中率范围仍需手动检查。
+
+### 统计卡片与明细表 Token 单位
+
+日期：2026-11-03。按用户要求统一统计卡片、请求日志以及供应商/模型聚合表的 Token 显示单位。
+
+- 新增 `formatTokensCompact`：不足 10,000 使用带英文千位分隔的完整整数；达到后使用 K / M / B 和最多三位有效数字，进位到 1000K / 1000M 时升级单位。示例 9,999、10K、48.2K、189K、1M、18.2M、2.34B 均有覆盖，999,960 显示 1M。
+- 统计卡片在非空态从原始 `totalTokens` 计算显示，中文不再使用万、亿，空态继续显示 `—`；请求日志及供应商/模型聚合表的 Token 列复用同一函数，供应商表 48,210 显示 48.2K、模型表 999,960 显示 1M。趋势轴和提示卡格式未改变。
+- 前端 **3 个文件、62 项测试通过**，其中格式化函数 8 项、Dashboard 组件 19 项、Dashboard 集成 35 项；TypeScript `tsc --noEmit` 检查通过。首轮两项旧断言匹配到纵轴隐藏测量层与可见刻度的重复文本，改为读取可见刻度后全部通过，未因此修改生产实现。
+- `git diff --check` 通过。本次没有 Swift 改动，未重复 Swift 测试、完整 Xcode 或 Vite 生产构建，未启动 App 做真实窗口验收，未提交或推送。
+
+### 名称列省略与全称提示
+
+日期：2026-11-03。按用户要求调整供应商/模型表名称列宽度，并为省略名称提供应用内全称提示。
+
+- 名称列通过 `colgroup` 调整为表格宽度 28%，其余六列各 12%；名称标签保留单行省略，只有实际截断时才通过 Tooltip 换行显示全称，未截断名称不显示 Tooltip，也不加入额外 Tab 顺序。
+- `DashboardNameLabel` 通过 `scrollWidth > clientWidth` 检测溢出，并用 `ResizeObserver` 跟随文本和列宽变化；截断时复用 Base UI Tooltip 支持鼠标悬停和键盘聚焦，未截断时设置 `disabled`，移除重复的浏览器原生 `title`。请求日志和其他统计表面布局不变。
+- 前端 **3 个文件、63 项测试通过**，其中格式化函数 8 项、Dashboard 组件 20 项、Dashboard 集成 35 项；覆盖列宽、长名称截断与悬停/聚焦全称、短名称无 Tooltip 和无额外焦点。TypeScript `tsc --noEmit` 与 `git diff --check` 通过。
+- 本次没有 Swift 改动，未重复 Swift 测试、完整 Xcode 或 Vite 生产构建，未启动 App 做真实窗口视觉验收，未提交或推送。
+
+### 移除统计卡片收起按钮
+
+日期：2026-11-03。按用户要求移除统计卡片下方的收起/展开按钮，趋势图改为始终展开。
+
+- 删除 `collapsed` 状态和按钮容器，保留图表区域的 `data-slot`、加载骨架、数据更新、指标切换与表格结构，首载和加载完成后都始终渲染图表；指标表头与图表之间的分隔线由图表区域自身的 `border-t` 保留，不依赖按钮容器。
+- 前端 **3 个文件、63 项测试通过**，其中格式化函数 8 项、Dashboard 组件 20 项、Dashboard 集成 35 项；原折叠用例改为验证 Hide chart / Show chart 按钮不存在、图表区域持续存在且包含 `border-t`。TypeScript `tsc --noEmit` 与 `git diff --check` 通过。
+- 本次没有 Swift 改动，未重复 Swift 测试、完整 Xcode 或 Vite 生产构建，未启动 App 做真实窗口视觉验收，未提交或推送。
+
+### 请求日志时间格式
+
+日期：2026-11-03。按用户要求将请求日志时间列改为 `HH:mm:ss`，不再显示本地化完整日期时间。
+
+- 使用 `Intl.DateTimeFormat("en-GB")` 和 bootstrap 时区，固定显示小时、分钟、秒及前导零，中文界面也保持同一格式；其他表格列、排序和分页行为不变。
+- 前端 **3 个文件、63 项测试通过**，其中格式化函数 8 项、Dashboard 组件 20 项、Dashboard 集成 35 项；新增北京时间 08:00:00 和 UTC 跨日后 00:00:00 断言，并检查不再显示完整日期。TypeScript `tsc --noEmit` 与 `git diff --check` 通过。
+- 本次没有 Swift 改动，未重复 Swift 测试、完整 Xcode 或 Vite 生产构建，未启动 App 做真实窗口视觉验收，未提交或推送。
+
+
+### 图表提示吸附动画
+
+日期：2026-11-03。按用户要求补齐所粘贴 shadcn/ui ChartTooltip 示例的吸附位移动画，保留现有 content。
+
+- 原实现只复制了卡片外观和吸附定位，且每个柱列/日期格单独挂载 Tooltip，因此缺少持续移动的提示实例。改为趋势图、热力图各共享一个 Base UI handle，触发器传入数据键，提示读取当前最新样本，切换时更新内容和位置。
+- 定位层采用原组件底层 Recharts Tooltip 默认的 `transform 400ms ease`，快速移动时 CSS 过渡从当前位置继续。首次出现由 Base UI 跳过挂载过渡；键盘聚焦直接定位，移出/Escape 关闭。动画仅对支持悬停的精细指针启用，减少动态效果时不播放位置过渡。
+- 将修改前后两处 content 的 JSX 统一格式后比较，内容完全一致；日期、指标、应用贡献、占比及合计顺序均保留。边界避让、背景、圆角、边框和无箭头样式保持原样。
+- TypeScript 检查通过，图表相关 **3 个文件、16 项测试通过**，覆盖共享卡片 DOM 持续复用、跨柱重新定位、热图跨日期、悬停期间数据刷新、原有边缘避让与键盘关闭。首次回归中跨柱测试把鼠标移动放在进入下一列之前，修正为浏览器的进入后移动顺序后通过。日志：`/tmp/ccbar-chart-tooltip-motion-tests.log`、`/tmp/ccbar-chart-tooltip-motion-typecheck.log`。
+- 本轮未运行完整 Xcode/Vite 构建，未启动 App 做真实 WKWebView 视觉验收；DOM 测试验证定位与实例复用，不测量动画中间帧。窗口内仍需检查连续横移、快速反向、边缘换侧和减少动态效果下的实际观感；未提交或推送。
+
+
+### 图表吸附切换与边缘抖动修复
+
+日期：2026-11-03。用户反馈卡片在切换、定位，尤其靠近窗口边缘时抖动。
+
+- 先用三项回归在修改前复现：跨柱进入后仍为上一列 `translate(160px, 140px)`，未立即切到 `translate(260px, 180px)`；底部鼠标从 578px 移到 580px 时，默认对齐翻转使目标 top 变成 400px；右侧跨列时目标 x 从 754px 反向跳到 574px。原日志：`/tmp/ccbar-chart-tooltip-jitter-before.log`。
+- 将当前触发器与鼠标坐标放在同一状态中，用虚拟锚点同步交给 Base UI Positioner，关闭内置光标跟随，保留共享提示、Portal 和键盘语义。跨列/反向进入即定位，后续鼠标移动仅更新当前锚点坐标。
+- 边界避让改为两轴 shift、关闭跨轴 fallback，在窗口内保留 8px 边距。底部连续路径 578 / 580 / 582 / 580 / 578 对应 top 578 / 580 / 580 / 580 / 578；右侧跨列目标 x 从 754px 到 756px，避免整张卡片宽高的翻转跳变。保留 400ms ease 动画、减少动态效果与即时键盘定位；本轮未修改 content。
+- TypeScript 检查通过，图表定向 **3 个文件、19 项测试通过**，包含三项先失败后通过的回归及原有卡片复用、内容刷新、边界可见、键盘关闭和刻度检查。日志：`/tmp/ccbar-chart-tooltip-jitter-tests.log`、`/tmp/ccbar-chart-tooltip-jitter-typecheck.log`。
+- 未运行完整 Xcode/Vite 构建，未启动实际 App 做 WKWebView 动画帧验收；上述证据验证目标坐标连续与锚点切换，不等同于真实窗口的视觉验收。未提交或推送。
+
+
+### 图表悬停与日期选择最终调整
+
+日期：2026-11-03。按用户后续要求调整图表悬停、Token 精度与日期选中指示器。
+
+- 趋势柱悬停显示整列浅色背景；卡片双轴跟随鼠标，以 12px 间距为目标，右侧空间不足时切换到左侧，纵向只做限位。保留共享卡片的 400ms ease 吸附动画，键盘聚焦与减少动态效果模式直接定位。
+- 趋势提示中的 Tokens 合计与应用贡献沿用上方总量的 K/M/B 单位选择规则，从原始数值固定保留两位小数，移除底部重复 Tokens 行；其他指标标签和热力图提示保持原样。
+- 日期选中及悬停底色四周内缩 2px，相邻日期之间保留 4px 间隙，完整点击区域和数字位置不变。
+- 已同步相关文档、现有测试数据和预期；最终状态仅完成静态代码审阅与 `git diff --check`。本轮未运行构建、类型检查、测试或实际窗口验收；上方阶段性测试结果不代表此次最终改动已经通过回归。
+
+## 2026-11-06：设置导航、扫描控制与图表样式
+
+独立工作区分支 `feature/react-settings-navigation`，从 `feature/react-main-window` 的 `23057c7` 创建；原工作区未提交的文档改动保持原样。
+
+- 设置入口将左侧导航替换为三个设置分类，返回恢复此前页面；顶部分类切换移除。
+- 用量设置切换视图后关闭抽屉；新增自动扫描开关、周期和手动同步。暂停模式仍允许同步及必要的额度周期修复；扫描和图表偏好由宿主持久化。
+- 概览及项目每日用量可切换柱状图 / 曲线面积图，沿用数据、轴、品牌色和提示卡。
+- 前端类型检查通过；设置导航、抽屉、面积路径、图表与项目图表共 38 项定向测试通过。首次抽屉测试缺少 Base UI 所需的 pointerDown 事件，补齐真实点击序列后 2 项复跑通过。
+- SDK 窗口契约 14 项测试通过；Swift `HostWindowSettingsTests` 与 `UsageSafeRebuildTests` 共 53 项通过，包含暂停/恢复、手动同步、周期修复及历史保护。
+- Xcode Debug `build` 与最终代码的 `build-for-testing` 通过。新工作区首次拉取依赖更新遇到 HTTP/2 错误，改用复制到当前工作区 `build/ValidationSourcePackages` 的既有缓存，核对四个依赖 revision 与 Package.resolved 一致，并关闭自动依赖解析/更新后完成；工程与锁文件未改。测试构建仅通过命令参数使用 ad-hoc 签名，独立 Xcode `xctest` 加载本次 Debug dylib 与测试 bundle，设置 `XCTestBundlePath` 隔离真实采集；不宣称标准 `xcodebuild test` 启动流程通过。
+- `git diff --check` 通过。按用户要求未检查视图；验证时尚未提交或推送，没有打包或替换已安装 App。
+
+## 2026-11-07：独立应用柱与 AreaChart
+
+在已合并设置改动的 `28ed271` 上创建 `feature/react-chart-components`，继续使用独立工作区。
+
+- 全部应用的概览与项目每日图使用并排独立柱，日期之间保持相同应用槽位；普通指标沿用宿主总量刻度，缺失值不画柱，真实零值保持零高。
+- 全部应用缓存命中率使用各应用自身比例和固定 0% / 50% / 100% 轴；无输入时提示显示 `—`，所选单应用保留原刻度和汇总明细。
+- 按提供的示例接入 Recharts 3.10.1 `AreaChart` / `Area` 与 ChartContainer，移除手写 SVG 面积路径。普通指标堆叠渐变面积，缓存率独立、不跨缺失值连线；边缘延伸只用于图形，不增加采样点标记或交互目标。
+- 前端定向 **5 个文件、41 项测试通过**，覆盖独立柱高度、固定槽位、服务顺序与颜色、项目图、刻度、抽屉，以及真实 Recharts 的渐变、堆叠/非堆叠、缺失值断线和真实采样点。测试仅为 jsdom 固定 ResponsiveContainer 尺寸，未替换 AreaChart 或 Area 渲染器。
+- 最终 Xcode Debug `build` 通过，其中包含 TypeScript 类型检查与 Vite 生产资源构建。继续使用已核对的 `build/ValidationSourcePackages` 缓存，禁用自动依赖解析和更新；日志 `/tmp/ccbar-chart-components-debug.log`。统计页资源约 558 kB（gzip 170 kB），触发 Vite 500 kB 提示，构建成功。
+- 相关需求、布局、技术实现和接口契约文档已同步；`git diff --check` 通过。本次没有 Swift 改动，未重复 Swift 测试；按用户要求未检查视图，未提交、合并或推送这轮改动，未打包或替换已安装 App。
+
+### 后续调整：合并柱、独立面积曲线与采样点
+
+同日按用户后续要求更新最终显示，取代上节的并排柱与普通指标堆叠面积方案。
+
+- 费用、请求、Tokens 每个日期合并为一根按应用色段堆叠的柱；缓存命中率柱保留总体单柱和宿主动态刻度。面积图各应用独立、非堆叠，渐变透明度降低以保留重叠曲线可读性。
+- 面积曲线与高亮点复用同一系列筛选和数值映射。提示卡真正打开时才标记当前日期各应用的采样点，跨日期同步更新，关闭或 Escape 后移除；键盘聚焦支持相同行为。零值有真实记录时保留零点，缺失应用和无输入的命中率不伪造点；单应用命中率无输入时也保持曲线断点。
+- 最终前端 **6 个文件、64 项定向测试通过**，覆盖共享提示卡与定位、刻度、合并柱、独立面积、双应用采样点、跨日期与键盘关闭、零值和缺失数据、项目图及设置抽屉。首次键盘回归用 `fireEvent.focus/blur` 仅派发事件、没有更新 DOM 焦点，旧触发器延迟 blur 误关下一张卡；改为真实 `element.focus()` 并断言活动元素、`data-popup-open` 和卡片可见性后，该文件 22 项复跑通过，产品代码未为此变更。
+- TypeScript 类型检查、Xcode Debug `build` 和构建内的 Vite 资源生成均通过；日志 `/tmp/ccbar-chart-components-debug.log`。构建保留既有 Swift 并发/HostWire 与 AppIntents 警告，以及统计资源约 558 kB 的体积提示，没有构建错误。
+- 需求、布局、技术实现和接口契约文档同步，`git diff --check` 通过。按用户要求未检查视图；仍位于 `feature/react-chart-components`，未提交、合并或推送，未改 Swift 数据口径。
+
+### 后续调整：全部应用命中率的公共动态轴
+
+同日按用户进一步要求，全部应用的缓存命中率柱图改为独立并排，柱图与面积图共同使用最低有效应用命中率对应的纵轴范围。费用、请求与 Tokens 柱图仍合并堆叠。
+
+- `cacheRateAxisMinimum` 读取当前范围内各应用的有效真实比例，排除缺失、零分母和非有限值，沿用宿主单应用命中率的留白、5% 取整及低值回退规则；未解析格式化标签，也不使用加权总体比例代替应用最低值。纵轴刻度、柱高、面积及激活点共用同一下限，单应用仍沿用宿主刻度与归一值。
+- **4 个文件、33 项定向测试通过**，包含轴边界、合并普通指标、独立命中率柱、面积与采样点、缺失槽位、项目图及原有交互。跨日期测试中的 Kimi 最低为 88%、另一应用为 96%，共同得到 80% / 90% / 100% 轴，两者柱高与激活点分别为绘图区 40% / 80%；真实 Recharts 渲染位置也匹配。无有效比例回退 0%～100%，不绘制虚假命中率柱或点。
+- TypeScript 类型检查、Xcode Debug `build`（含 Vite 资源构建）与 `git diff --check` 通过，日志仍为 `/tmp/ccbar-chart-components-debug.log`。既有 Swift 与 AppIntents 警告未阻止构建；本次未改 Swift、SDK 协议或持久化配置。
+- 相关四份行为文档已同步；按用户要求未检查视图。改动仍在 `feature/react-chart-components`，尚未提交、合并或推送。

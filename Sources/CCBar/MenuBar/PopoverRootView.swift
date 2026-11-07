@@ -195,23 +195,32 @@ struct PopoverRootView: View {
 
     @ViewBuilder
     private var content: some View {
-        let providers = appState.quotaAccountProviders.filter {
-            SettingsStore.shared.isProviderEnabled($0.app)
+        let settings = SettingsStore.shared
+        let primaryKimiVisible = settings.effectiveFloatingVisibility(for: .kimi) && appState.kimiAccount != nil
+        let hasManagedKimi = appState.kimiManagedAccounts.contains {
+            $0.showsInFloatingSurfaces && !(primaryKimiVisible && appState.kimiManagedMirrorsCLI($0))
         }
-        let hasImported = appState.importedCodexAccounts.contains(where: \.visibleInPopover)
+        let providers = appState.quotaAccountProviders.filter {
+            if $0.app == .kimi {
+                return hasManagedKimi || (settings.effectiveFloatingVisibility(for: .kimi)
+                    && (appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty))
+            }
+            return settings.effectiveFloatingVisibility(for: $0.app)
+        }
+        let hasImported = appState.importedCodexAccounts.contains(where: \.showsInFloatingSurfaces)
         let includesCodex = providers.contains(where: { $0.app == .codex })
         // 主 Codex 卡片会展示时,「其他账号」区去掉与主账号同身份的镜像项后是否还有内容。
         let hasOtherCodexAfterDedup = appState.importedCodexAccounts.contains {
-            $0.visibleInPopover && !appState.importedCodexAccountMirrorsPrimary($0)
+            $0.showsInFloatingSurfaces && !(includesCodex && appState.importedCodexAccountMirrorsPrimary($0))
         }
 
         if providers.isEmpty && !hasImported
-            && !appState.deepSeekQuotaAccounts.contains(where: \.visibleInPopover) {
+            && !appState.deepSeekQuotaAccounts.contains(where: \.showsInFloatingSurfaces) {
             VStack(spacing: 6) {
-                Text(tr("No services turned on", "未开启任何服务"))
+                Text(tr("No accounts selected for floating views", "未选择悬浮窗账号"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
-                Text(tr("Turn one on in Quota Management", "到「额度管理」开启"))
+                Text(tr("Select Floating panels in Quota Management", "在「额度管理」勾选悬浮窗"))
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             }
@@ -231,13 +240,14 @@ struct PopoverRootView: View {
                         Divider().padding(.horizontal, 16)
                     }
                     if provider.app != .kimi || appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty
-                        || appState.kimiManagedAccounts.contains(where: \.visibleInPopover) {
+                        || hasManagedKimi {
                         AccountVendorHeader(title: provider.title, logoName: provider.logoName,
                                             fallback: provider.fallback, tint: provider.app.tintColor,
                                             status: provider.app == .kimi ? appState.displayedKimiServiceStatus : serviceStatus(for: provider.app),
                                             statusPageURL: ServiceStatusClient.pageURL(for: provider.app))
                     }
-                    if provider.app != .kimi || appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty {
+                    if provider.app != .kimi || (settings.effectiveFloatingVisibility(for: .kimi)
+                        && (appState.kimiAccount != nil || appState.kimiManagedAccounts.isEmpty)) {
                         primaryServiceBlock(provider)
                     }
 
@@ -245,12 +255,12 @@ struct PopoverRootView: View {
                         Divider().padding(.leading, 28).padding(.trailing, 16)
                         OtherCodexAccountsSection(dedupPrimary: true, showsVendorHeader: false)
                     }
-                    if provider.app == .kimi && appState.kimiManagedAccounts.contains(where: { $0.visibleInPopover && !appState.kimiManagedMirrorsCLI($0) }) {
-                        if appState.kimiAccount != nil { Divider().padding(.leading, 28).padding(.trailing, 16) }
+                    if provider.app == .kimi && hasManagedKimi {
+                        if primaryKimiVisible { Divider().padding(.leading, 28).padding(.trailing, 16) }
                         KimiManagedAccountsSection()
                     }
                 }
-                if appState.deepSeekQuotaAccounts.contains(where: \.visibleInPopover) {
+                if appState.deepSeekQuotaAccounts.contains(where: \.showsInFloatingSurfaces) {
                     if !providers.isEmpty || hasImported {
                         Divider().padding(.horizontal, 16)
                     }
@@ -458,25 +468,26 @@ struct PopoverRootView: View {
     }
 
     private var displayedRefreshStates: [QuotaRefreshState] {
-        var states = enabledPrimaryApps.compactMap { app -> QuotaRefreshState? in
+        let settings = SettingsStore.shared
+        let primaryApps = appState.quotaAccountProviders.filter {
+            settings.effectiveFloatingVisibility(for: $0.app)
+        }.map(\.app)
+        var states = primaryApps.compactMap { app -> QuotaRefreshState? in
             if app == .kimi, appState.kimiAccount == nil, !appState.kimiManagedAccounts.isEmpty { return nil }
             return appState.refreshState(for: app)
         }
-        if SettingsStore.shared.isProviderEnabled(.kimi) {
-            states += appState.kimiManagedAccounts.filter {
-                $0.visibleInPopover || $0.showInMenuBar || $0.showInFloatingHUD
-            }.map { appState.kimiManagedRefreshStates[$0.id] ?? QuotaRefreshState() }
+        states += appState.importedCodexAccounts.filter {
+            $0.showsInFloatingSurfaces && !(primaryApps.contains(.codex) && appState.importedCodexAccountMirrorsPrimary($0))
+        }.map { appState.importedCodexRefreshState(for: $0) }
+        let primaryKimiVisible = primaryApps.contains(.kimi) && appState.kimiAccount != nil
+        states += appState.kimiManagedAccounts.filter {
+            $0.showsInFloatingSurfaces && !(primaryKimiVisible && appState.kimiManagedMirrorsCLI($0))
         }
-        states += appState.deepSeekQuotaAccounts.filter(\.isVisible).map {
+            .map { appState.kimiManagedRefreshStates[$0.id] ?? QuotaRefreshState() }
+        states += appState.deepSeekQuotaAccounts.filter(\.showsInFloatingSurfaces).map {
             appState.deepSeekRefreshStates[$0.id] ?? QuotaRefreshState()
         }
         return states
-    }
-
-    private var enabledPrimaryApps: [QuotaApp] {
-        appState.quotaAccountProviders.compactMap {
-            SettingsStore.shared.isProviderEnabled($0.app) ? $0.app : nil
-        }
     }
 
     // MARK: Open main window

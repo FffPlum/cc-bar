@@ -153,8 +153,8 @@ struct ImportedCodexAccountsView: View {
                 set: { value in appState.updateImportedCodexMetadata(id: account.id) { $0.showInMenuBar = value } }
             )).frame(width: ServiceRowMetrics.destination)
             DisplayDestinationCheckbox(title: tr("Floating HUD", "悬浮窗"), isOn: Binding(
-                get: { account.showInFloatingHUD == true },
-                set: { value in appState.updateImportedCodexMetadata(id: account.id) { $0.showInFloatingHUD = value } }
+                get: { account.showsInFloatingSurfaces },
+                set: { value in appState.updateImportedCodexMetadata(id: account.id) { $0.visibleInPopover = value; $0.showInFloatingHUD = value } }
             )).frame(width: ServiceRowMetrics.destination)
 
             Menu {
@@ -184,9 +184,9 @@ struct ImportedCodexAccountsView: View {
             .frame(width: ServiceRowMetrics.info)
 
             Toggle(rowTitle(account), isOn: Binding(
-                get: { account.visibleInPopover },
+                get: { account.showsInFloatingSurfaces },
                 set: { newValue in
-                    appState.updateImportedCodexMetadata(id: account.id) { $0.visibleInPopover = newValue }
+                    appState.updateImportedCodexMetadata(id: account.id) { $0.visibleInPopover = newValue; $0.showInFloatingHUD = newValue }
                 }
             ))
             .labelsHidden()

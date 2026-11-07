@@ -19,7 +19,12 @@ let package = Package(
         .executableTarget(
             name: "CCBar",
             dependencies: ["CCBarConfiguration", .product(name: "libzstd", package: "zstd"), "Sparkle"],
-            resources: [.process("Resources")],
+            resources: [
+                .process("Resources/Assets.xcassets"),
+                .process("Resources/Logos"),
+                .process("Resources/MenuBarIcon"),
+                .copy("Resources/WebInterface")
+            ],
             swiftSettings: [.defaultIsolation(MainActor.self), .enableUpcomingFeature("MemberImportVisibility")]
         ),
         .testTarget(name: "CCBarConfigurationTests", dependencies: ["CCBarConfiguration"]),

@@ -1,0 +1,1424 @@
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { beforeEach, expect, it, vi } from "vitest";
+import usage from "../../host-api/fixtures/window-usage.json";
+import { DashboardQueryScope } from "@/features/stats/dashboard-query";
+import { DashboardPage } from "@/features/stats/dashboard-page";
+import { LanguageProvider } from "@/lib/i18n";
+import { TooltipProvider } from "@/components/ui/tooltip";
+const total = usage["window.usage.overview"].totals;
+const status = usage["window.usage.overview"].status;
+const coverage = {
+  precision: "event",
+  incomplete: false,
+  refreshing: false,
+  unlocatedTotals: total,
+  message: null,
+};
+function heatmapWindow(fromDay: string, toDay: string) {
+  return {
+    fromDay,
+    toDay,
+    timeZone: "UTC",
+    days: [
+      { day: fromDay, totals: total, value: 1, label: "1", normalizedValue: 1 },
+    ],
+    totals: total,
+    nextBeforeDay: fromDay,
+    coverage,
+    status,
+  };
+}
+const heatmapDayLabel = (day: string) =>
+  `${day}: ${total.totalTokens.toLocaleString("en")} Tokens`;
+const resolvedRange = {
+  from: "2026-01-01T00:00:00Z",
+  to: "2026-11-01T00:00:00Z",
+  asOf: "2026-11-01T00:00:00Z",
+  timeZone: "UTC",
+  granularity: "day",
+};
+const data = {
+  requestLogCount: 24,
+  revision: "1",
+  resolvedRange,
+  coverage,
+  totals: total,
+  kpiDisplay: { cost: "$1", requests: "2", tokens: "3", cacheHitRate: "0%" },
+  facets: { services: [], sources: [], models: [] },
+  providerRows: [],
+  modelRows: [],
+  samples: [],
+  axisTicks: [],
+  status,
+};
+const listeners = new Set<(event: any) => void>();
+const api = {
+  subscribe: vi.fn((listener: (event: any) => void) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }),
+  usageDashboard: vi.fn(async () => data),
+  usageRequests: vi.fn(async () => ({
+    revision: "1",
+    resolvedRange,
+    totalCount: 0,
+    page: 1,
+    pageSize: 12,
+    rows: [],
+    nextCursor: null,
+    coverage,
+    status,
+  })),
+  usageHeatmap: vi.fn(async () => ({
+    fromDay: "2025-01-06",
+    toDay: "2026-01-12",
+    timeZone: "UTC",
+    days: [],
+    totals: total,
+    nextBeforeDay: null,
+    coverage,
+    status,
+  })),
+};
+let session = { ...api };
+beforeEach(async () => {
+  session = { ...api };
+  const fixtures = await import("./fixtures");
+  fixtures.bootstrap.visibleUsageServices = ["codex", "kimi"];
+});
+vi.mock("@/host/host-context", async () => {
+  const f = await import("./fixtures");
+  return {
+    useHost: () => ({
+      api: session,
+      bootstrap: f.bootstrap,
+      settings: f.settings,
+    }),
+    errorMessage: (error: unknown) => String(error),
+  };
+});
+it("queries dashboard immediately and loads request and heatmap only when opened", async () => {
+  render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  await screen.findByText("$1");
+  expect(api.usageDashboard).toHaveBeenCalled();
+  expect(api.usageRequests).not.toHaveBeenCalled();
+  expect(api.usageHeatmap).not.toHaveBeenCalled();
+  expect(screen.getByRole("tab", { name: "Request logs 24" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  await waitFor(() =>
+    expect(api.usageRequests).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 1, pageSize: 12 }),
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "All",
+      exact: true,
+    }),
+  );
+  await waitFor(() => expect(api.usageHeatmap).toHaveBeenCalled());
+  expect(api.usageDashboard.mock.lastCall?.[0]).toMatchObject({ range: "all" });
+});
+it("discards a deferred heatmap when the filter changes", async () => {
+  let resolve!: (value: unknown) => void;
+  api.usageHeatmap.mockImplementationOnce(
+    () =>
+      new Promise((r) => {
+        resolve = r;
+      }) as never,
+  );
+  render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "All",
+      exact: true,
+    }),
+  );
+  await waitFor(() => expect(api.usageHeatmap).toHaveBeenCalled());
+  fireEvent.click(
+    screen
+      .getAllByRole("button", { name: "All" })
+      .find((x) => x.hasAttribute("aria-haspopup"))!,
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: "Today" }),
+  );
+  resolve({
+    fromDay: "1990-01-01",
+    toDay: "1991-01-01",
+    timeZone: "UTC",
+    days: [],
+    totals: total,
+    nextBeforeDay: null,
+    coverage,
+    status,
+  });
+  await waitFor(() =>
+    expect(api.usageDashboard.mock.lastCall?.[0]).toMatchObject({
+      range: "today",
+    }),
+  );
+  expect(screen.queryByText(/1990-01-01/)).toBeNull();
+});
+it("shows the available log count before opening incomplete request history", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue({
+    ...data,
+    requestLogCount: 13,
+    coverage: { ...coverage, incomplete: true },
+  });
+  api.usageRequests.mockReset().mockImplementation(
+    async (query: any) =>
+      ({
+        ...requestPage("available-model", query.page),
+        totalCount: 13,
+        coverage: { ...coverage, incomplete: true },
+      }) as never,
+  );
+  renderDashboard();
+  await screen.findByRole("tab", { name: "Request logs 13" });
+  expect(api.usageRequests).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  await screen.findByText("available-model");
+  expect(screen.getByText("13 records")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await waitFor(() =>
+    expect(api.usageRequests.mock.lastCall?.[0]).toMatchObject({
+      page: 2,
+      pageSize: 12,
+    }),
+  );
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+});
+it("shows only the latest 53-week window even when older history is available", async () => {
+  api.usageHeatmap
+    .mockReset()
+    .mockResolvedValue(heatmapWindow("2025-01-06", "2026-01-12") as never);
+  render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "All",
+      exact: true,
+    }),
+  );
+  await screen.findByLabelText(heatmapDayLabel("2025-01-06"));
+  expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+  expect(api.usageHeatmap).toHaveBeenCalledTimes(1);
+  expect(api.usageHeatmap.mock.lastCall?.[0]).not.toHaveProperty("beforeDay");
+});
+it("keeps the latest window visible and refreshes only that window when revision changes", async () => {
+  const { act } = await import("@testing-library/react");
+  const { HeatmapResource } = await import("@/features/stats/dashboard-page");
+  const block = heatmapWindow("2025-01-06", "2026-01-12");
+  let finish!: (value: any) => void;
+  api.usageHeatmap
+    .mockReset()
+    .mockResolvedValueOnce(block as never)
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+  const query = { range: "all", metric: "tokens" } as const;
+  const element = (revision: string) => (
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardQueryScope>
+          <HeatmapResource
+            query={query}
+            revision={revision}
+            today="2026-11-02"
+          />
+        </DashboardQueryScope>
+      </TooltipProvider>
+    </LanguageProvider>
+  );
+  const view = render(element("1"));
+  const cell = await screen.findByLabelText(heatmapDayLabel("2025-01-06"));
+  api.usageHeatmap.mockClear();
+  view.rerender(element("2"));
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
+  await waitFor(() => expect(api.usageHeatmap).toHaveBeenCalledTimes(1));
+  expect(api.usageHeatmap.mock.lastCall?.[0]).toEqual(query);
+  await act(async () => {
+    finish(block);
+  });
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
+  expect(api.usageHeatmap).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+});
+it("refreshes moving presets on the visible minute timer", async () => {
+  const { act } = await import("@testing-library/react");
+  vi.useFakeTimers();
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  await act(async () => {
+    render(
+      <LanguageProvider language="en">
+        <TooltipProvider>
+          <DashboardPage onService={() => {}} />
+        </TooltipProvider>
+      </LanguageProvider>,
+    );
+  });
+  const count = api.usageDashboard.mock.calls.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60000);
+  });
+  expect(api.usageDashboard.mock.calls.length).toBeGreaterThan(count);
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+it("keeps the latest heatmap window and retries a failed refresh", async () => {
+  const { HeatmapResource } = await import("@/features/stats/dashboard-page");
+  const query = { range: "all", metric: "tokens" } as const;
+  const block = heatmapWindow("2025-01-06", "2026-01-12");
+  api.usageHeatmap.mockReset();
+  api.usageHeatmap
+    .mockResolvedValueOnce(block as never)
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValueOnce(block as never);
+  const viewFor = (revision: string) => (
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardQueryScope>
+          <HeatmapResource
+            query={query}
+            revision={revision}
+            today="2026-11-02"
+          />
+        </DashboardQueryScope>
+      </TooltipProvider>
+    </LanguageProvider>
+  );
+  const view = render(viewFor("1"));
+  const cell = await screen.findByLabelText(heatmapDayLabel("2025-01-06"));
+  view.rerender(viewFor("2"));
+  await screen.findByRole("alert");
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
+});
+it("ignores a failed request from an earlier filter after another page is open", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  const { act } = await import("@testing-library/react");
+  let rejectOld!: (error: unknown) => void;
+  api.usageRequests.mockReset();
+  api.usageRequests.mockImplementation(async (q: any) => {
+    if (q.range === "last7" && q.page === 2)
+      return new Promise((_, reject) => {
+        rejectOld = reject;
+      });
+    return {
+      revision: "1",
+      resolvedRange,
+      totalCount: 24,
+      page: q.page,
+      pageSize: q.pageSize,
+      rows: [],
+      nextCursor: null,
+      coverage,
+      status,
+    };
+  });
+  render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await waitFor(() => expect(rejectOld).toBeTypeOf("function"));
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 30 days",
+    }),
+  );
+  await waitFor(() =>
+    expect(api.usageRequests.mock.lastCall?.[0]).toMatchObject({
+      range: "last30",
+    }),
+  );
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await waitFor(() =>
+    expect(api.usageRequests.mock.lastCall?.[0]).toMatchObject({
+      range: "last30",
+      page: 2,
+    }),
+  );
+  const count = api.usageRequests.mock.calls.length;
+  await act(async () => {
+    rejectOld(new Error("previous filter failed"));
+    await Promise.resolve();
+  });
+  expect(api.usageRequests.mock.calls.length).toBe(count);
+});
+it("shifts only the latest 53-week window on Monday without following older pages", async () => {
+  const { HeatmapResource } = await import("@/features/stats/dashboard-page");
+  const query = { range: "all", metric: "tokens" } as const;
+  let monday = false;
+  api.usageHeatmap.mockReset();
+  api.usageHeatmap.mockImplementation(async () =>
+    (monday
+      ? heatmapWindow("2025-01-13", "2026-01-19")
+      : heatmapWindow("2025-01-06", "2026-01-12")) as never,
+  );
+  const viewFor = (today: string) => (
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardQueryScope>
+          <HeatmapResource query={query} revision="1" today={today} />
+        </DashboardQueryScope>
+      </TooltipProvider>
+    </LanguageProvider>
+  );
+  const view = render(viewFor("2026-01-11"));
+  await screen.findByLabelText(heatmapDayLabel("2025-01-06"));
+  monday = true;
+  api.usageHeatmap.mockClear();
+  view.rerender(viewFor("2026-01-12"));
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBeTruthy();
+  await screen.findByLabelText(heatmapDayLabel("2025-01-13"));
+  expect(api.usageHeatmap).toHaveBeenCalledTimes(1);
+  expect(api.usageHeatmap.mock.lastCall?.[0]).toEqual(query);
+  expect(screen.queryByLabelText(heatmapDayLabel("2025-01-06"))).toBeNull();
+  expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+});
+it("keeps filters mounted while switching, then serves a revisited key from cache", async () => {
+  let finish!: (v: any) => void;
+  api.usageDashboard.mockReset();
+  api.usageDashboard.mockImplementation((q: any) =>
+    q.range === "last30"
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : Promise.resolve(data),
+  );
+  render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 30 days",
+    }),
+  );
+  expect(screen.getByRole("button", { name: /Last 30 days/ })).toBeTruthy();
+  expect(screen.getByText(/Changing filters/)).toBeTruthy();
+  finish({ ...data, kpiDisplay: { ...data.kpiDisplay, cost: "$30" } });
+  await screen.findByText("$30");
+  fireEvent.click(screen.getByRole("button", { name: /Last 30 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 7 days",
+    }),
+  );
+  expect(screen.getByText("$1")).toBeTruthy();
+  expect(
+    api.usageDashboard.mock.calls.filter(
+      (call: any[]) => call[0].range === "last7",
+    ),
+  ).toHaveLength(1);
+});
+it("does not show old cached results across a privacy context change", async () => {
+  const fixtures = await import("./fixtures");
+  let finish!: (v: any) => void;
+  api.usageDashboard
+    .mockReset()
+    .mockResolvedValueOnce(data)
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+  const element = () => (
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>
+  );
+  const view = render(element());
+  await screen.findByText("$1");
+  fixtures.settings.appearance.privacyMode = true;
+  view.rerender(element());
+  expect(screen.queryByText("$1")).toBeNull();
+  finish({ ...data, kpiDisplay: { ...data.kpiDisplay, cost: "hidden" } });
+  await screen.findByText("hidden");
+  fixtures.settings.appearance.privacyMode = false;
+});
+it("invalidates an in-flight query without accepting its older result as fresh", async () => {
+  const { act } = await import("@testing-library/react");
+  let old!: (v: any) => void;
+  api.usageDashboard
+    .mockReset()
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          old = resolve;
+        }),
+    )
+    .mockResolvedValue({
+      ...data,
+      kpiDisplay: { ...data.kpiDisplay, cost: "fresh" },
+    });
+  render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  await waitFor(() => expect(old).toBeTypeOf("function"));
+  await act(async () => {
+    for (const listener of listeners) listener({ domains: ["usage"] });
+    await Promise.resolve();
+  });
+  await screen.findByText("fresh");
+  await act(async () => {
+    old({ ...data, kpiDisplay: { ...data.kpiDisplay, cost: "obsolete" } });
+    await Promise.resolve();
+  });
+  expect(screen.queryByText("obsolete")).toBeNull();
+  expect(api.usageDashboard.mock.calls.length).toBeGreaterThanOrEqual(2);
+});
+it("does not reset the selected filters on broad usage events with unchanged context", async () => {
+  const { act } = await import("@testing-library/react");
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 30 days",
+    }),
+  );
+  await waitFor(() =>
+    expect(api.usageDashboard.mock.lastCall?.[0]).toMatchObject({
+      range: "last30",
+    }),
+  );
+  await act(async () => {
+    for (const listener of listeners)
+      listener({ domains: ["usage", "settings", "applications"] });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  });
+  expect(screen.getByRole("button", { name: /Last 30 days/ })).toBeTruthy();
+});
+it("isolates cached data when the visible usage services change", async () => {
+  const fixtures = await import("./fixtures");
+  let finish!: (v: any) => void;
+  api.usageDashboard
+    .mockReset()
+    .mockResolvedValueOnce(data)
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+  const element = () => (
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>
+  );
+  const view = render(element());
+  await screen.findByText("$1");
+  fixtures.bootstrap.visibleUsageServices = ["codex"];
+  view.rerender(element());
+  expect(screen.queryByText("$1")).toBeNull();
+  finish({ ...data, kpiDisplay: { ...data.kpiDisplay, cost: "new scope" } });
+  await screen.findByText("new scope");
+  fixtures.bootstrap.visibleUsageServices = [];
+});
+it("reuses the session cache across page remount and revalidates it", async () => {
+  let resolve!: (value: any) => void;
+  api.usageDashboard
+    .mockReset()
+    .mockResolvedValueOnce(data)
+    .mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        }),
+    );
+  const element = () => (
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>
+  );
+  const first = render(element());
+  await screen.findByText("$1");
+  first.unmount();
+  render(element());
+  expect(screen.getByText("$1")).toBeTruthy();
+  await waitFor(() => expect(resolve).toBeTypeOf("function"));
+  resolve({ ...data, kpiDisplay: { ...data.kpiDisplay, cost: "refreshed" } });
+  await screen.findByText("refreshed");
+});
+it("updates application selection immediately while its result is pending", async () => {
+  const React = await import("react");
+  let finish!: (value: any) => void;
+  const scoped = {
+    ...data,
+    facets: {
+      ...data.facets,
+      services: [
+        { id: "codex", title: "Codex", requestCount: 1 },
+        { id: "claude", title: "Claude", requestCount: 1 },
+      ],
+    },
+  };
+  api.usageDashboard.mockReset().mockImplementation((q: any) =>
+    q.service === "codex"
+      ? new Promise((r) => {
+          finish = r;
+        })
+      : Promise.resolve(scoped),
+  );
+  function View() {
+    const [service, setService] =
+      React.useState<import("@ccbar/host-api/window").UsageService>();
+    return <DashboardPage service={service} onService={setService} />;
+  }
+  render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <View />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+  expect(
+    screen.getByRole("button", { name: "Codex" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(screen.getByText(/Changing filters/)).toBeTruthy();
+  finish(scoped);
+});
+
+const renderDashboard = () =>
+  render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+const requestPage = (
+  modelID: string,
+  page = 1,
+  pageSize = 12,
+  totalCount = 24,
+) => ({
+  revision: "1",
+  resolvedRange,
+  totalCount,
+  page,
+  pageSize,
+  rows: [
+    {
+      id: modelID,
+      service: "codex",
+      sourceID: "session:codex",
+      modelID,
+      timestamp: "2026-11-01T10:00:00Z",
+      totals: total,
+    },
+  ],
+  nextCursor: null,
+  coverage,
+  status,
+});
+
+it("keeps request rows while paging and immediately reuses a cached page", async () => {
+  const { act } = await import("@testing-library/react");
+  let finish!: (value: any) => void;
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  api.usageRequests.mockReset().mockImplementation((query: any) =>
+    query.page === 2
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : (Promise.resolve(requestPage("first-page-model")) as never),
+  );
+  renderDashboard();
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  await screen.findByText("first-page-model");
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("first-page-model")).toBeTruthy();
+  expect(screen.queryByText("Loading request records…")).toBeNull();
+  expect(
+    (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(
+    (screen.getByRole("button", { name: "Previous" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  await act(async () => {
+    finish(requestPage("second-page-model", 2));
+  });
+  await screen.findByText("second-page-model");
+  fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+  expect(screen.getByText("first-page-model")).toBeTruthy();
+  expect(api.usageRequests).toHaveBeenCalledTimes(2);
+});
+
+it("retains the last request page when the next page fails and supports retry", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  api.usageRequests
+    .mockReset()
+    .mockResolvedValueOnce(requestPage("retained-model") as never)
+    .mockRejectedValueOnce(new Error("database temporarily busy"))
+    .mockResolvedValueOnce(requestPage("retried-model", 2) as never);
+  renderDashboard();
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  await screen.findByText("retained-model");
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByRole("alert");
+  expect(screen.getByText("retained-model")).toBeTruthy();
+  expect(screen.getByText(/Request records could not be updated/)).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByText("retried-model");
+  expect(screen.queryByText("retained-model")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("retains prior dashboard results after filter failure without caching them under the failed key", async () => {
+  api.usageDashboard
+    .mockReset()
+    .mockResolvedValueOnce(data)
+    .mockRejectedValueOnce(new Error("database temporarily busy"))
+    .mockResolvedValueOnce({
+      ...data,
+      kpiDisplay: { ...data.kpiDisplay, cost: "$30" },
+    });
+  renderDashboard();
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 30 days",
+    }),
+  );
+  await screen.findByText(/Filters could not be applied/);
+  expect(screen.getByText("$1")).toBeTruthy();
+  expect(
+    screen.getByRole("table").querySelector("tbody[inert]"),
+  ).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByText("$30");
+  expect(screen.getByRole("table").querySelector("tbody[inert]")).toBeNull();
+  expect(api.usageDashboard.mock.lastCall?.[0]).toMatchObject({
+    range: "last30",
+  });
+});
+
+it.each(["usage", "pricing"])(
+  "keeps displayed results during %s background refresh and on failure",
+  async (domain) => {
+    const { act } = await import("@testing-library/react");
+    let fail!: (reason: Error) => void;
+    api.usageDashboard
+      .mockReset()
+      .mockResolvedValueOnce(data)
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            fail = reject;
+          }),
+      );
+    renderDashboard();
+    await screen.findByText("$1");
+    const table = screen.getByRole("table");
+    await act(async () => {
+      for (const listener of listeners) listener({ domains: [domain] });
+    });
+    await waitFor(() => expect(fail).toBeTypeOf("function"));
+    expect(screen.getByText("$1")).toBeTruthy();
+    expect(screen.getByRole("table")).toBe(table);
+    expect(
+      document.querySelector('[data-slot="chart-loading-overlay"]'),
+    ).toBeNull();
+    expect(document.querySelector('[data-slot="table-skeleton"]')).toBeNull();
+    expect(screen.getByText("$1").className).not.toContain("invisible");
+    await act(async () => {
+      fail(new Error("temporarily unavailable"));
+    });
+    await screen.findByText(/Refresh failed/);
+    expect(screen.getByText("$1")).toBeTruthy();
+    expect(screen.getByRole("table")).toBe(table);
+  },
+);
+
+it("adopts the host-clamped page after records shrink without fetching it twice", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  api.usageRequests
+    .mockReset()
+    .mockResolvedValueOnce(requestPage("outdated-page") as never)
+    .mockResolvedValueOnce(requestPage("remaining-page", 1, 12, 1) as never);
+  renderDashboard();
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  await screen.findByText("outdated-page");
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByText("remaining-page");
+  expect(api.usageRequests).toHaveBeenCalledTimes(2);
+  expect(
+    (screen.getByRole("textbox", { name: "Current page" }) as HTMLInputElement)
+      .value,
+  ).toBe("1");
+  expect(screen.getByText("1 records")).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+});
+
+it("jumps directly, resets sorting and filters to page one, and retains the selected page size", async () => {
+  api.usageDashboard
+    .mockReset()
+    .mockResolvedValue({ ...data, requestLogCount: 80 });
+  api.usageRequests
+    .mockReset()
+    .mockImplementation(
+      async (query: any) =>
+        requestPage(
+          `page-${query.page}-${query.pageSize}`,
+          query.page,
+          query.pageSize,
+          80,
+        ) as never,
+    );
+  renderDashboard();
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  await screen.findByText("page-1-12");
+  const input = screen.getByRole("textbox", { name: "Current page" });
+  input.focus();
+  fireEvent.change(input, { target: { value: "5" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await screen.findByText("page-5-12");
+  expect(api.usageRequests).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("combobox", { name: "Rows per page" }));
+  const pageSizeOption = await screen.findByRole("option", { name: "24 / page" });
+  fireEvent.pointerDown(pageSizeOption, { pointerType: "mouse", button: 0 });
+  fireEvent.click(pageSizeOption, { detail: 1 });
+  await screen.findByText("page-1-24");
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByText("page-2-24");
+  fireEvent.click(
+    within(screen.getByRole("table")).getByRole("button", { name: "Cost" }),
+  );
+  await screen.findByText("page-1-24");
+  expect(api.usageRequests.mock.lastCall?.[0]).toMatchObject({
+    page: 1,
+    pageSize: 24,
+    sort: "cost",
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByText("page-2-24");
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 30 days",
+    }),
+  );
+  await waitFor(() =>
+    expect(api.usageRequests.mock.lastCall?.[0]).toMatchObject({
+      range: "last30",
+      page: 1,
+      pageSize: 24,
+    }),
+  );
+  expect(
+    api.usageRequests.mock.calls
+      .filter((call: any[]) => call[0].range === "last30")
+      .every((call: any[]) => call[0].page === 1),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: /Last 30 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 7 days",
+    }),
+  );
+  await waitFor(() =>
+    expect(
+      (
+        screen.getByRole("textbox", {
+          name: "Current page",
+        }) as HTMLInputElement
+      ).value,
+    ).toBe("1"),
+  );
+});
+
+const emptyTotal = {
+  ...total,
+  inputTokens: 0,
+  outputTokens: 0,
+  inputWithCacheTokens: 0,
+  totalTokens: 0,
+  costUSD: "0",
+  costDisplay: "$0",
+  requestCount: 0,
+};
+const emptyDashboard = {
+  ...data,
+  requestLogCount: 0,
+  totals: emptyTotal,
+  coverage: { ...coverage, refreshing: false, unlocatedTotals: emptyTotal },
+  kpiDisplay: { cost: "—", requests: "—", tokens: "—", cacheHitRate: "—" },
+  axisTicks: [
+    { position: 0, label: "0" },
+    { position: 0.5, label: "1" },
+    { position: 1, label: "2" },
+  ],
+  samples: ["2026-11-01", "2026-11-02", "2026-11-03"].map((day) => ({
+    key: day,
+    start: `${day}T00:00:00Z`,
+    totals: emptyTotal,
+    value: 0,
+    label: "0",
+    normalizedValue: 0,
+    segments: [],
+  })),
+};
+
+it("keeps every enabled application in configured order during loading and when query facets change", async () => {
+  const { act } = await import("@testing-library/react");
+  const fixtures = await import("./fixtures");
+  fixtures.bootstrap.visibleUsageServices = ["kimi", "codex"];
+  // Neither app is in the sidebar; usage enablement is independent of sidebar membership.
+  expect(fixtures.bootstrap.sidebarApplications).toHaveLength(0);
+  let finish!: (value: any) => void;
+  api.usageDashboard
+    .mockReset()
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    )
+    .mockResolvedValue({
+      ...data,
+      facets: { services: [], sources: [], models: [] },
+    });
+  renderDashboard();
+  const names = () =>
+    within(screen.getByRole("group", { name: "Application filter" }))
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+  expect(names()).toEqual(["All", "Kimi Code", "Codex"]);
+  expect(screen.queryByText("No data")).toBeNull();
+  await act(async () => {
+    finish({
+      ...data,
+      facets: {
+        ...data.facets,
+        services: [{ id: "codex", title: "Codex", requestCount: 2 }],
+      },
+    });
+  });
+  await screen.findByText("$1");
+  expect(names()).toEqual(["All", "Kimi Code", "Codex"]);
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: "Today" }),
+  );
+  await waitFor(() =>
+    expect(api.usageDashboard.mock.lastCall?.[0]).toMatchObject({
+      range: "today",
+    }),
+  );
+  expect(names()).toEqual(["All", "Kimi Code", "Codex"]);
+});
+
+it("returns selection to all when the selected application is disabled", async () => {
+  const React = await import("react");
+  const fixtures = await import("./fixtures");
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  function View() {
+    const [service, setService] = React.useState<
+      import("@ccbar/host-api/window").UsageService | undefined
+    >("codex");
+    return (
+      <LanguageProvider language="en">
+        <TooltipProvider>
+          <DashboardPage service={service} onService={setService} />
+        </TooltipProvider>
+      </LanguageProvider>
+    );
+  }
+  const view = render(<View />);
+  await screen.findByText("$1");
+  expect(
+    screen.getByRole("button", { name: "Codex" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  fixtures.bootstrap.visibleUsageServices = ["kimi"];
+  view.rerender(<View />);
+  const selector = screen.getByRole("group", { name: "Application filter" });
+  expect(within(selector).queryByRole("button", { name: "Codex" })).toBeNull();
+  expect(
+    within(selector)
+      .getByRole("button", { name: "All" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+  await waitFor(() =>
+    expect(api.usageDashboard.mock.lastCall?.[0].service).toBeUndefined(),
+  );
+});
+
+it("keeps KPI, chart axes and all table columns when a successful query is empty", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue(emptyDashboard as never);
+  api.usageRequests.mockReset().mockResolvedValue({
+    revision: "1",
+    resolvedRange,
+    totalCount: 0,
+    page: 1,
+    pageSize: 12,
+    rows: [],
+    nextCursor: null,
+    coverage: emptyDashboard.coverage,
+    status,
+  });
+  const view = renderDashboard();
+  await screen.findByText("No data");
+  for (const name of ["Cost", "Requests", "Tokens", "Cache hit rate"])
+    expect(screen.getByRole("button", { name: `${name} —` })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Request logs 0" })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Providers 0" })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Models 0" })).toBeTruthy();
+  expect(
+    view.container.querySelector('[data-slot="dashboard-bar"]'),
+  ).toBeNull();
+  expect(screen.getByText("11/01")).toBeTruthy();
+  expect(screen.getByText("11/03")).toBeTruthy();
+  expect(
+    Array.from(
+      view.container.querySelectorAll('[data-slot="dashboard-axis-tick"]'),
+    ).map((tick) => tick.textContent),
+  ).toEqual(["0", "1", "2"]);
+  expect(screen.getAllByRole("columnheader")).toHaveLength(7);
+  expect(screen.getByText("No data").getAttribute("colspan")).toBe("7");
+  fireEvent.click(screen.getByRole("tab", { name: "Models 0" }));
+  expect(screen.getAllByRole("columnheader")).toHaveLength(7);
+  expect(screen.getByText("No data")).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "Request logs 0" }));
+  expect(screen.getAllByRole("columnheader")).toHaveLength(6);
+  expect(screen.getByText("No data").getAttribute("colspan")).toBe("6");
+  await waitFor(() => expect(api.usageRequests).toHaveBeenCalled());
+});
+
+it("uses K/M/B for statistic card tokens in Chinese", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue({
+    ...data,
+    totals: { ...total, totalTokens: 999_960 },
+    kpiDisplay: { ...data.kpiDisplay, tokens: "99.996万" },
+  });
+  render(
+    <LanguageProvider language="zh">
+      <TooltipProvider>
+        <DashboardPage onService={() => {}} />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  expect(
+    await screen.findByRole("button", { name: "Tokens 1M" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /万/ })).toBeNull();
+});
+
+it("does not treat actual zero-cost usage as an empty query", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue({
+    ...data,
+    totals: { ...total, costUSD: "0", costDisplay: "$0" },
+    kpiDisplay: { ...data.kpiDisplay, cost: "$0" },
+  });
+  renderDashboard();
+  await screen.findByText("$0");
+  expect(screen.queryByText("No data")).toBeNull();
+  expect(screen.getByRole("button", { name: "Requests 2" })).toBeTruthy();
+});
+
+it("keeps application filters but does not display empty success on initial query failure", async () => {
+  api.usageDashboard
+    .mockReset()
+    .mockRejectedValue(new Error("database unavailable"));
+  renderDashboard();
+  await screen.findByText("Couldn’t load this page");
+  expect(screen.getByRole("button", { name: "Codex" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Kimi Code" })).toBeTruthy();
+  expect(screen.queryByText("No data")).toBeNull();
+});
+
+it("does not claim empty data while request details are still being prepared", async () => {
+  api.usageDashboard.mockReset().mockResolvedValue({
+    ...emptyDashboard,
+    requestLogCount: null,
+    coverage: { ...emptyDashboard.coverage, refreshing: true },
+    kpiDisplay: { cost: "$0", requests: "0", tokens: "0", cacheHitRate: "0%" },
+  } as never);
+  renderDashboard();
+  await screen.findByText("Updating request details…");
+  expect(screen.queryByText("No data")).toBeNull();
+  expect(screen.getByRole("tab", { name: "Request logs —" })).toBeTruthy();
+});
+
+it("uses the dashboard shell for first-load skeletons while controls remain usable", async () => {
+  const { act } = await import("@testing-library/react");
+  let finish!: (value: any) => void;
+  api.usageDashboard.mockReset().mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = renderDashboard();
+  const summary = view.container.querySelector(
+    '[data-slot="dashboard-summary"]',
+  );
+  const table = screen.getByRole("table");
+  expect(summary).not.toBeNull();
+  expect(
+    view.container.querySelector('[data-slot="chart-skeleton"]'),
+  ).not.toBeNull();
+  expect(
+    view.container.querySelector('[data-slot="table-skeleton"]'),
+  ).not.toBeNull();
+  expect(screen.getAllByRole("status")).toHaveLength(1);
+  expect(screen.getByRole("status").className).toContain("sr-only");
+  expect(screen.getByRole("status").closest('[aria-busy="true"]')).toBeNull();
+  expect(screen.queryByText("No data")).toBeNull();
+  for (const skeleton of view.container.querySelectorAll(
+    '[data-slot="skeleton"]',
+  )) {
+    expect(skeleton.className).toContain("motion-reduce:animate-none");
+    expect(skeleton.getAttribute("aria-hidden")).toBe("true");
+  }
+  expect(
+    (
+      within(summary as HTMLElement).getByRole("button", {
+        name: "Cost",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(false);
+  fireEvent.click(screen.getByRole("tab", { name: "Models" }));
+  expect(screen.queryByRole("button", { name: "Hide chart" })).toBeNull();
+  const chartRegion = view.container.querySelector(
+    '[data-slot="dashboard-chart-region"]',
+  );
+  expect(chartRegion).not.toBeNull();
+  expect(chartRegion?.className).toContain("border-t");
+  await act(async () => {
+    finish(data);
+  });
+  await screen.findByText("$1");
+  expect(view.container.querySelector('[data-slot="dashboard-summary"]')).toBe(
+    summary,
+  );
+  expect(screen.getByRole("table")).toBe(table);
+  expect(
+    screen.getByRole("tab", { name: "Models 0" }).getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(screen.queryByRole("button", { name: "Show chart" })).toBeNull();
+  expect(
+    view.container.querySelector('[data-slot="dashboard-chart-region"]'),
+  ).not.toBeNull();
+  expect(
+    view.container.querySelector('[data-slot="table-skeleton"]'),
+  ).toBeNull();
+});
+
+it("keeps fresh-filter results readable without unmounting panels and skips loading indicators for a cached filter", async () => {
+  const { act } = await import("@testing-library/react");
+  let finish!: (value: any) => void;
+  api.usageDashboard.mockReset().mockImplementation((query: any) =>
+    query.range === "last30"
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : Promise.resolve(data),
+  );
+  const view = renderDashboard();
+  await screen.findByText("$1");
+  const summary = view.container.querySelector(
+    '[data-slot="dashboard-summary"]',
+  );
+  const table = screen.getByRole("table");
+  const kpi = screen.getByText("$1");
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 30 days",
+    }),
+  );
+  expect(
+    view.container.querySelector('[data-slot="chart-loading-overlay"]'),
+  ).toBeNull();
+  expect(
+    view.container.querySelector('[data-slot="table-skeleton"]'),
+  ).toBeNull();
+  expect(view.container.querySelector('[data-slot="dashboard-summary"]')).toBe(
+    summary,
+  );
+  expect(screen.getByRole("table")).toBe(table);
+  expect(screen.getByText("$1")).toBe(kpi);
+  expect(kpi.className).not.toContain("invisible");
+  expect(kpi.getAttribute("aria-hidden")).not.toBe("true");
+  expect(
+    view.container
+      .querySelector('[data-slot="dashboard-chart-region"]')
+      ?.getAttribute("aria-busy"),
+  ).toBe("true");
+  expect(
+    screen.getByRole("tab", { name: "Models 0" }).closest("[inert]"),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("tab", { name: "Models 0" }));
+  await act(async () => {
+    finish({ ...data, kpiDisplay: { ...data.kpiDisplay, cost: "$30" } });
+  });
+  await screen.findByText("$30");
+  expect(
+    view.container.querySelector('[data-slot="table-skeleton"]'),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Last 30 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Last 7 days",
+    }),
+  );
+  expect(screen.getByText("$1").className).not.toContain("invisible");
+  expect(view.container.querySelector('[data-slot="skeleton"]')).toBeNull();
+  expect(
+    screen.getByRole("tab", { name: "Models 0" }).getAttribute("aria-selected"),
+  ).toBe("true");
+});
+
+it("keeps the request table and paging area while first-page and next-page queries are pending", async () => {
+  const { act } = await import("@testing-library/react");
+  let finish!: (value: any) => void;
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  api.usageRequests.mockReset().mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = renderDashboard();
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("tab", { name: /Request logs/ }));
+  const table = screen.getByRole("table");
+  const body = table.parentElement!;
+  expect(body.className).toContain("min-h-[196px]");
+  expect(body.querySelector('[data-slot="table-skeleton"]')).not.toBeNull();
+  expect(screen.getAllByRole("columnheader")).toHaveLength(6);
+  expect(screen.getByRole("status").className).toContain("sr-only");
+  expect(screen.getByRole("status").closest('[aria-busy="true"]')).toBeNull();
+  const pager = view.container.querySelector(
+    '[data-slot="dashboard-table"] .min-h-14',
+  );
+  expect(pager?.className).not.toContain("invisible");
+  expect(screen.getByText("24 records")).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  await act(async () => {
+    finish(requestPage("loaded-row"));
+  });
+  await screen.findByText("loaded-row");
+  expect(screen.getByRole("table")).toBe(table);
+  expect(pager?.className).not.toContain("invisible");
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("loaded-row")).toBeTruthy();
+  expect(body.querySelector('[data-slot="table-skeleton"]')).toBeNull();
+  expect(
+    screen
+      .getByText("loaded-row")
+      .closest("tbody")
+      ?.getAttribute("aria-hidden"),
+  ).not.toBe("true");
+  expect(
+    (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  await act(async () => {
+    finish(requestPage("next-row", 2));
+  });
+  await screen.findByText("next-row");
+  expect(screen.getByRole("table")).toBe(table);
+  expect(body.querySelector('[data-slot="table-skeleton"]')).toBeNull();
+});
+
+it("uses a full heatmap skeleton on first load and retains the latest window during a background reload", async () => {
+  const { act } = await import("@testing-library/react");
+  const { HeatmapResource } = await import("@/features/stats/dashboard-page");
+  let finish!: (value: any) => void;
+  const block = heatmapWindow("2025-01-06", "2026-01-12");
+  api.usageHeatmap.mockReset().mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const element = (revision: string) => (
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <DashboardQueryScope>
+          <HeatmapResource
+            query={{ range: "all", metric: "tokens" }}
+            today="2026-11-02"
+            revision={revision}
+          />
+        </DashboardQueryScope>
+      </TooltipProvider>
+    </LanguageProvider>
+  );
+  const view = render(element("1"));
+  expect(
+    view.container.querySelector('[data-slot="heatmap-skeleton"]'),
+  ).not.toBeNull();
+  expect(screen.getByRole("status").className).toContain("sr-only");
+  expect(screen.getByRole("status").closest('[aria-busy="true"]')).toBeNull();
+  await act(async () => {
+    finish(block);
+  });
+  const cell = await screen.findByLabelText(heatmapDayLabel("2025-01-06"));
+  expect(
+    view.container.querySelector('[data-slot="heatmap-skeleton"]'),
+  ).toBeNull();
+  view.rerender(element("2"));
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
+  expect(
+    view.container.querySelector('[data-slot="heatmap-skeleton"]'),
+  ).toBeNull();
+  expect(
+    view.container.querySelectorAll('[data-slot="skeleton"]'),
+  ).toHaveLength(1);
+  await act(async () => {
+    finish(block);
+  });
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
+});
+
+it("keeps the rendered heatmap while a new application filter is pending", async () => {
+  const React = await import("react");
+  const { act } = await import("@testing-library/react");
+  let finish!: (value: any) => void;
+  const block = heatmapWindow("2025-01-06", "2026-01-12");
+  api.usageDashboard.mockReset().mockResolvedValue(data);
+  api.usageHeatmap.mockReset().mockImplementation((query: any) =>
+    query.service === "codex"
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : Promise.resolve(block as never),
+  );
+  function View() {
+    const [service, setService] =
+      React.useState<import("@ccbar/host-api/window").UsageService>();
+    return <DashboardPage service={service} onService={setService} />;
+  }
+  const view = render(
+    <LanguageProvider language="en">
+      <TooltipProvider>
+        <View />
+      </TooltipProvider>
+    </LanguageProvider>,
+  );
+  await screen.findByText("$1");
+  fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }));
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "All",
+      exact: true,
+    }),
+  );
+  const cell = await screen.findByLabelText(heatmapDayLabel("2025-01-06"));
+  fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+  await waitFor(() =>
+    expect(api.usageHeatmap.mock.lastCall?.[0]).toMatchObject({
+      service: "codex",
+    }),
+  );
+  expect(screen.getByLabelText(heatmapDayLabel("2025-01-06"))).toBe(cell);
+  expect(
+    view.container.querySelector('[data-slot="heatmap-skeleton"]'),
+  ).toBeNull();
+  await act(async () => {
+    finish(heatmapWindow("2025-01-13", "2026-01-19"));
+  });
+  await screen.findByLabelText(heatmapDayLabel("2025-01-13"));
+  expect(screen.queryByLabelText(heatmapDayLabel("2025-01-06"))).toBeNull();
+});

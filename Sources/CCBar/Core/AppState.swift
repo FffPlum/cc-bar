@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import CCBarConfiguration
 
 nonisolated struct AppTerminationError: Error, LocalizedError {
     private let message: String
@@ -22,8 +23,14 @@ nonisolated struct AppTerminationError: Error, LocalizedError {
 @Observable
 @MainActor
 final class AppState {
-    let authorizations = AuthorizationStore()
-    let applications = ApplicationStore()
+    let authorizations: AuthorizationStore
+    let applications: ApplicationStore
+
+    init(authorizations: AuthorizationStore? = nil, applications: ApplicationStore? = nil, usageService: UsageService? = nil) {
+        self.authorizations = authorizations ?? AuthorizationStore()
+        self.applications = applications ?? ApplicationStore()
+        self.usageService = usageService ?? UsageService()
+    }
     var applicationImportError: String?
     var codexAccount: CodexAccount? {
         didSet {
@@ -167,7 +174,7 @@ final class AppState {
     // 允许重复出现,token 存入私有文件 (见 ImportedCodexStore)。
     // - `importedCodexAccounts` 元数据列表,保持添加顺序。
     // - `importedCodexQuotas / Sources / Errors / RefreshStates` 按 account.id 索引,
-    //   只在该账号 `visibleInPopover` 为 true 时才刷新与展示。
+    //   只在该账号选择了菜单栏或悬浮窗展示位时自动刷新。
     var importedCodexAccounts: [ImportedCodexAccount] = []
     var importedCodexQuotas: [String: QuotaSnapshot] = [:]
     var importedCodexSources: [String: QuotaSnapshotSource] = [:]
@@ -347,7 +354,7 @@ final class AppState {
     /// Kimi 单独记录失败,不参与原三家的全失败判定。
     var kimiServiceStatusUnreachable = false
 
-    let usageService = UsageService()
+    let usageService: UsageService
     private let scheduler = Scheduler()
     private var codexAlertEntryVersion: UInt64 = 0
     private var primaryAlertEntryVersions: [QuotaApp: UInt64] = [:]
@@ -430,7 +437,7 @@ final class AppState {
         }
         guard app == .codex else { return nil }
         guard let account = importedCodexAccounts.first(where: { $0.id == observation.entry }),
-              account.visibleInPopover, importedAlertEntryVersions[account.id, default: 0] == observation.entryVersion,
+              account.isVisible, importedAlertEntryVersions[account.id, default: 0] == observation.entryVersion,
               importedAlertIdentities[account.id] == observation.identity else { return nil }
         let alias = account.alias.trimmingCharacters(in: .whitespacesAndNewlines)
         return QuotaAlertDisplayContext(name: alias.isEmpty ? (account.email ?? "Codex") : alias, privacyKey: account.id)
@@ -505,6 +512,7 @@ final class AppState {
         defer { activeStateOperations -= 1 }
         guard !didBootstrap else { return }
         didBootstrap = true
+        usageService.setAutomaticScanningEnabled(SettingsStore.shared.usageAutoScanEnabled)
 
         loadQuotaCache()
         loadQuotaHistory()
@@ -544,11 +552,11 @@ final class AppState {
         scheduler.start(
             appState: self,
             quotaInterval: settings.quotaInterval.seconds,
-            usageInterval: settings.usageInterval.seconds
+            usageInterval: settings.usageAutoScanEnabled ? settings.usageInterval.seconds : nil
         )
         // 启动后台触发一次 JSONL 扫描，让今日 cost 立刻更新（不阻塞 bootstrap）
         Task {
-            await usageService.scanNow()
+            await usageService.scanNow(automatically: true)
             await usageService.rebuildCycleUsageIfNeeded()
             // load 时修复过超长周期记录：旧 rollup 桶按污染窗口切分过，必须重算。
             // 放在初始重建之后，避免与全量重建的桶清空互相干扰（两者都能自愈，
@@ -560,7 +568,7 @@ final class AppState {
                     + "orphanBuckets=\(usageService.hasPendingOrphanCycleRebuild)"
                 pendingCycleRepairs = []
                 AppLog.info(.usage, "cycle usage rebuild requested \(reason)")
-                await usageService.rebuildCycleUsageForRecentChanges(reasons: [reason])
+                usageService.requestCycleUsageRebuild(reasons: [reason])
             }
         }
         // 启动后异步拉一次服务状态;后续由 Scheduler 5 分钟刷新一次
@@ -630,7 +638,8 @@ final class AppState {
     func applySettingsChange() {
         let settings = SettingsStore.shared
         scheduler.setQuotaInterval(settings.quotaInterval.seconds)
-        scheduler.setUsageInterval(settings.usageInterval.seconds)
+        usageService.setAutomaticScanningEnabled(settings.usageAutoScanEnabled)
+        scheduler.setUsageInterval(settings.usageAutoScanEnabled ? settings.usageInterval.seconds : nil)
     }
 
     func refreshNow() async {
@@ -648,6 +657,18 @@ final class AppState {
         refreshInFlight = task
         await task.value
         refreshInFlight = nil
+    }
+
+    /// Explicit account discovery is independent of quota visibility. Reuse the
+    /// local readers without changing preferences or requesting remote quota.
+    func reloadQuotaAccounts() async {
+        guard beginStateOperation() else { return }
+        defer { activeStateOperations -= 1 }
+        await loadCodex()
+        await loadClaude()
+        handleClaudeDesktopAccessRequest()
+        await loadAntigravity()
+        await loadKimi()
     }
 
     /// 每次刷新(手动 / Scheduler 定时)只重读已启用主 Provider 的本地凭据,
@@ -719,8 +740,8 @@ final class AppState {
                 await loadKimiQuota(reason: reason)
                 await loadKimiProfileIfNeeded()
             }
-            await loadAllKimiManagedQuotas(reason: reason)
         }
+        await loadAllKimiManagedQuotas(reason: reason)
         if plan.refreshImported {
             await loadAllImportedCodexQuotas(
                 reason: reason,
@@ -785,6 +806,9 @@ final class AppState {
 
     /// 只保存已读取的内存状态；不为退出发请求、扫描日志或重新计算历史。
     func prepareForTermination() async throws {
+        guard !applications.management.hasActiveOperation else {
+            throw ApplicationLifecycleError.unavailable(tr("Wait for the application installation operation to finish before quitting.", "应用安装管理操作尚未完成，请结束后再退出。"))
+        }
         guard !isPreparingForTermination else { throw AppTerminationError.busy }
         terminationRequested = true
         cancelKimiDeviceLogin()
@@ -1043,6 +1067,7 @@ final class AppState {
             existing.email = parsed.email ?? existing.email
             existing.planType = parsed.planType ?? existing.planType
             existing.visibleInPopover = visibleInPopover
+            existing.showInFloatingHUD = visibleInPopover
             list[idx] = existing
         } else {
             list.append(ImportedCodexAccount(
@@ -1094,6 +1119,7 @@ final class AppState {
             existing.email = fetched.email ?? existing.email
             existing.planType = fetched.snapshot.planType ?? existing.planType
             existing.visibleInPopover = visibleInPopover
+            existing.showInFloatingHUD = visibleInPopover
             existing.isPersonalAccessToken = true
             list[idx] = existing
         } else {
@@ -1134,7 +1160,13 @@ final class AppState {
         guard !isPreparingForTermination else { return }
         var list = ImportedCodexStore.loadAll()
         guard let idx = list.firstIndex(where: { $0.id == id }) else { return }
+        let previous = list[idx]
         mutate(&list[idx])
+        if list[idx].showInFloatingHUD != previous.showInFloatingHUD {
+            list[idx].visibleInPopover = list[idx].showInFloatingHUD == true
+        } else if list[idx].visibleInPopover != previous.visibleInPopover {
+            list[idx].showInFloatingHUD = list[idx].visibleInPopover
+        }
         do { try ImportedCodexStore.saveAll(list) } catch {
             AppLog.error(.credentials, "imported codex save metadata failed: \(Redact.error(error))")
             return
@@ -1191,7 +1223,7 @@ final class AppState {
         return importedCodexRefreshStates[account.id] ?? QuotaRefreshState()
     }
 
-    /// 对所有 `visibleInPopover` 为 true 的导入账号并发拉一遍配额,并发上限 3。
+    /// 对所有选中任一展示位的导入账号并发拉一遍配额,并发上限 3。
     private func loadAllImportedCodexQuotas(
         reason: QuotaRefreshReason,
         canMirrorPrimary: Bool

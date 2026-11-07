@@ -22,7 +22,8 @@ nonisolated struct ImportedCodexAccount: Sendable, Equatable, Codable, Identifia
     var addedAt: Date
     var showInMenuBar: Bool? = nil
     var showInFloatingHUD: Bool? = nil
-    var isVisible: Bool { visibleInPopover || showInMenuBar == true || showInFloatingHUD == true }
+    var showsInFloatingSurfaces: Bool { visibleInPopover || showInFloatingHUD == true }
+    var isVisible: Bool { showsInFloatingSurfaces || showInMenuBar == true }
     /// 该账号凭据为 Codex personal access token（不透明令牌）。可空以兼容旧数据，nil 视为 false。
     /// 为 true 时刷新走「不续期、直接用令牌」路径，见 [[AppState]].loadImportedCodexQuota。
     var isPersonalAccessToken: Bool? = nil

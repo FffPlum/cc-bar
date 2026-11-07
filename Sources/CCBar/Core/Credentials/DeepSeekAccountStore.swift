@@ -15,7 +15,8 @@ nonisolated struct DeepSeekAccount: Codable, Equatable, Identifiable, Sendable {
     var sourceApplication: String? = nil
     var sourceConfigurationID: String? = nil
 
-    var isVisible: Bool { kind == .account && (visibleInPopover || showInMenuBar || showInFloatingHUD) }
+    var showsInFloatingSurfaces: Bool { visibleInPopover || showInFloatingHUD }
+    var isVisible: Bool { kind == .account && (showsInFloatingSurfaces || showInMenuBar) }
 
     static func fingerprint(_ secret: String, kind: DeepSeekAuthKind) -> String {
         APISecret.fingerprint(secret, namespace: kind.rawValue)

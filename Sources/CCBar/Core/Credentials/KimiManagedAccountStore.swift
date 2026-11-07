@@ -27,6 +27,9 @@ nonisolated struct KimiManagedAccount: Codable, Equatable, Identifiable, Sendabl
     var showInMenuBar = false
     var showInFloatingHUD = false
 
+    var showsInFloatingSurfaces: Bool { visibleInPopover || showInFloatingHUD }
+    var isVisible: Bool { showInMenuBar || showsInFloatingSurfaces }
+
     var identity: String { "\(region.rawValue):\(userID)" }
 
     func auth(tokens: KimiManagedTokens, homeDirectory: URL) -> KimiAuthSession {

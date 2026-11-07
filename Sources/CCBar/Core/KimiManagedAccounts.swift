@@ -76,6 +76,11 @@ extension AppState {
         guard let index = kimiManagedAccounts.firstIndex(where: { $0.id == id }) else { return }
         var candidate = kimiManagedAccounts
         update(&candidate[index])
+        if candidate[index].showInFloatingHUD != kimiManagedAccounts[index].showInFloatingHUD {
+            candidate[index].visibleInPopover = candidate[index].showInFloatingHUD
+        } else if candidate[index].visibleInPopover != kimiManagedAccounts[index].visibleInPopover {
+            candidate[index].showInFloatingHUD = candidate[index].visibleInPopover
+        }
         do {
             try persistKimiManagedMetadata(candidate)
             kimiManagedAccounts = candidate
@@ -222,14 +227,16 @@ extension AppState {
         kimiManagedRefreshStates[account.id] = state
         kimiManagedErrors[account.id] = nil
         kimiManagedProfileAttempts[account.id] = nil
-        SettingsStore.shared.setServiceEnabled(true, for: .kimi)
         if refreshAfterSave { await loadKimiManagedQuota(account: account, reason: .userInitiated) }
     }
 
-    func loadAllKimiManagedQuotas(reason: QuotaRefreshReason) async {
-        guard SettingsStore.shared.isProviderEnabled(.kimi) else { return }
-        for account in kimiManagedAccounts where account.visibleInPopover || account.showInMenuBar || account.showInFloatingHUD {
-            await loadKimiManagedQuota(account: account, reason: reason)
+    func loadAllKimiManagedQuotas(
+        reason: QuotaRefreshReason,
+        fetch: @Sendable (KimiAuthSession) async -> Result<QuotaSnapshot, QuotaError> = { await KimiQuotaClient.fetch(auth: $0) },
+        profile: @Sendable (KimiAuthSession) async -> KimiUserInfo? = { await KimiQuotaClient.fetchUserInfo(auth: $0) }
+    ) async {
+        for account in kimiManagedAccounts where account.isVisible {
+            await loadKimiManagedQuota(account: account, reason: reason, fetch: fetch, profile: profile)
         }
     }
 
@@ -247,7 +254,7 @@ extension AppState {
         let store = tokenStore ?? kimiTokenStore
         let id = account.id
         var state = kimiManagedRefreshStates[id] ?? QuotaRefreshState()
-        guard !isPreparingForTermination, SettingsStore.shared.isProviderEnabled(.kimi), !state.inFlight,
+        guard !isPreparingForTermination, !state.inFlight,
               kimiManagedAccounts.contains(where: { $0.id == id && $0.identity == account.identity }) else { return }
         let now = Date()
         if let until = state.backoffUntil, until > now { kimiManagedErrors[id] = backoffMessage(until: until); return }
@@ -314,7 +321,7 @@ extension AppState {
     }
 
     private func ownsKimiManagedRequest(_ id: UUID, account: KimiManagedAccount) -> Bool {
-        !isPreparingForTermination && SettingsStore.shared.isProviderEnabled(.kimi)
+        !isPreparingForTermination
             && kimiManagedRequestIDs[account.id] == id
             && kimiManagedAccounts.contains(where: { $0.id == account.id && $0.identity == account.identity })
     }

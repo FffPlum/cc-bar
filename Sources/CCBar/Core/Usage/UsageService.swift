@@ -1,5 +1,45 @@
 import Foundation
+import CryptoKit
 import Observation
+
+/// Derived request details from currently readable source logs. Daily rollups remain authoritative.
+nonisolated struct UsageRequestRecord: Sendable {
+    let id: String
+    let entry: UsageEntry
+}
+
+/// Only index readiness is held in memory. Request rows stay in SQLite.
+nonisolated struct UsageRequestIndexStatus: Sendable {
+    let revision: String
+    let incompleteApps: Set<UsageApp>
+    var retryableApps: Set<UsageApp> = []
+    var isRefreshing = false
+    var isReady = false
+    var isUnavailable = false
+}
+
+nonisolated enum UsageRequestIndex {
+    /// Identical records remain distinct; the ordinal is stable for an unchanged multiset.
+    static func records(from entries: [UsageEntry]) -> [UsageRequestRecord] {
+        let keyed = entries.filter { $0.requestCount >= 0 }.map { entry in
+            let parts = [entry.app.rawValue, entry.conversationKey, entry.model, entry.speed.rawValue,
+                String(entry.timestamp.timeIntervalSince1970.bitPattern),
+                String(entry.inputTokens), String(entry.outputTokens), String(entry.cacheReadTokens),
+                String(entry.cacheCreationTokens), String(entry.requestCount),
+                entry.costUSD.map { NSDecimalNumber(decimal: $0).stringValue } ?? "nil",
+                entry.timing.map { "\($0.firstTokenMs.map(String.init) ?? "nil"):\($0.generationMs):\($0.isEstimated)" } ?? "nil"]
+            let canonical = parts.map { "\($0.utf8.count):\($0)" }.joined()
+            let digest = SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
+            return (digest, entry)
+        }.sorted { $0.0 < $1.0 }
+        var counts: [String: Int] = [:]
+        return keyed.map { digest, entry in
+            let ordinal = counts[digest, default: 0]
+            counts[digest] = ordinal + 1
+            return UsageRequestRecord(id: "\(digest)-\(ordinal)", entry: entry)
+        }
+    }
+}
 
 /// 本地扫描器使用的日志根目录与标题索引。
 ///
@@ -242,6 +282,37 @@ final class UsageService {
     /// 远端价格普通变化的自动重建间隔、自动失败后的重试间隔、自动补价的同模型间隔。
     nonisolated private static let automaticRebuildInterval: TimeInterval = 24 * 3600
 
+    private struct RequestIndexInputToken: Equatable, Sendable {
+        let revision: UInt64
+        let scanRevision: UInt64
+        let timeZone: String
+        let legacy: Bool
+    }
+    private var requestIndexScanRevision: UInt64 = 0
+    private var requestIndexFingerprintsCache: (token: RequestIndexInputToken, keys: [UsageApp: String])?
+    private var requestIndexFingerprintTask: (token: RequestIndexInputToken, task: Task<[UsageApp: String], Never>)?
+    #if DEBUG
+    private(set) var requestIndexFingerprintCalculations = 0
+    #endif
+    private var requestIndexMetadata: UsageRequestIndexStore.Metadata?
+    private var requestIndexRetryableApps: Set<UsageApp> = []
+    private(set) var requestIndexRevision: UInt64 = 0
+    private var requestIndexWarmTask: Task<Void, Never>?
+    private var requestIndexBuildTask: Task<RequestIndexUpdate, Never>?
+    private var requestIndexHistoryReady = false
+    private var requestIndexDiskLoaded = false
+    private var requestIndexUnavailable = false
+    private var requestIndexRetryAfter: Date?
+
+    var requestIndexStore: UsageRequestIndexStore { UsageRequestIndexStore(directory: historyStore.directory) }
+
+    private nonisolated struct RequestIndexUpdate: Sendable {
+        var rows: [UsageRequestIndexStore.Row] = []
+        var incomplete = false
+        var retryable = false
+        var replace = true
+    }
+
     private let historyStore: UsageSnapshotStore
     private let roots: UsageScanRoots
     private let legacyLocations: LegacyUsageHistoryLocations
@@ -262,11 +333,14 @@ final class UsageService {
     #if DEBUG
     /// 在真实扫描完成、提交之前控制交错；只用于隔离测试。
     var candidateReadyForTesting: (() async -> Void)?
+    var scanStartedForIndexTesting: (() async -> Void)?
     var cycleReadyForTesting: (() async -> Void)?
     #endif
 
     private weak var appState: AppState?
     private var scanQueued = false
+    private var queuedScanIsAutomatic = true
+    private(set) var automaticScanningEnabled = true
     private var suspendedForTermination = false
     private var isPersistingForTermination = false
     private var requiresFullRebuild = false
@@ -307,6 +381,270 @@ final class UsageService {
         self.backfillURL = backfillURL
         self.cursorCacheDirectory = cursorCacheDirectory
     }
+
+    private var requestIndexInputToken: RequestIndexInputToken {
+        RequestIndexInputToken(revision: aggregator.revision, scanRevision: requestIndexScanRevision,
+            timeZone: TimeZone.current.identifier, legacy: usesLegacyCodexModels)
+    }
+
+    private nonisolated static func makeRequestIndexFingerprints(state: ScanState?, buckets: [UsageBucket],
+        timeZone: String, legacy: Bool) -> [UsageApp: String] {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        func encoded<T: Encodable>(_ value: T) -> String {
+            (try? encoder.encode(value)).map { $0.base64EncodedString() } ?? "unavailable"
+        }
+        var keys: [UsageApp: String] = [:]
+        for app in UsageApp.localApps {
+            let rows = timeZone + buckets.filter { $0.app == app }.map(encoded).sorted().joined(separator: ",")
+            let scan: String
+            switch app {
+            case .claude: scan = encoded(state?.claude)
+            case .codex: scan = encoded(state?.codex) + String(legacy)
+            case .pi: scan = encoded(state?.pi)
+            case .opencode: scan = encoded(state?.opencode)
+            case .antigravity: scan = encoded(state?.antigravity)
+            case .kimi: scan = encoded(state?.kimi)
+            case .dsh: scan = encoded(state?.dsh)
+            case .cursor: scan = ""
+            }
+            keys[app] = SHA256.hash(data: Data((rows + scan).utf8))
+                .map { String(format: "%02x", $0) }.joined()
+        }
+        return keys
+    }
+
+
+    private func requestIndexFingerprints() async -> [UsageApp: String]? {
+        let token = requestIndexInputToken
+        if let cached = requestIndexFingerprintsCache, cached.token == token { return cached.keys }
+        let task: Task<[UsageApp: String], Never>
+        if let current = requestIndexFingerprintTask, current.token == token {
+            task = current.task
+        } else {
+            let state = cachedScanState
+            let buckets = aggregator.snapshotLocal()
+            #if DEBUG
+            requestIndexFingerprintCalculations += 1
+            #endif
+            task = Task.detached(priority: .utility) {
+                Self.makeRequestIndexFingerprints(state: state, buckets: buckets, timeZone: token.timeZone,
+                    legacy: token.legacy)
+            }
+            requestIndexFingerprintTask = (token, task)
+        }
+        let keys = await task.value
+        if requestIndexFingerprintTask?.token == token { requestIndexFingerprintTask = nil }
+        guard token == requestIndexInputToken else { return nil }
+        requestIndexFingerprintsCache = (token, keys)
+        return keys
+    }
+
+    /// Returns only metadata. A display read never restores or scans request rows.
+    func requestIndexStatusForDisplay() -> UsageRequestIndexStatus {
+        guard requestIndexHistoryReady else {
+            return UsageRequestIndexStatus(revision: "loading", incompleteApps: Set(UsageApp.allCases), isRefreshing: true)
+        }
+        let keys = requestIndexFingerprintsCache.flatMap { $0.token == requestIndexInputToken ? $0.keys : nil } ?? [:]
+        let valid = Set(UsageApp.localApps.filter { keys[$0] == requestIndexMetadata?.sourceKeys[$0] && keys[$0] != nil })
+        if !requestIndexDiskLoaded || valid.count < UsageApp.localApps.count || !requestIndexRetryableApps.isEmpty {
+            scheduleRequestIndexWarm()
+        }
+        return UsageRequestIndexStatus(revision: requestIndexMetadata?.revision ?? "loading",
+            incompleteApps: (requestIndexMetadata?.incompleteApps ?? Set(UsageApp.allCases))
+                .union(Set(UsageApp.localApps).subtracting(valid)),
+            retryableApps: requestIndexRetryableApps, isRefreshing: requestIndexWarmTask != nil,
+            isReady: requestIndexMetadata != nil, isUnavailable: requestIndexUnavailable)
+    }
+
+    /// Keep the last successful state while scheduling metadata recovery after a failed SQL read.
+    func requestIndexStorageReadFailed() {
+        requestIndexDiskLoaded = false
+        requestIndexUnavailable = true
+        requestIndexRetryAfter = Date().addingTimeInterval(2)
+    }
+
+    private func scheduleRequestIndexWarm() {
+        guard requestIndexHistoryReady, requestIndexWarmTask == nil,
+              requestIndexRetryAfter.map({ $0 <= Date() }) ?? true else { return }
+        requestIndexWarmTask = Task { [weak self] in
+            guard let self else { return }
+            await self.updateRequestIndex()
+            self.requestIndexWarmTask = nil
+            self.requestIndexRevision &+= 1
+        }
+    }
+
+    /// One writer owns the sync chain. Import one changed source at a time and release
+    /// its parsed rows after committing; unchanged sources are never read into memory.
+    private func updateRequestIndex() async {
+        let store = requestIndexStore
+        if !requestIndexDiskLoaded {
+            let metadata = await Task.detached(priority: .utility) { store.loadMetadata() }.value
+            switch metadata {
+            case .ready(let value):
+                requestIndexMetadata = value
+                requestIndexDiskLoaded = true
+                requestIndexRevision &+= 1
+            case .needsRebuild:
+                requestIndexMetadata = nil
+                requestIndexDiskLoaded = true
+            case .unavailable:
+                requestIndexUnavailable = true
+                requestIndexRetryAfter = Date().addingTimeInterval(30)
+                return
+            }
+        }
+        for _ in 0..<3 {
+            while isScanning || isCycleRebuilding {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard !Task.isCancelled else { return }
+            }
+            guard !Task.isCancelled else { return }
+            guard let keys = await requestIndexFingerprints() else { continue }
+            let token = requestIndexInputToken
+            let changed = UsageApp.localApps.filter {
+                keys[$0] != requestIndexMetadata?.sourceKeys[$0] || requestIndexRetryableApps.contains($0)
+            }
+            if changed.isEmpty { requestIndexUnavailable = false; return }
+            let roots = roots
+            let accepted = cachedScanState
+            let legacy = usesLegacyCodexModels
+            let canonical = aggregator.snapshotLocal()
+            for app in changed {
+                guard token == requestIndexInputToken, !isScanning, !Task.isCancelled else { break }
+                let task = Task.detached(priority: .utility) {
+                    await Self.buildRequestIndexUpdate(app: app, roots: roots, accepted: accepted,
+                        legacyCodex: legacy, canonical: canonical.filter { $0.app == app })
+                }
+                requestIndexBuildTask = task
+                let update = await task.value
+                requestIndexBuildTask = nil
+                guard token == requestIndexInputToken, !isScanning, !Task.isCancelled else { break }
+                var sourceKeys = requestIndexMetadata?.sourceKeys ?? [:]
+                var incomplete = requestIndexMetadata?.incompleteApps ?? [.dsh, .cursor]
+                if update.replace || !update.retryable { sourceKeys[app] = keys[app] }
+                if update.incomplete { incomplete.insert(app) } else { incomplete.remove(app) }
+                let payload = UsageRequestIndexStore.Payload(version: 1, sourceKeys: sourceKeys,
+                    incompleteApps: incomplete, rows: update.rows)
+                // Include failed sources in metadata without replacing their prior rows.
+                do {
+                    let metadata = try await Task.detached(priority: .utility) {
+                        try store.saveChanges(payload, replacingApps: update.replace ? [app] : [])
+                        guard case .ready(let result) = store.loadMetadata() else {
+                            throw CocoaError(.fileReadUnknown)
+                        }
+                        return result
+                    }.value
+                    requestIndexMetadata = metadata
+                    if update.retryable { requestIndexRetryableApps.insert(app) }
+                    else { requestIndexRetryableApps.remove(app) }
+                    requestIndexRevision &+= 1
+                } catch {
+                    // Preserve the last published metadata and rows. A failed database
+                    // write must not become a successful empty result in the frontend.
+                    requestIndexRetryAfter = Date().addingTimeInterval(30)
+                    requestIndexDiskLoaded = false
+                    requestIndexUnavailable = true
+                    return
+                }
+            }
+            if token == requestIndexInputToken {
+                requestIndexUnavailable = false
+                if !requestIndexRetryableApps.isEmpty { requestIndexRetryAfter = Date().addingTimeInterval(30) }
+                return
+            }
+        }
+    }
+
+    private nonisolated static func buildRequestIndexUpdate(app: UsageApp, roots: UsageScanRoots,
+        accepted: ScanState?, legacyCodex: Bool, canonical: [UsageBucket]) async -> RequestIndexUpdate {
+        var entries: [UsageEntry] = []
+        var failed = false
+        var retryable = true
+        switch app {
+        case .claude:
+            let result = ClaudeJSONLScanner.scan(previous: [:], seenMessageIds: [], root: roots.claudeRoot,
+                conversationIndex: ConversationTitleIndex.ClaudeIndex(titles: [:], projects: [:]),
+                acceptedBoundary: accepted?.claude ?? [:])
+            entries = result.entries
+            failed = result.failedFileCount > 0 || result.hasDeferredMessages
+        case .codex:
+            var result = await CodexJSONLScanner.scan(previous: [:], seenTokenIds: [], roots: roots.codexRoots,
+                indexedTitles: [:], historicalBoundary: accepted?.codex ?? [:], priceHistorical: true)
+            if legacyCodex { result = Self.legacyCodexResult(result) }
+            entries = result.entries
+            failed = result.failedFileCount > 0
+        case .pi:
+            let result = PiJSONLScanner.scan(previous: [:], seenEntryIds: [], root: roots.piRoot,
+                acceptedBoundary: accepted?.pi ?? [:])
+            entries = result.entries
+            failed = result.failedFileCount > 0
+        case .opencode:
+            let result = OpencodeScanner.scan(previous: nil, databaseURL: roots.opencodeDatabaseURL)
+            entries = result.entries
+            failed = !result.isComplete
+            retryable = FileManager.default.fileExists(atPath: roots.opencodeDatabaseURL.path)
+        case .antigravity:
+            let result = AntigravityScanner.scan(previous: nil, roots: roots.antigravityRoots)
+            entries = result.entries
+            failed = !result.isComplete
+        case .kimi:
+            entries = accepted?.kimi.map { KimiSessionScanner.committedEntries(from: $0) } ?? []
+            failed = accepted?.kimi == nil
+            retryable = false
+        case .dsh, .cursor:
+            return RequestIndexUpdate(incomplete: true)
+        }
+        guard !Task.isCancelled, !failed else {
+            return RequestIndexUpdate(incomplete: true, retryable: retryable, replace: false)
+        }
+        // Validate at ingestion, never by restoring all persisted details for a query.
+        // A source ahead of accepted history leaves the previous SQLite rows intact.
+        struct Partition: Hashable { let model: String; let speed: UsageSpeed; let day: Date }
+        var remaining: [Partition: UsageBucket] = [:]
+        for bucket in canonical { remaining[Partition(model: bucket.model, speed: bucket.speed, day: bucket.day)] = bucket }
+        entries = entries.filter { remaining[Partition(model: $0.model, speed: $0.speed, day: $0.day)] != nil }
+        for entry in entries {
+            let key = Partition(model: entry.model, speed: entry.speed, day: entry.day)
+            guard var bucket = remaining[key], bucket.inputTokens >= entry.inputTokens,
+                  bucket.outputTokens >= entry.outputTokens, bucket.cacheReadTokens >= entry.cacheReadTokens,
+                  bucket.cacheCreationTokens >= entry.cacheCreationTokens, bucket.requestCount >= entry.requestCount else {
+                return RequestIndexUpdate(incomplete: true, retryable: true, replace: false)
+            }
+            bucket.inputTokens -= entry.inputTokens; bucket.outputTokens -= entry.outputTokens
+            bucket.cacheReadTokens -= entry.cacheReadTokens; bucket.cacheCreationTokens -= entry.cacheCreationTokens
+            bucket.requestCount -= entry.requestCount
+            remaining[key] = bucket
+        }
+        let rows = UsageRequestIndex.records(from: entries).map { record in
+            let e = record.entry
+            return UsageRequestIndexStore.Row(id: record.id, conversationHash: UsageRequestIndexStore.hash(e.conversationKey),
+                app: e.app, model: e.model, speed: e.speed, day: e.day, timestamp: e.timestamp,
+                input: e.inputTokens, output: e.outputTokens, cacheRead: e.cacheReadTokens,
+                cacheCreation: e.cacheCreationTokens, requests: e.requestCount, cost: e.costUSD,
+                costInput: e.costBreakdown?.input, costOutput: e.costBreakdown?.output,
+                costRead: e.costBreakdown?.cacheRead, costCreation: e.costBreakdown?.cacheCreation, timing: e.timing)
+        }
+        return RequestIndexUpdate(rows: rows)
+    }
+
+    isolated deinit {
+        requestIndexBuildTask?.cancel()
+        requestIndexFingerprintTask?.task.cancel()
+        requestIndexWarmTask?.cancel()
+    }
+
+    #if DEBUG
+    func waitForRequestIndexForTesting() async { await requestIndexWarmTask?.value }
+
+    func synchronizeRequestIndexForTesting() async {
+        await requestIndexWarmTask?.value
+        requestIndexRetryAfter = nil
+        scheduleRequestIndexWarm()
+        await requestIndexWarmTask?.value
+    }
+    #endif
 
     /// 统计页读取的完整 Cursor 自然日覆盖范围。只有身份匹配的独立远端缓存会进入此集合。
     var cursorUsageCoveredDayRanges: [CursorUsageDayRange] {
@@ -367,7 +705,9 @@ final class UsageService {
 
     /// 上一轮成功提交的 ScanState 常驻内存，避免每轮扫描都从磁盘重读重解码。
     /// 冷启动首轮才从快照恢复；快照没有可信进度时为 nil，此时不允许续扫。
-    private var cachedScanState: ScanState?
+    private var cachedScanState: ScanState? {
+        didSet { requestIndexScanRevision &+= 1 }
+    }
 
     var hasActiveOperationsForTermination: Bool {
         isScanning || isCycleRebuilding || isRefreshingPricingCatalog
@@ -507,6 +847,8 @@ final class UsageService {
         publishTotals()
         // 远端价格目录后台刷新：非阻塞，isDue 内部判断是否真的需要发请求，刷新结果由下次扫描自然拾取。
         PricingCatalogStore.shared.refreshIfNeeded()
+        requestIndexHistoryReady = true
+        scheduleRequestIndexWarm()
     }
 
     /// 只有从未建立新存储且没有新快照证据时，才允许旧格式迁移。
@@ -925,31 +1267,73 @@ final class UsageService {
 
     // MARK: - 常规扫描
 
+    /// Finish in-flight work safely, but discard automatic followups when paused.
+    /// Explicit refresh/recalculation continues to use the manual entry points.
+    func setAutomaticScanningEnabled(_ enabled: Bool) {
+        guard enabled != automaticScanningEnabled else { return }
+        automaticScanningEnabled = enabled
+        if enabled { UsageLogWatcher.shared.requestRescan() }
+        if !enabled, scanQueued, queuedScanIsAutomatic { scanQueued = false }
+    }
+
+    private func resumeQueuedScan() {
+        guard scanQueued else { return }
+        let automatic = queuedScanIsAutomatic
+        Task { await scanNow(automatically: automatic) }
+    }
+
     /// Scheduler 的周期扫描入口：日志目录自上次扫描以来没有变化时整轮跳过。
     /// 手动刷新（`refreshNow`）与强制重算（`forceRescan`）直接走 `scanNow` / 全量路径，
     /// 不受门控影响，用户点了就一定扫。
     func scanPeriodically() async {
-        guard !suspendedForTermination, !isPersistingForTermination else { return }
-        guard UsageLogWatcher.shared.shouldScan() else {
+        guard automaticScanningEnabled, !suspendedForTermination, !isPersistingForTermination else { return }
+        guard UsageLogWatcher.shared.shouldScan() || !pendingCycleRebuildReasons.isEmpty || hasPendingOrphanCycleRebuild else {
             AppLog.debug(.usage, "usage scan skipped; no log changes since last scan")
             return
         }
-        await scanNow()
+        await scanNow(automatically: true)
+        await rebuildCycleUsageIfNeeded()
+        if !pendingCycleRebuildReasons.isEmpty || hasPendingOrphanCycleRebuild {
+            await rebuildCycleUsageForRecentChanges()
+        }
     }
 
-    /// 由 Scheduler / 手动触发；防重入。
-    func scanNow() async {
-        guard !suspendedForTermination, !isPersistingForTermination else { return }
+    /// Automatic callers must identify themselves so pausing never blocks a manual sync.
+    func scanNow(automatically: Bool = false) async {
+        let handledManualScan = await scanUsage(automatically: automatically)
+        // While paused, no background task will repair changed quota windows. Complete
+        // those repairs as part of the explicit sync, after releasing the scan lock.
+        // A queued manual request is handled by the scan that actually consumes it.
+        guard handledManualScan, !automaticScanningEnabled else { return }
+        await rebuildCycleUsageIfNeeded(automatically: false)
+        if !pendingCycleRebuildReasons.isEmpty || hasPendingOrphanCycleRebuild {
+            await rebuildCycleUsageForRecentChanges(automatically: false)
+        }
+    }
+
+    /// Returns whether this invocation completed a manual scan, including queued requests.
+    private func scanUsage(automatically: Bool) async -> Bool {
+        guard !automatically || automaticScanningEnabled else { return false }
+        guard !suspendedForTermination, !isPersistingForTermination else { return false }
         if isScanning {
+            queuedScanIsAutomatic = scanQueued ? queuedScanIsAutomatic && automatically : automatically
             scanQueued = true
-            return
+            return false
         }
         isScanning = true
         defer { isScanning = false }
+        #if DEBUG
+        await scanStartedForIndexTesting?()
+        #endif
 
-        if storeWriteDisabled { return }
+        if storeWriteDisabled { return false }
+        var handledManualScan = false
+        var currentScanIsAutomatic = automatically
         repeat {
+            guard !currentScanIsAutomatic || automaticScanningEnabled else { break }
+            handledManualScan = handledManualScan || !currentScanIsAutomatic
             scanQueued = false
+            defer { currentScanIsAutomatic = queuedScanIsAutomatic }
             // 借用量扫描的既有节奏当远端价格目录 24h 到期检查的心跳，不新开定时器；非阻塞。
             PricingCatalogStore.shared.refreshIfNeeded()
             PricingCatalogStore.shared.commitPending()
@@ -963,9 +1347,12 @@ final class UsageService {
             }
             if await runScan(prev: cacheResult.state, allowDeferredWrite: true) {
                 requiresFullRebuild = false
-                await rebuildAutomaticallyIfNeeded()
+                if !currentScanIsAutomatic || automaticScanningEnabled {
+                    await rebuildAutomaticallyIfNeeded()
+                }
             }
         } while scanQueued && !suspendedForTermination
+        return handledManualScan
     }
 
     /// 受限恢复：历史可用但进度不可信。
@@ -1016,11 +1403,16 @@ final class UsageService {
     /// 重建期间新到的请求留给下一轮。
     func requestCycleUsageRebuild(reasons: [String]) {
         guard !reasons.isEmpty, !suspendedForTermination, !isPersistingForTermination else { return }
+        // One deferred reason is enough while paused; quota polling may keep changing cycles.
+        guard automaticScanningEnabled else {
+            pendingCycleRebuildReasons = ["cycle changes while automatic scanning paused"]
+            return
+        }
         pendingCycleRebuildReasons.append(contentsOf: reasons)
         guard cycleRebuildRequestTask == nil else { return }
         cycleRebuildRequestTask = Task { [weak self] in
             guard let self else { return }
-            while !self.pendingCycleRebuildReasons.isEmpty {
+            while self.automaticScanningEnabled && !self.pendingCycleRebuildReasons.isEmpty {
                 let batch = self.pendingCycleRebuildReasons
                 self.pendingCycleRebuildReasons = []
                 await self.rebuildCycleUsageForRecentChanges(reasons: batch)
@@ -1034,13 +1426,21 @@ final class UsageService {
     /// 触发频率高（5h / weekly 滚动，每天数次），必须保持轻量；
     /// 全量重建只在冷启动且 cycle rollup 无效时发生一次（见 `rebuildCycleUsageIfNeeded`）。
     /// `reasons` 只用于日志统计本轮合并了多少次触发。
-    func rebuildCycleUsageForRecentChanges(reasons: [String] = []) async {
+    func rebuildCycleUsageForRecentChanges(reasons: [String] = [], automatically: Bool = true) async {
         guard !suspendedForTermination, !isPersistingForTermination else { return }
+        guard !automatically || automaticScanningEnabled else {
+            requestCycleUsageRebuild(reasons: reasons)
+            return
+        }
         guard let appState, !appState.quotaCycles.records.isEmpty else { return }
         let started = Date()
         while isScanning || isCycleRebuilding {
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !suspendedForTermination, !isPersistingForTermination else { return }
+            guard !automatically || automaticScanningEnabled else {
+                requestCycleUsageRebuild(reasons: reasons)
+                return
+            }
         }
         let waitEnded = Date()
 
@@ -1050,9 +1450,7 @@ final class UsageService {
             isCycleRebuilding = false
             isScanning = false
             scanProgress = nil
-            if scanQueued {
-                Task { await scanNow() }
-            }
+            resumeQueuedScan()
         }
         // 先提交上次常规扫描之后新追加的日志，推进主 watermark。
         // 否则它们会先被下面的窗口重扫灌入，再被下一次常规增量扫描重复计入。
@@ -1487,8 +1885,8 @@ final class UsageService {
         AppLog.info(.usage, "cycle usage \(tag) \(status) commit=\(elapsed)")
     }
 
-    func rebuildCycleUsageIfNeeded() async {
-        guard !suspendedForTermination, !isPersistingForTermination else { return }
+    func rebuildCycleUsageIfNeeded(automatically: Bool = true) async {
+        guard (!automatically || automaticScanningEnabled), !suspendedForTermination, !isPersistingForTermination else { return }
         guard let appState, !appState.quotaCycles.records.isEmpty else { return }
         guard !storeWriteDisabled, historyRecoveryState == .complete else { return }
         guard !Self.pendingInitialCycleRebuildApps(
@@ -1497,7 +1895,7 @@ final class UsageService {
         ).isEmpty else { return }
         while isScanning || isCycleRebuilding {
             try? await Task.sleep(nanoseconds: 150_000_000)
-            guard !suspendedForTermination, !isPersistingForTermination else { return }
+            guard (!automatically || automaticScanningEnabled), !suspendedForTermination, !isPersistingForTermination else { return }
             if Self.pendingInitialCycleRebuildApps(
                 cycles: appState.quotaCycles.records,
                 completedApps: cycleInitialRebuildCompletedApps
@@ -1510,9 +1908,7 @@ final class UsageService {
             isCycleRebuilding = false
             isScanning = false
             scanProgress = nil
-            if scanQueued {
-                Task { await scanNow() }
-            }
+            resumeQueuedScan()
         }
         guard await drainPendingUsageBeforeCycleRebuild() else { return }
         let progress: ScanProgressCallback? = { [weak self] progress in
@@ -1654,7 +2050,7 @@ final class UsageService {
         defer {
             isScanning = false
             scanProgress = nil
-            if scanQueued { Task { await scanNow() } }
+            resumeQueuedScan()
         }
         lastRebuildOutcome = nil
         PricingCatalogStore.shared.refreshIfNeeded()
@@ -1778,7 +2174,7 @@ final class UsageService {
             )
             guard let self else { return }
             self.isRefreshingMissingPricing = false
-            if refreshed { await self.scanNow() }
+            if refreshed { await self.scanNow(automatically: true) }
         }
     }
 
@@ -2002,6 +2398,7 @@ final class UsageService {
                 previous: [:],
                 seenTokenIds: [],
                 knownIDs: codexKnown,
+                knownOwner: { ledgerSnapshot.conversationKey(containing: $0, app: .codex) },
                 roots: codexRoots,
                 indexedTitles: codexTitles,
                 onProgress: progress
@@ -2324,6 +2721,7 @@ final class UsageService {
                 previous: prev.codex,
                 seenTokenIds: prev.codexSeenTokenIds,
                 knownIDs: codexKnown,
+                knownOwner: { ledgerSnapshot.conversationKey(containing: $0, app: .codex) },
                 roots: codexRoots,
                 indexedTitles: codexTitles,
                 onProgress: progress
@@ -2628,6 +3026,7 @@ final class UsageService {
             lastError = nil
         }
         publishTotals()
+        scheduleRequestIndexWarm()
 
         let elapsed = String(format: "%.2fs", Date().timeIntervalSince(started))
         AppLog.info(.usage, """
@@ -2785,7 +3184,8 @@ final class UsageService {
         let codexRoots = roots.codexRoots
         let evidence = await Task.detached(priority: .utility) {
             await CodexJSONLScanner.scan(previous: [:], roots: codexRoots, indexedTitles: [:],
-                                         historicalBoundary: baseline.scanState.codex)
+                                         historicalBoundary: baseline.scanState.codex,
+                                         includeCompactionUsage: false)
         }.value
         // 读取失败 / 根目录不可访问 / 扫描中被移走可能下次就恢复，不能当成确定结果提交。
         // 本进程不再重试；在迁移提交前，新调用继续按旧身份入账（见 usesLegacyCodexModels），

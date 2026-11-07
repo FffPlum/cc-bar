@@ -40,6 +40,9 @@ struct APIKeyEditor: View {
                         try appState.authorizations.saveAccount(supplier: supplier, name: name,
                                                                endpoint: endpoint, key: key)
                         dismiss()
+                    } catch ConfigurationError.invalidProvider {
+                        self.error = tr("API key wasn't saved. Check the name, API URL, and key.",
+                                        "API Key 未保存，请检查名称、API 地址和 Key。")
                     } catch { self.error = error.localizedDescription }
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             }

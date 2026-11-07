@@ -667,6 +667,187 @@ final class ScannerIncrementalTests: XCTestCase {
         XCTAssertNotNil(filtered.newState[newer.path])
     }
 
+    // MARK: - Codex 上下文压缩用量
+
+    private func compactionHeader(_ id: String) -> [String] {
+        [
+            #"{"timestamp":"2026-11-06T00:00:00Z","type":"session_meta","payload":{"id":"\#(id)"}}"#,
+            #"{"timestamp":"2026-11-06T00:00:00Z","type":"turn_context","payload":{"model":"gpt-6-astra"}}"#,
+        ]
+    }
+
+    private func compactionPayload(_ responseID: String) -> String {
+        #"{"response_id":"\#(responseID)","usage":{"input_tokens":245017,"cached_input_tokens":244864,"cache_write_input_tokens":0,"output_tokens":3544,"total_tokens":248561},"thread_token_usage":{"input_tokens":10134828,"cached_input_tokens":9500000,"output_tokens":40000,"total_tokens":10174828}}"#
+    }
+
+    private func compactionRecord(_ responseID: String, at timestamp: String = "2026-11-06T00:00:01Z") -> String {
+        #"{"timestamp":"\#(timestamp)","type":"token_usage_record","payload":\#(compactionPayload(responseID))}"#
+    }
+
+    private func compacted(_ responseID: String, at timestamp: String = "2026-11-06T00:00:02Z", embedded: String? = nil) -> String {
+        let embeddedField = embedded.map { ",\"latest_token_usage_record\":\(compactionPayload($0))" } ?? ""
+        return #"{"timestamp":"\#(timestamp)","type":"compacted","payload":{"compaction_response_id":"\#(responseID)"\#(embeddedField)}}"#
+    }
+
+    private func compactionTokenCount(output: Int = 3544, total: Int = 9889811) -> String {
+        #"{"timestamp":"2026-11-06T00:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":\#(total),"cached_input_tokens":9000000,"output_tokens":40000,"total_tokens":\#(total + 40000)},"last_token_usage":{"input_tokens":245017,"cached_input_tokens":244864,"output_tokens":\#(output),"total_tokens":\#(245017 + output)}}}}"#
+    }
+
+    func testCodexCountsConfirmedCompactionWithoutTokenCount() async throws {
+        let (sessions, _) = try makeCodexRoots()
+        let id = Self.forkParentID
+        let file = sessions.appendingPathComponent("rollout-\(id).jsonl")
+        try writeLines(compactionHeader(id) + [
+            compactionRecord("resp_compact"), compacted("resp_compact", embedded: "resp_compact"),
+            #"{"timestamp":"2026-11-06T00:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1},"last_token_usage":{"input_tokens":0,"output_tokens":0}}}}"#,
+        ], to: file)
+
+        let result = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+        let entry = try XCTUnwrap(result.entries.first)
+        XCTAssertEqual(result.entries.count, 1)
+        XCTAssertEqual(entry.inputTokens, 153)
+        XCTAssertEqual(entry.cacheReadTokens, 244864)
+        XCTAssertEqual(entry.outputTokens, 3544)
+        XCTAssertEqual(entry.costUSD, Decimal(string: "0.423594"))
+        XCTAssertEqual(entry.timestamp, JSONLTimestamp.parse("2026-11-06T00:00:01Z"))
+        XCTAssertNil(entry.timing, "压缩不作为普通回答的生成速度样本")
+    }
+
+    func testCodexCompactionPendingSurvivesRestartAndMidnight() async throws {
+        let (sessions, _) = try makeCodexRoots()
+        let id = Self.forkParentID
+        let file = sessions.appendingPathComponent("rollout-\(id).jsonl")
+        let midnight = Calendar.current.startOfDay(for: Date(timeIntervalSince1970: 1_793_923_200))
+        let originalTime = midnight.addingTimeInterval(-1)
+        let formatter = ISO8601DateFormatter()
+        try writeLines(compactionHeader(id) + [compactionRecord("resp_split", at: formatter.string(from: originalTime))], to: file)
+        let first = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+        XCTAssertTrue(first.entries.isEmpty, "没有 compacted 确认的独立记录不能提前计费")
+        let restored = try JSONDecoder().decode([String: ScanFileState].self, from: JSONEncoder().encode(first.newState))
+        try appendLines([
+            #"{"type":"turn_context","payload":{"model":"unknown-model"}}"#,
+            compacted("resp_split", at: formatter.string(from: midnight.addingTimeInterval(1))),
+        ], to: file)
+
+        let second = await CodexJSONLScanner.scan(previous: restored, roots: [sessions], indexedTitles: [:])
+        let entry = try XCTUnwrap(second.entries.first)
+        XCTAssertEqual(second.entries.count, 1)
+        XCTAssertEqual(entry.timestamp, originalTime)
+        XCTAssertEqual(entry.day, Calendar.current.startOfDay(for: originalTime))
+        XCTAssertEqual(entry.model, "gpt-6-astra", "保留原用量记录的模型，不用后来的设置")
+        XCTAssertEqual(entry.costUSD, Decimal(string: "0.423594"))
+        let replay = await CodexJSONLScanner.scan(previous: [:], knownIDs: Set(second.ledger.values.flatMap { $0 }),
+            roots: [sessions], indexedTitles: [:])
+        XCTAssertTrue(replay.entries.isEmpty, "重读由消息账本保证幂等")
+    }
+
+    func testCodexCompactionRequiresMatchingResponseAndSupportsEmbeddedRecord() async throws {
+        let (sessions, _) = try makeCodexRoots()
+        let file = sessions.appendingPathComponent("rollout-\(Self.forkParentID).jsonl")
+        try writeLines(compactionHeader(Self.forkParentID) + [
+            compactionRecord("resp_unconfirmed"),
+            compacted("resp_wrong", embedded: "resp_other"),
+            compacted("resp_embedded", embedded: "resp_embedded"),
+        ], to: file)
+        let result = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+        XCTAssertEqual(result.entries.count, 1, "只计 response ID 明确匹配的 embedded 记录")
+        XCTAssertEqual(result.entries.first?.costUSD, Decimal(string: "0.423594"))
+    }
+
+    func testCodexCompactionResponseDedupesForkAndPaginatedReplay() async throws {
+        let (sessions, _) = try makeCodexRoots()
+        try writeLines(compactionHeader(Self.forkParentID) + [
+            compactionRecord("resp_parent"), compacted("resp_parent"),
+        ], to: sessions.appendingPathComponent("rollout-\(Self.forkParentID).jsonl"))
+        try writeLines(compactionHeader(Self.forkChildID) + compactionHeader(Self.forkParentID) + [
+            compactionRecord("resp_parent"), compacted("resp_parent"),
+            compactionRecord("resp_child"), compacted("resp_child"),
+        ], to: sessions.appendingPathComponent("rollout-\(Self.forkChildID).jsonl"))
+        try writeLines([
+            #"{"type":"session_meta","payload":{"id":"\#(Self.forkParentID)","history_base":{"thread_id":"\#(Self.forkParentID)"}}}"#,
+        ] + compactionHeader(Self.forkParentID) + [
+            compactionRecord("resp_parent"), compacted("resp_parent"),
+        ], to: sessions.appendingPathComponent("rollout-\(Self.forkFreshID).jsonl"))
+
+        let result = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+        XCTAssertEqual(result.entries.count, 2)
+        XCTAssertEqual(result.entries.filter { $0.conversationKey == "codex:\(Self.forkParentID)" }.count, 1)
+        XCTAssertEqual(result.entries.filter { $0.conversationKey == "codex:\(Self.forkChildID)" }.count, 1,
+            "不同 response 即使 token 数及 thread 累计完全相同，也不能误删")
+    }
+
+    func testCodexCompactionAndMatchingTokenCountOnlyCountOnce() async throws {
+        let (sessions, _) = try makeCodexRoots()
+        let file = sessions.appendingPathComponent("rollout-\(Self.forkParentID).jsonl")
+        for compactFirst in [false, true] {
+            let representations = compactFirst
+                ? [compacted("resp_pair"), compactionTokenCount()]
+                : [compactionTokenCount(), compacted("resp_pair")]
+            try writeLines(compactionHeader(Self.forkParentID) + [compactionRecord("resp_pair")] + representations, to: file)
+            let result = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+            XCTAssertEqual(result.entries.count, 1)
+            XCTAssertEqual(result.entries.first?.costUSD, Decimal(string: "0.423594"))
+        }
+        try writeLines(compactionHeader(Self.forkParentID) + [
+            compactionRecord("resp_different"), compacted("resp_different"), compactionTokenCount(output: 3550),
+        ], to: file)
+        let different = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+        XCTAssertEqual(different.entries.count, 2, "累计值不能代替完整 token 比对，真实的另一条请求必须保留")
+    }
+
+    func testCodexCompactionRegistersTokenCountAliasWithOriginalOwner() async throws {
+        let (sessions, _) = try makeCodexRoots()
+        let parentKey = "codex:\(Self.forkParentID)"
+        let parent = sessions.appendingPathComponent("rollout-\(Self.forkParentID).jsonl")
+        try writeLines(compactionHeader(Self.forkParentID) + [compactionRecord("resp_alias"), compacted("resp_alias")], to: parent)
+        let first = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+        let known = Set(first.ledger.values.flatMap { $0 })
+        // 响应已在原会话计入，新增的 token_count 表示位于另一份重放文件。
+        try writeLines(compactionHeader(Self.forkChildID) + compactionHeader(Self.forkParentID) + [
+            compactionRecord("resp_alias"), compactionTokenCount(),
+        ], to: sessions.appendingPathComponent("rollout-\(Self.forkChildID).jsonl"))
+        let second = await CodexJSONLScanner.scan(previous: first.newState, knownIDs: known,
+            knownOwner: { known.contains($0) ? parentKey : nil }, roots: [sessions], indexedTitles: [:])
+        XCTAssertTrue(second.entries.isEmpty)
+        XCTAssertFalse(second.ledger[parentKey, default: []].isEmpty, "新增累计别名归原已入账对话")
+        XCTAssertNil(second.ledger["codex:\(Self.forkChildID)"])
+        let allKnown = known.union(second.ledger.values.flatMap { $0 })
+        try writeLines(compactionHeader(Self.forkParentID) + [compactionTokenCount()],
+            to: sessions.appendingPathComponent("rollout-\(Self.forkFreshID).jsonl"))
+        let third = await CodexJSONLScanner.scan(previous: second.newState, knownIDs: allKnown,
+            roots: [sessions], indexedTitles: [:])
+        XCTAssertTrue(third.entries.isEmpty, "仅有 token_count 的后续重放也必须幂等")
+    }
+
+    func testCodexCompactionZeroTokenCountClosesResponsePairing() async throws {
+        let (sessions, _) = try makeCodexRoots()
+        let file = sessions.appendingPathComponent("rollout-\(Self.forkParentID).jsonl")
+        try writeLines(compactionHeader(Self.forkParentID) + [
+            compactionRecord("resp_finished"), compacted("resp_finished"),
+            #"{"timestamp":"2026-11-06T00:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1},"last_token_usage":{"input_tokens":0,"output_tokens":0}}}}"#,
+        ], to: file)
+        let first = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:])
+        try appendLines([compactionTokenCount()], to: file)
+        let second = await CodexJSONLScanner.scan(previous: first.newState, seenTokenIds: first.newSeenIds,
+            roots: [sessions], indexedTitles: [:])
+        XCTAssertEqual(second.entries.count, 1, "下一条独立请求即使 token 恰好相同，也不能复用已结束的压缩 response")
+    }
+
+    func testCodexLegacyIdentityEvidenceCanExcludeCompaction() async throws {
+        let (sessions, _) = try makeCodexRoots()
+        let file = sessions.appendingPathComponent("rollout-\(Self.forkParentID).jsonl")
+        try writeLines(compactionHeader(Self.forkParentID) + [compactionRecord("resp_old"), compacted("resp_old")], to: file)
+        let legacy = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:], includeCompactionUsage: false)
+        XCTAssertTrue(legacy.entries.isEmpty)
+        let evidence = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:],
+            historicalBoundary: legacy.newState, includeCompactionUsage: false)
+        XCTAssertTrue(evidence.entries.isEmpty)
+        XCTAssertEqual(evidence.failedFileCount, 0)
+        let current = await CodexJSONLScanner.scan(previous: [:], roots: [sessions], indexedTitles: [:],
+            historicalBoundary: legacy.newState, priceHistorical: true)
+        XCTAssertEqual(current.entries.count, 1)
+    }
+
     // MARK: - 首字延迟与输出速度
 
     private func writeLines(_ lines: [String], to url: URL) throws {

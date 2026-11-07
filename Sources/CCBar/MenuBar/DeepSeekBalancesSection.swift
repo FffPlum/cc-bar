@@ -6,7 +6,7 @@ struct DeepSeekBalancesSection: View {
     var body: some View {
         VStack(spacing: 0) {
             AccountVendorHeader(title: "DeepSeek", logoName: "deepseek", fallback: "D", tint: .blue)
-            ForEach(appState.deepSeekQuotaAccounts.filter(\.visibleInPopover)) { account in
+            ForEach(appState.deepSeekQuotaAccounts.filter(\.showsInFloatingSurfaces)) { account in
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Text(appState.deepSeekDisplayName(account)).lineLimit(1)
