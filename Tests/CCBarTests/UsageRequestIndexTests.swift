@@ -33,6 +33,36 @@ final class UsageRequestIndexTests: XCTestCase {
         XCTAssertEqual(first.reduce(0) { $0 + $1.entry.requestCount }, 3)
         XCTAssertEqual(first.filter { $0.entry.requestCount == 0 }.count, 1)
     }
+
+    func testRequestIDsPreserveCanonicalFormat() throws {
+        let entry = UsageEntry(app: .codex, conversationKey: "codex:test", model: "model", speed: .standard,
+                               day: Date(timeIntervalSince1970: 0), timestamp: Date(timeIntervalSince1970: 3600),
+                               inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheCreationTokens: 0,
+                               costUSD: nil, costBreakdown: nil)
+        let cost = try XCTUnwrap(Decimal(string: "12.3400", locale: Locale(identifier: "en_US_POSIX")))
+        let timed = UsageEntry(app: .claude, conversationKey: "会话:一", model: "provider/模型:fast", speed: .fast,
+                               day: Date(timeIntervalSince1970: 0), timestamp: Date(timeIntervalSince1970: 1_800_000_000.25),
+                               inputTokens: 1200, outputTokens: 34, cacheReadTokens: 560, cacheCreationTokens: 78,
+                               requestCount: 0, costUSD: cost, costBreakdown: nil,
+                               timing: RequestTiming(firstTokenMs: 42, generationMs: 345))
+        var estimated = timed
+        estimated.timing = RequestTiming(firstTokenMs: nil, generationMs: 345, isEstimated: true)
+        var sameIDFields = entry
+        sameIDFields.day = Date(timeIntervalSince1970: 86400)
+        var excluded = entry
+        excluded.requestCount = -1
+
+        let records = UsageRequestIndex.records(from: [timed, sameIDFields, excluded, estimated, entry])
+        // Pin persisted IDs, including UTF-8 byte lengths, optional fields and duplicate ordinals.
+        XCTAssertEqual(records.map(\.id), [
+            "1acb3441e7eaac9327d01692b40b38e7b13095c31a167c7c61e90bb51174fda1-0",
+            "1acb3441e7eaac9327d01692b40b38e7b13095c31a167c7c61e90bb51174fda1-1",
+            "4fd9d45dedd07175cbd3f361c3d2393008015322aa02811c35510059dbb19b33-0",
+            "67b8d2f70c6b4934692a9cdf23a6dcfbea562cf41d613756d75d08fb0a121919-0",
+        ])
+        XCTAssertEqual(records.filter { $0.entry.requestCount == 0 }.count, 2)
+    }
+
     @MainActor
     func testReadOnlyIndexLoadsAndRefreshesFromIsolatedLogs() async throws {
         let env = try UsageTestEnvironment(name: "request-index")
