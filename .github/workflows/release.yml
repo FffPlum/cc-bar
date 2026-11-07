@@ -1,126 +1,156 @@
 name: Release
 
-# 推送 v 开头的 tag 后构建、签名更新源，并发布 DMG / ZIP / appcast / 更新日志。
 on:
   push:
     tags: ['v*']
 
 permissions:
-  contents: write # 创建 Release / 上传产物需要写权限
+  contents: read
+
+# Serialize publishing so two versions cannot race to replace the latest feed.
+concurrency:
+  group: ccbar-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  release:
-    # 与 Release Build 保持一致，避免依赖 ARM hosted runner 容量。
-    runs-on: macos-15-intel
-    steps:
-      - uses: actions/checkout@v4
+  validate:
+    name: Validate tagged source
+    uses: ./.github/workflows/build.yml
+    # No signing secrets are passed into the reusable validation workflow.
 
-      - name: 校验更新签名配置
-        shell: bash
+  package:
+    name: Build and sign arm64 release
+    needs: validate
+    runs-on: macos-15-intel
+    timeout-minutes: 40
+    env:
+      NODE_VERSION: '22.23.2'
+      XCODE_VERSION: '26.3'
+      TAG: ${{ github.ref_name }}
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Validate version, notes and main ancestry
+        run: |
+          python3 scripts/validate-release.py --tag "$TAG"
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+      - name: Validate signing configuration without exposing keys
         env:
           SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
           SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
-        run: |
-          set -euo pipefail
-          if [[ -z "$SPARKLE_PUBLIC_ED_KEY" || -z "$SPARKLE_PRIVATE_ED_KEY" ]]; then
-            echo "请先设置 repository variable SPARKLE_PUBLIC_ED_KEY 和 secret SPARKLE_PRIVATE_ED_KEY。"
-            echo "配置方式见 docs/打包发布.md；本次停止发布，避免分发无法验证更新的 App。"
-            exit 1
-          fi
-
-      - name: 校验发布说明
-        shell: bash
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          notes_path="release-notes/${TAG}.md"
-          if [[ ! -s "$notes_path" ]] || ! grep -q '[^[:space:]]' "$notes_path"; then
-            echo "缺少 ${notes_path}；请在创建发布 tag 前补充面向用户的更新说明。" >&2
-            exit 1
-          fi
-
-      - name: 安装 Node.js
-        uses: actions/setup-node@v4
+        run: python3 scripts/validate-release.py --tag "$TAG" --signing
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: |
-            packages/host-api/package-lock.json
-            packages/interface/package-lock.json
-
-      - name: 安装前端锁定依赖
+          node-version: ${{ env.NODE_VERSION }}
+          # Release jobs do not restore caches produced by branch or PR code.
+          package-manager-cache: false
+      - name: Select pinned Xcode
+        run: |
+          sudo xcode-select --switch "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          xcodebuild -version
+      - name: Install locked dependencies
         run: |
           npm --prefix packages/host-api ci
           npm --prefix packages/interface ci
-
-      - name: 选择最新 Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: 构建并打包(ad-hoc 签名,无需证书)
+      - name: Package with the repository entry point
         env:
           SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          CCBAR_SIGN_IDENTITY: '-'
           CCBAR_BUILD_ARCH: arm64
-        run: ./scripts/build.sh
-
-      - name: 签名更新包、更新日志和 appcast
-        shell: bash
+        run: |
+          set -o pipefail
+          ./scripts/build.sh 2>&1 | tee "$RUNNER_TEMP/release-build.log"
+      - name: Sign and verify the final update assets
         env:
-          TAG: ${{ github.ref_name }}
           SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
           SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
         run: |
-          set -euo pipefail
-          # SPM 的预编译 artifact 内含官方签名工具，与 App 锁定的 Sparkle 版本相同。
-          sparkle_sign_update="build/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"
-          if [[ ! -x "$sparkle_sign_update" ]]; then
-            echo "构建目录中找不到 Sparkle sign_update；请检查 SPM artifact。"
-            exit 1
-          fi
           python3 scripts/generate-update-feed.py \
             --tag "$TAG" \
             --repository "$GITHUB_REPOSITORY" \
             --app build/Build/Products/Release/CCBar.app \
             --dist dist \
-            --sign-update "$sparkle_sign_update"
-
-      - name: 生成 Release 正文
-        shell: bash
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          # 本版说明在前，近期新功能在后；GitHub 会合并连续空行，用 <br> 多留一行空白。
-          highlights="release-notes/highlights.md"
-          {
-            cat "release-notes/${TAG}.md"
-            if [[ -f "$highlights" ]] && grep -q '[^[:space:]]' "$highlights"; then
-              printf '\n\n<br>\n\n'
-              cat "$highlights"
-            fi
-          } > dist/release-body.md
-
-      - name: 上传到 GitHub Release
-        uses: softprops/action-gh-release@v2
+            --sign-update build/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update
+      - name: Save complete release assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          # 不设 name:Release 标题沿用默认的 tag 名(如 v1.0.40)。
-          body_path: dist/release-body.md
-          # 先将产物上传到 draft，全部成功后才使 latest/appcast 对用户可见。
-          draft: true
-          fail_on_unmatched_files: true
-          files: |
+          # Keep this name across attempts so "re-run failed jobs" can reuse a
+          # successful package job; re-running every job replaces only this run.
+          name: signed-release-${{ github.run_id }}
+          overwrite: true
+          path: |
             dist/CCBar.dmg
             dist/CCBar.app.zip
-            dist/version.json
             dist/appcast.xml
             dist/release-notes.md
-          generate_release_notes: false
+            dist/version.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - name: Preserve packaging failure log
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-build-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
-      - name: 发布已完整上传的 Release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+  publish:
+    name: Publish complete draft
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      # Consume only this run's signed assets; no repository code runs with write access.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-release-${{ github.run_id }}
+          path: dist
+      - name: Create or resume a draft release
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft > "$RUNNER_TEMP/existing-release.json"; then
+            if [[ "$(jq -r '.isDraft' "$RUNNER_TEMP/existing-release.json")" != true ]]; then
+              echo 'This version is already published; published assets are never replaced.' >&2
+              exit 1
+            fi
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" --notes-file dist/release-notes.md
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --draft --title "$TAG" --notes-file dist/release-notes.md
+          fi
+      - name: Upload all five assets to the draft
+        run: |
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            dist/CCBar.dmg dist/CCBar.app.zip dist/appcast.xml \
+            dist/release-notes.md dist/version.json
+      - name: Verify uploaded assets before making the release visible
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          release = json.loads((Path(os.environ['RUNNER_TEMP']) / 'release.json').read_text())
+          expected = {'CCBar.dmg', 'CCBar.app.zip', 'appcast.xml', 'release-notes.md', 'version.json'}
+          assets = release['assets']
+          assert release['draft'] and release['tag_name'] == os.environ['TAG'], 'Release is not the expected draft'
+          assert len(assets) == len(expected) and {a['name'] for a in assets} == expected, 'Release asset set is incomplete'
+          for asset in assets:
+              size = (Path('dist') / asset['name']).stat().st_size
+              assert size > 0 and asset['state'] == 'uploaded' and asset['size'] == size, 'Release asset upload is incomplete'
+          PY
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
