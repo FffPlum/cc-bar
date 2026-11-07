@@ -22,7 +22,12 @@ import {
 import { useHost } from "@/host/host-context";
 import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { dashboardAreaPaths } from "./dashboard-area-paths";
+import {
+  DashboardAreaChart,
+  dashboardAreaServices,
+  dashboardAreaValue,
+} from "./dashboard-area-chart";
+import { cacheRateAxisMinimum } from "./cache-rate-axis";
 
 export interface DashboardChartData {
   samples: (DashboardSample & { highlighted?: boolean })[];
@@ -58,10 +63,29 @@ export function DashboardChart({
   const t = useTranslation();
   const isCacheHitRate = metric === "cacheHitRate";
   const isArea = settings.appearance.statsChartType === "area";
+  const independentRates = isCacheHitRate && !service;
+  const cacheRateMinimum = independentRates
+    ? cacheRateAxisMinimum(data.samples)
+    : 0;
+  const percent = (value: number) =>
+    new Intl.NumberFormat(bootstrap.resolvedLanguage, {
+      style: "percent",
+      maximumFractionDigits: 1,
+    }).format(value);
   const valueLabel = (sample: DashboardSample | DashboardSampleSegment) =>
     metric === "tokens"
       ? formatTokensCompact(sample.totals.totalTokens, 2)
-      : sample.label;
+      : isCacheHitRate && sample.totals.inputWithCacheTokens <= 0
+        ? "—"
+        : independentRates && "service" in sample
+          ? percent(sample.totals.cacheHitRate)
+          : sample.label;
+  const axisTicks = independentRates
+    ? [0, 0.5, 1].map((position) => ({
+        position,
+        label: percent(cacheRateMinimum + position * (1 - cacheRateMinimum)),
+      }))
+    : data.axisTicks;
   if (
     data.resolvedRange.granularity === "hour" &&
     data.coverage?.precision === "day"
@@ -94,8 +118,19 @@ export function DashboardChart({
   const colorFor = (service: (typeof services)[number]) =>
     brandColor(service, settings, bootstrap.appearance === "dark");
   const aggregateColor = service ? colorFor(service) : "var(--foreground)";
-  const areaBands =
-    isArea && !empty ? dashboardAreaPaths(samples, services, metric) : [];
+  const areaServices = dashboardAreaServices(
+    samples,
+    services,
+    metric,
+    independentRates,
+  );
+  const orderedSegments = (sample: DashboardSample) =>
+    services.flatMap((app) => {
+      const segment = sample.segments.find((item) => item.service === app);
+      return segment ? [segment] : [];
+    });
+  const segmentLabel = (segment: DashboardSampleSegment) =>
+    `${serviceDisplayName(segment.service)}: ${valueLabel(segment)}${isCacheHitRate ? "" : `, ${(segment.share * 100).toFixed(1)}%`}`;
   const indices = new Set(
     samples
       .map((_, i) => i)
@@ -131,7 +166,7 @@ export function DashboardChart({
             </>
           )}
         </h2>
-        {!isCacheHitRate && (
+        {(!isCacheHitRate || independentRates) && (
           <div
             aria-label={t("Applications", "应用")}
             className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
@@ -159,11 +194,11 @@ export function DashboardChart({
             aria-hidden="true"
             className="invisible flex w-max flex-col"
           >
-            {data.axisTicks.map((tick) => (
+            {axisTicks.map((tick) => (
               <span key={tick.position}>{tick.label}</span>
             ))}
           </div>
-          {data.axisTicks.map((tick) => (
+          {axisTicks.map((tick) => (
             <span
               data-slot="dashboard-axis-tick"
               key={tick.position}
@@ -179,97 +214,147 @@ export function DashboardChart({
             <div className="pointer-events-none absolute inset-x-0 top-0 border-t" />
             <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t" />
             {isArea && (
-              <svg
-                data-slot="dashboard-area"
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
-              >
-                {areaBands.map((band) => {
-                  const color = band.service
-                    ? colorFor(band.service)
-                    : aggregateColor;
-                  return (
-                    <g
-                      key={band.service ?? "total"}
-                      data-service={band.service ?? undefined}
-                    >
-                      <path d={band.fill} fill={color} fillOpacity={0.55} />
-                      <path
-                        d={band.line}
-                        fill="none"
-                        stroke={color}
-                        strokeWidth={1.5}
-                        vectorEffect="non-scaling-stroke"
-                      />
-                    </g>
-                  );
-                })}
-              </svg>
+              <DashboardAreaChart
+                samples={empty ? [] : samples}
+                services={services}
+                metric={metric}
+                independentRates={independentRates}
+                cacheRateMinimum={cacheRateMinimum}
+                colorFor={colorFor}
+                aggregateColor={aggregateColor}
+              />
             )}
             {(empty ? [] : samples).map((s) => (
               <ChartDataTooltipTrigger
                 key={s.key}
                 handle={tooltipHandle}
                 payload={s.key}
-                render={
+                render={(props, { open }) => (
                   <button
+                    {...props}
                     type="button"
                     className="cc-chart-column-guide group relative z-0 flex h-full min-w-0 flex-1 items-end justify-center"
                     aria-label={`${fmt.format(new Date(s.start))}: ${valueLabel(s)}; ${
                       isCacheHitRate
-                        ? `${t("Cache read tokens", "命中 Tokens")}: ${formatTokensCompact(s.totals.cacheReadTokens, 2)}`
-                        : s.segments
-                            .map(
-                              (segment) =>
-                                `${serviceDisplayName(segment.service)}: ${valueLabel(segment)}, ${(segment.share * 100).toFixed(1)}%`,
-                            )
-                            .join("; ")
+                        ? `${t("Cache read tokens", "命中 Tokens")}: ${formatTokensCompact(s.totals.cacheReadTokens, 2)}${independentRates ? `; ${orderedSegments(s).map(segmentLabel).join("; ")}` : ""}`
+                        : orderedSegments(s).map(segmentLabel).join("; ")
                     }`}
-                  />
-                }
-              >
-                {isArea ? (
-                  <span
-                    aria-hidden="true"
-                    className="pointer-events-none absolute z-10 size-1.5 translate-y-1/2 rounded-full border border-background bg-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
-                    style={{
-                      bottom: `${Math.max(0, Math.min(1, s.normalizedValue)) * 100}%`,
-                    }}
-                  />
-                ) : (
-                  <span
-                    data-slot="dashboard-bar"
-                    className="relative z-10 flex shrink-0 flex-col-reverse overflow-hidden rounded-t-[2px]"
-                    style={{
-                      width: chartBarWidth(samples.length),
-                      maxWidth: "100%",
-                      height: `${Math.max(0, Math.min(1, s.normalizedValue)) * 100}%`,
-                      backgroundColor: isCacheHitRate
-                        ? service
-                          ? colorFor(service)
-                          : "var(--foreground)"
-                        : undefined,
-                    }}
                   >
-                    {!isCacheHitRate &&
-                      s.segments
-                        .filter((segment) => segment.share > 0)
-                        .map((segment) => (
+                    {isArea ? (
+                      open &&
+                      areaServices.map((app) => {
+                        // A curve can reach zero in an empty bucket; only mark
+                        // samples that actually exist in the card's series.
+                        if (
+                          app &&
+                          !s.segments.some((item) => item.service === app)
+                        )
+                          return null;
+                        if (
+                          isCacheHitRate &&
+                          !app &&
+                          s.totals.inputWithCacheTokens <= 0
+                        )
+                          return null;
+                        const value = dashboardAreaValue(
+                          s,
+                          app,
+                          independentRates,
+                          metric,
+                          cacheRateMinimum,
+                        );
+                        if (value === null) return null;
+                        return (
                           <span
-                            key={segment.service}
-                            data-service={segment.service}
+                            key={app ?? "total"}
+                            data-slot="dashboard-area-point"
+                            data-service={app ?? service}
+                            aria-hidden="true"
+                            className="pointer-events-none absolute left-1/2 z-10 size-2.5 -translate-x-1/2 translate-y-1/2 rounded-full border-2 border-background"
                             style={{
-                              height: `${Math.max(0, Math.min(1, segment.share)) * 100}%`,
-                              backgroundColor: colorFor(segment.service),
-                              flexShrink: 0,
+                              bottom: `${value * 100}%`,
+                              backgroundColor: app
+                                ? colorFor(app)
+                                : aggregateColor,
                             }}
                           />
-                        ))}
-                  </span>
+                        );
+                      })
+                    ) : independentRates ? (
+                      <span
+                        data-slot="dashboard-bar-group"
+                        aria-hidden="true"
+                        className="relative z-10 flex h-full items-end justify-center"
+                        style={{
+                          width:
+                            chartBarWidth(samples.length) * services.length,
+                          maxWidth: "90%",
+                          gap: "min(2px, 5%)",
+                        }}
+                      >
+                        {services.map((app) => {
+                          const value = dashboardAreaValue(
+                            s,
+                            app,
+                            true,
+                            metric,
+                            cacheRateMinimum,
+                          );
+                          return (
+                            <span
+                              key={app}
+                              data-slot="dashboard-bar-slot"
+                              className="flex h-full min-w-0 flex-1 items-end"
+                            >
+                              {value !== null && (
+                                <span
+                                  data-slot="dashboard-bar"
+                                  data-service={app}
+                                  className="w-full rounded-t-[2px]"
+                                  style={{
+                                    height: `${value * 100}%`,
+                                    backgroundColor: colorFor(app),
+                                  }}
+                                />
+                              )}
+                            </span>
+                          );
+                        })}
+                      </span>
+                    ) : (
+                      <span
+                        data-slot="dashboard-bar"
+                        data-service={service}
+                        aria-hidden="true"
+                        className="relative z-10 flex shrink-0 flex-col-reverse overflow-hidden rounded-t-[2px]"
+                        style={{
+                          width: chartBarWidth(samples.length),
+                          maxWidth: "100%",
+                          height: `${Math.max(0, Math.min(1, s.normalizedValue)) * 100}%`,
+                          backgroundColor: isCacheHitRate
+                            ? aggregateColor
+                            : undefined,
+                        }}
+                      >
+                        {!isCacheHitRate &&
+                          orderedSegments(s)
+                            .filter((segment) => segment.share > 0)
+                            .map((segment) => (
+                              <span
+                                key={segment.service}
+                                data-service={segment.service}
+                                className="w-full shrink-0"
+                                style={{
+                                  height: `${Math.max(0, Math.min(1, segment.share)) * 100}%`,
+                                  backgroundColor: colorFor(segment.service),
+                                }}
+                              />
+                            ))}
+                      </span>
+                    )}
+                  </button>
                 )}
-              </ChartDataTooltipTrigger>
+              />
             ))}
             <ChartDataTooltip
               handle={tooltipHandle}
@@ -292,13 +377,14 @@ export function DashboardChart({
                     <span>
                       {title}: {valueLabel(s)}
                     </span>
-                    {isCacheHitRate ? (
+                    {isCacheHitRate && (
                       <span>
                         {t("Cache read tokens", "命中 Tokens")}:{" "}
                         {formatTokensCompact(s.totals.cacheReadTokens, 2)}
                       </span>
-                    ) : (
-                      s.segments.map((segment) => (
+                    )}
+                    {(!isCacheHitRate || independentRates) &&
+                      orderedSegments(s).map((segment) => (
                         <span
                           key={segment.service}
                           className="flex items-center gap-1.5"
@@ -314,12 +400,12 @@ export function DashboardChart({
                             {serviceDisplayName(segment.service)}
                           </span>
                           <span className="max-w-[55%] break-words text-right">
-                            {valueLabel(segment)} ·{" "}
-                            {(segment.share * 100).toFixed(1)}%
+                            {valueLabel(segment)}
+                            {!isCacheHitRate &&
+                              ` · ${(segment.share * 100).toFixed(1)}%`}
                           </span>
                         </span>
-                      ))
-                    )}
+                      ))}
                   </ChartDataTooltipContent>
                 );
               }}

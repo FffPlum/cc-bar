@@ -330,3 +330,33 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ccb
 - SDK 窗口契约 14 项测试通过；Swift `HostWindowSettingsTests` 与 `UsageSafeRebuildTests` 共 53 项通过，包含暂停/恢复、手动同步、周期修复及历史保护。
 - Xcode Debug `build` 与最终代码的 `build-for-testing` 通过。新工作区首次拉取依赖更新遇到 HTTP/2 错误，改用复制到当前工作区 `build/ValidationSourcePackages` 的既有缓存，核对四个依赖 revision 与 Package.resolved 一致，并关闭自动依赖解析/更新后完成；工程与锁文件未改。测试构建仅通过命令参数使用 ad-hoc 签名，独立 Xcode `xctest` 加载本次 Debug dylib 与测试 bundle，设置 `XCTestBundlePath` 隔离真实采集；不宣称标准 `xcodebuild test` 启动流程通过。
 - `git diff --check` 通过。按用户要求未检查视图；验证时尚未提交或推送，没有打包或替换已安装 App。
+
+## 2026-11-07：独立应用柱与 AreaChart
+
+在已合并设置改动的 `28ed271` 上创建 `feature/react-chart-components`，继续使用独立工作区。
+
+- 全部应用的概览与项目每日图使用并排独立柱，日期之间保持相同应用槽位；普通指标沿用宿主总量刻度，缺失值不画柱，真实零值保持零高。
+- 全部应用缓存命中率使用各应用自身比例和固定 0% / 50% / 100% 轴；无输入时提示显示 `—`，所选单应用保留原刻度和汇总明细。
+- 按提供的示例接入 Recharts 3.10.1 `AreaChart` / `Area` 与 ChartContainer，移除手写 SVG 面积路径。普通指标堆叠渐变面积，缓存率独立、不跨缺失值连线；边缘延伸只用于图形，不增加采样点标记或交互目标。
+- 前端定向 **5 个文件、41 项测试通过**，覆盖独立柱高度、固定槽位、服务顺序与颜色、项目图、刻度、抽屉，以及真实 Recharts 的渐变、堆叠/非堆叠、缺失值断线和真实采样点。测试仅为 jsdom 固定 ResponsiveContainer 尺寸，未替换 AreaChart 或 Area 渲染器。
+- 最终 Xcode Debug `build` 通过，其中包含 TypeScript 类型检查与 Vite 生产资源构建。继续使用已核对的 `build/ValidationSourcePackages` 缓存，禁用自动依赖解析和更新；日志 `/tmp/ccbar-chart-components-debug.log`。统计页资源约 558 kB（gzip 170 kB），触发 Vite 500 kB 提示，构建成功。
+- 相关需求、布局、技术实现和接口契约文档已同步；`git diff --check` 通过。本次没有 Swift 改动，未重复 Swift 测试；按用户要求未检查视图，未提交、合并或推送这轮改动，未打包或替换已安装 App。
+
+### 后续调整：合并柱、独立面积曲线与采样点
+
+同日按用户后续要求更新最终显示，取代上节的并排柱与普通指标堆叠面积方案。
+
+- 费用、请求、Tokens 每个日期合并为一根按应用色段堆叠的柱；缓存命中率柱保留总体单柱和宿主动态刻度。面积图各应用独立、非堆叠，渐变透明度降低以保留重叠曲线可读性。
+- 面积曲线与高亮点复用同一系列筛选和数值映射。提示卡真正打开时才标记当前日期各应用的采样点，跨日期同步更新，关闭或 Escape 后移除；键盘聚焦支持相同行为。零值有真实记录时保留零点，缺失应用和无输入的命中率不伪造点；单应用命中率无输入时也保持曲线断点。
+- 最终前端 **6 个文件、64 项定向测试通过**，覆盖共享提示卡与定位、刻度、合并柱、独立面积、双应用采样点、跨日期与键盘关闭、零值和缺失数据、项目图及设置抽屉。首次键盘回归用 `fireEvent.focus/blur` 仅派发事件、没有更新 DOM 焦点，旧触发器延迟 blur 误关下一张卡；改为真实 `element.focus()` 并断言活动元素、`data-popup-open` 和卡片可见性后，该文件 22 项复跑通过，产品代码未为此变更。
+- TypeScript 类型检查、Xcode Debug `build` 和构建内的 Vite 资源生成均通过；日志 `/tmp/ccbar-chart-components-debug.log`。构建保留既有 Swift 并发/HostWire 与 AppIntents 警告，以及统计资源约 558 kB 的体积提示，没有构建错误。
+- 需求、布局、技术实现和接口契约文档同步，`git diff --check` 通过。按用户要求未检查视图；仍位于 `feature/react-chart-components`，未提交、合并或推送，未改 Swift 数据口径。
+
+### 后续调整：全部应用命中率的公共动态轴
+
+同日按用户进一步要求，全部应用的缓存命中率柱图改为独立并排，柱图与面积图共同使用最低有效应用命中率对应的纵轴范围。费用、请求与 Tokens 柱图仍合并堆叠。
+
+- `cacheRateAxisMinimum` 读取当前范围内各应用的有效真实比例，排除缺失、零分母和非有限值，沿用宿主单应用命中率的留白、5% 取整及低值回退规则；未解析格式化标签，也不使用加权总体比例代替应用最低值。纵轴刻度、柱高、面积及激活点共用同一下限，单应用仍沿用宿主刻度与归一值。
+- **4 个文件、33 项定向测试通过**，包含轴边界、合并普通指标、独立命中率柱、面积与采样点、缺失槽位、项目图及原有交互。跨日期测试中的 Kimi 最低为 88%、另一应用为 96%，共同得到 80% / 90% / 100% 轴，两者柱高与激活点分别为绘图区 40% / 80%；真实 Recharts 渲染位置也匹配。无有效比例回退 0%～100%，不绘制虚假命中率柱或点。
+- TypeScript 类型检查、Xcode Debug `build`（含 Vite 资源构建）与 `git diff --check` 通过，日志仍为 `/tmp/ccbar-chart-components-debug.log`。既有 Swift 与 AppIntents 警告未阻止构建；本次未改 Swift、SDK 协议或持久化配置。
+- 相关四份行为文档已同步；按用户要求未检查视图。改动仍在 `feature/react-chart-components`，尚未提交、合并或推送。
